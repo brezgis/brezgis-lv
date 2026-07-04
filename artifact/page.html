@@ -1,0 +1,233 @@
+<title>Brezgi — a Latvian village through time</title>
+<style>
+  :root {
+    --ink: #e8e2d2;
+    --ink-dim: #b5ad97;
+    --sage: #8a9678;
+    --bronze: #c9963f;
+    --bronze-bright: #e8b95a;
+    --glass: rgba(18, 15, 10, 0.66);
+    --glass-soft: rgba(18, 15, 10, 0.45);
+    --line: rgba(232, 226, 210, 0.22);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+    --sans: -apple-system, 'Segoe UI', system-ui, Roboto, sans-serif;
+  }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #12100c; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* ---------- loader ---------- */
+  #loader {
+    position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(ellipse at 50% 60%, #1c2416 0%, #12100c 70%);
+    color: var(--ink); transition: opacity 0.8s ease; font-family: var(--serif);
+  }
+  #loader.done { opacity: 0; pointer-events: none; }
+  #loader .t { font-size: 42px; letter-spacing: 0.32em; margin-left: 0.32em; }
+  #loader .s { font-family: var(--sans); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--sage); }
+  #loader-status { font-family: var(--sans); font-size: 13px; color: var(--ink-dim); font-style: italic; }
+  #loader .band { display: flex; gap: 7px; }
+  #loader .band i { width: 8px; height: 8px; background: var(--bronze); transform: rotate(45deg); opacity: 0.35; animation: bpulse 1.6s infinite; }
+  #loader .band i:nth-child(2) { animation-delay: 0.2s; }
+  #loader .band i:nth-child(3) { animation-delay: 0.4s; }
+  #loader .band i:nth-child(4) { animation-delay: 0.6s; }
+  #loader .band i:nth-child(5) { animation-delay: 0.8s; }
+  @keyframes bpulse { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+  /* ---------- title ---------- */
+  #masthead {
+    position: fixed; top: 18px; left: 22px; z-index: 10; color: var(--ink);
+    font-family: var(--serif); pointer-events: none; text-shadow: 0 1px 8px rgba(0,0,0,0.55);
+  }
+  #masthead h1 { margin: 0; font-size: 26px; font-weight: 500; letter-spacing: 0.3em; }
+  #masthead p { margin: 3px 0 0; font-family: var(--sans); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); }
+
+  /* ---------- era timeline ---------- */
+  #timeline {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 10;
+    display: flex; align-items: flex-start; padding: 14px 30px 12px;
+    background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 2px;
+  }
+  .era-btn {
+    position: relative; background: none; border: none; cursor: pointer;
+    width: 108px; padding: 0 0 2px; color: var(--ink-dim); font-family: var(--sans);
+  }
+  .era-btn::before {
+    content: ''; position: absolute; top: 5px; left: -50%; width: 100%; height: 1px; background: var(--line);
+  }
+  .era-btn:first-child::before { display: none; }
+  .era-btn .dot {
+    display: block; width: 9px; height: 9px; margin: 0 auto 9px; transform: rotate(45deg);
+    background: #4b4536; border: 1px solid var(--line); transition: all 0.25s; position: relative; z-index: 1;
+  }
+  .era-btn .yr { display: block; font-size: 13px; letter-spacing: 0.06em; color: var(--ink); font-family: var(--serif); }
+  .era-btn .nm { display: block; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 2px; }
+  .era-btn:hover .dot { background: #6b5c38; }
+  .era-btn.active .dot { background: var(--bronze-bright); border-color: var(--bronze-bright); box-shadow: 0 0 12px rgba(232, 185, 90, 0.7); }
+  .era-btn.active .yr { color: var(--bronze-bright); }
+  .era-btn:focus-visible { outline: 1px solid var(--bronze); outline-offset: 3px; }
+
+  /* ---------- era panel ---------- */
+  #panel {
+    position: fixed; left: 22px; top: 50%; transform: translateY(-50%); z-index: 10;
+    width: min(330px, calc(100vw - 44px)); color: var(--ink);
+    background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 2px; padding: 20px 22px 16px;
+    transition: opacity 0.3s, transform 0.3s;
+  }
+  #panel.closed { opacity: 0; pointer-events: none; transform: translateY(-50%) translateX(-16px); }
+  #panel h2 { margin: 0 0 10px; font-family: var(--serif); font-weight: 500; font-size: 19px; line-height: 1.3; text-wrap: balance; }
+  #panel p { margin: 0; font-family: var(--serif); font-size: 13.5px; line-height: 1.62; color: var(--ink-dim); }
+  #era-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  #era-facts span {
+    font-family: var(--sans); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--sage); border: 1px solid rgba(138, 150, 120, 0.35); padding: 3px 8px; border-radius: 1px;
+  }
+  #panel-toggle {
+    position: fixed; left: 22px; bottom: 26px; z-index: 11;
+  }
+
+  /* ---------- controls ---------- */
+  #controls {
+    position: fixed; top: 18px; right: 22px; z-index: 10; display: flex; flex-direction: column;
+    gap: 8px; align-items: flex-end;
+  }
+  .ctl-row { display: flex; gap: 6px; }
+  .ctl {
+    font-family: var(--sans); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-dim); background: var(--glass-soft); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 1px; padding: 7px 11px; cursor: pointer; transition: color 0.2s, border-color 0.2s;
+  }
+  .ctl:hover { color: var(--ink); border-color: var(--ink-dim); }
+  .ctl.active { color: var(--bronze-bright); border-color: var(--bronze); }
+  .ctl:focus-visible { outline: 1px solid var(--bronze); outline-offset: 2px; }
+  #day-clock {
+    font-family: var(--sans); font-size: 11px; letter-spacing: 0.2em; color: var(--ink-dim);
+    padding: 4px 2px; font-variant-numeric: tabular-nums;
+  }
+  .ctl-label { font-family: var(--sans); font-size: 8.5px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(181, 173, 151, 0.6); margin-top: 4px; }
+
+  /* ---------- era fade & year spin ---------- */
+  #fade {
+    position: fixed; inset: 0; z-index: 20; background: #efe9da; opacity: 0; pointer-events: none;
+    transition: opacity 0.62s ease;
+  }
+  #fade.on { opacity: 1; }
+  #year-spin {
+    position: fixed; left: 50%; top: 44%; transform: translate(-50%, -50%); z-index: 21;
+    font-family: var(--serif); font-size: clamp(44px, 8vw, 92px); color: #2d2716;
+    letter-spacing: 0.06em; opacity: 0; transition: opacity 0.5s; pointer-events: none;
+    font-variant-numeric: tabular-nums; text-shadow: 0 2px 30px rgba(45, 39, 22, 0.25);
+  }
+
+  /* ---------- about overlay ---------- */
+  #about {
+    position: fixed; inset: 0; z-index: 30; overflow-y: auto; display: none;
+    background: rgba(14, 12, 8, 0.94); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    color: var(--ink);
+  }
+  #about.open { display: block; }
+  #about .inner { max-width: 66ch; margin: 0 auto; padding: 72px 24px 120px; font-family: var(--serif); }
+  #about h1 { font-size: 30px; font-weight: 500; letter-spacing: 0.12em; margin: 0 0 4px; }
+  #about .sub { font-family: var(--sans); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--sage); margin-bottom: 34px; }
+  #about h2 { font-size: 19px; font-weight: 500; margin: 40px 0 12px; letter-spacing: 0.03em; }
+  #about p, #about li { font-size: 15px; line-height: 1.75; color: var(--ink-dim); }
+  #about blockquote {
+    margin: 28px 0; padding: 4px 0 4px 20px; border-left: 2px solid var(--bronze);
+    font-style: italic; color: var(--ink); font-size: 17px; line-height: 1.7;
+  }
+  #about .divider { display: flex; gap: 9px; justify-content: center; margin: 44px 0; }
+  #about .divider i { width: 7px; height: 7px; background: var(--bronze); transform: rotate(45deg); opacity: 0.7; }
+  #about .src { font-size: 13px; line-height: 1.7; }
+  #about .src li { margin-bottom: 8px; }
+  #about a { color: var(--bronze-bright); text-decoration: none; border-bottom: 1px solid rgba(232, 185, 90, 0.35); }
+  #about a:hover { border-bottom-color: var(--bronze-bright); }
+  #about-close {
+    position: fixed; top: 20px; right: 24px; z-index: 31;
+  }
+  #about .note { font-size: 13px; color: var(--sage); font-style: italic; }
+
+  #hint {
+    position: fixed; right: 22px; bottom: 26px; z-index: 9; font-family: var(--sans);
+    font-size: 10px; letter-spacing: 0.12em; color: rgba(181, 173, 151, 0.55); text-align: right;
+    pointer-events: none; text-transform: uppercase;
+  }
+  @media (max-width: 760px) {
+    #panel { top: auto; bottom: 108px; transform: none; }
+    #panel.closed { transform: translateX(-16px); }
+    .era-btn { width: 72px; }
+    .era-btn .nm { display: none; }
+    #hint { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #fade { transition: none; }
+    #loader .band i { animation: none; }
+  }
+</style>
+
+<canvas id="scene"></canvas>
+
+<div id="loader">
+  <div class="t">BREZGI</div>
+  <div class="s">Taurenes pagasts · Vidzeme · Latvija</div>
+  <div class="band"><i></i><i></i><i></i><i></i><i></i></div>
+  <div id="loader-status">Waking the time machine…</div>
+</div>
+
+<header id="masthead">
+  <h1>BREZGI</h1>
+  <p>Taurenes pagasts · 57.159° N 25.665° E</p>
+</header>
+
+<nav id="timeline" aria-label="Choose era">
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 50</span><span class="nm">Aurochs</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 950</span><span class="nm">Latgalians</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1860</span><span class="nm">Manor</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1935</span><span class="nm">Taurene</span></button>
+</nav>
+
+<aside id="panel">
+  <h2 id="era-title"></h2>
+  <p id="era-body"></p>
+  <div id="era-facts"></div>
+</aside>
+<button class="ctl" id="panel-toggle" type="button">Stāsts / story</button>
+
+<div id="controls">
+  <div class="ctl-row">
+    <button class="ctl" id="sound-btn" type="button">🔇 skaņa</button>
+    <button class="ctl" id="about-btn" type="button">Chronicle &amp; sources</button>
+  </div>
+  <div class="ctl-label">Skats · view</div>
+  <div class="ctl-row">
+    <button class="ctl" data-view="seta" type="button">Sēta</button>
+    <button class="ctl" data-view="pagalms" type="button">Pagalms</button>
+    <button class="ctl" data-view="upe" type="button">Gauja</button>
+    <button class="ctl" data-view="muiza" type="button">Muiža</button>
+    <button class="ctl" data-view="ezers" type="button">Ezers</button>
+    <button class="ctl" data-view="putns" type="button">Putns</button>
+  </div>
+  <div class="ctl-label">Diena · time of day</div>
+  <div class="ctl-row">
+    <button class="ctl active" data-time="flow" type="button">Rit</button>
+    <button class="ctl" data-time="dawn" type="button">Rīts</button>
+    <button class="ctl" data-time="noon" type="button">Diena</button>
+    <button class="ctl" data-time="evening" type="button">Vakars</button>
+  </div>
+  <div id="day-clock">--:--</div>
+</div>
+
+<div id="hint">drag to look · scroll to zoom · keys 1–4 travel in time</div>
+
+<div id="fade"></div>
+<div id="year-spin"></div>
+
+<div id="about" role="dialog" aria-label="Chronicle and sources">
+  <button class="ctl" id="about-close" type="button">Close ✕</button>
+  <div class="inner" id="about-content"><!--ABOUT--></div>
+</div>
+
+<script>
+/*BUNDLE*/
+</script>

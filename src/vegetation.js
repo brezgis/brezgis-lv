@@ -4,8 +4,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, LOC } from './landuse.js';
+import { forestDensity, distToRiver, riverLevelNear, LOC } from './landuse.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
+import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { makeNoise, clamp, pointInPoly } from './util.js';
 
 function colored(geo, hex) {
@@ -70,6 +71,14 @@ function lindenGeo() {
     colored(T(new THREE.SphereGeometry(0.26, 7, 6), 0, 0.58, 0).scale(1, 1.35, 1), 0x44622f),
   ]);
 }
+function shrubGeo() {
+  // dwarf birch / juniper clump for the tundra era
+  return mergeGeometries([
+    colored(T(new THREE.SphereGeometry(0.4, 5, 4), 0, 0.3, 0).scale(1, 0.6, 1), 0x5d5c38),
+    colored(T(new THREE.SphereGeometry(0.28, 5, 4), 0.3, 0.24, 0.15).scale(1, 0.6, 1), 0x6a6540),
+    colored(T(new THREE.SphereGeometry(0.24, 4, 3), -0.28, 0.2, -0.1).scale(1, 0.55, 1), 0x4f5434),
+  ]);
+}
 // far/backdrop simplified
 const farConifer = () => mergeGeometries([
   colored(T(new THREE.ConeGeometry(0.3, 0.85, 5), 0, 0.55, 0), 0x263f28),
@@ -80,7 +89,44 @@ const farLeafy = () => mergeGeometries([
   colored(T(new THREE.CylinderGeometry(0.02, 0.035, 0.4, 4), 0, 0.2, 0), 0x6b5540),
 ]);
 
+// one shared wind clock for every plant in the world
+export const WIND = {
+  time: { value: 0 },
+  dir: { value: new THREE.Vector2(0.76, 0.48).normalize() },
+  strength: { value: 0.55 },
+};
+
 const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+// Hierarchical wind, adapted from LAAS (MIT): green (foliage/grass) flexes,
+// brown (trunks) stays stiff; per-instance constant frequency; gust fronts
+// drive amplitude only; a second axis at x1.31 draws Lissajous ellipses.
+export function windify(material) {
+  material.onBeforeCompile = (sh) => {
+    sh.uniforms.uWindT = WIND.time;
+    sh.uniforms.uWindD = WIND.dir;
+    sh.uniforms.uWindS = WIND.strength;
+    sh.vertexShader = 'uniform float uWindT; uniform vec2 uWindD; uniform float uWindS;\n' +
+      sh.vertexShader.replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      #ifdef USE_INSTANCING
+      {
+        vec3 iPos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+        float phase = fract(sin(dot(iPos.xz, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831;
+        float flex = clamp((vColor.g - vColor.r) * 2.2, 0.0, 1.0) * transformed.y * transformed.y;
+        float gust = 0.55 + 0.45 * sin(dot(iPos.xz, uWindD) * 0.018 - uWindT * 1.25 + phase * 0.31);
+        float f = 1.0 + fract(phase * 2.7) * 1.6;
+        float lean = uWindS * uWindS * 0.5;
+        float swayA = sin(uWindT * f + phase) * gust * uWindS;
+        float swayB = sin(uWindT * f * 1.31 + phase * 1.7) * gust * uWindS;
+        vec2 disp = uWindD * (lean + 0.24 * swayA) + vec2(-uWindD.y, uWindD.x) * 0.12 * swayB;
+        transformed.xz += disp * flex;
+      }
+      #endif
+      `);
+  };
+  return material;
+}
+windify(mat);
 
 function makeInstanced(geo, count, shadows) {
   const m = new THREE.InstancedMesh(geo, mat, count);
@@ -101,10 +147,11 @@ export function buildVegetation(scene) {
     alder: makeInstanced(alderGeo(), 2200, true),
     apple: makeInstanced(appleGeo(), 80, true),
     linden: makeInstanced(lindenGeo(), 160, true),
+    shrub: makeInstanced(shrubGeo(), 9000, false),
   };
   const far = {
-    conifer: makeInstanced(farConifer(), 26000, false),
-    leafy: makeInstanced(farLeafy(), 16000, false),
+    conifer: makeInstanced(farConifer(), 48000, false),
+    leafy: makeInstanced(farLeafy(), 30000, false),
   };
   const group = new THREE.Group();
   group.name = 'vegetation';
@@ -123,23 +170,30 @@ export function buildVegetation(scene) {
     for (const k in near) lists[k] = [];
     for (const k in far) lists[k] = [];
     const S = LOC.STEAD;
-    const step = 15;
-    const N = Math.floor(4700 / step);
+    const step = 17;
+    const EXT = HM_SPAN - 120;
+    const N = Math.floor(EXT / step);
     for (let iz = 0; iz < N; iz++) {
       for (let ix = 0; ix < N; ix++) {
-        const x = (ix / (N - 1) - 0.5) * 4700 + (rng() - 0.5) * step * 1.4;
-        const z = (iz / (N - 1) - 0.5) * 4700 + (rng() - 0.5) * step * 1.4;
+        const x = (ix / (N - 1) - 0.5) * EXT + HM_OFF_X + (rng() - 0.5) * step * 1.4;
+        const z = (iz / (N - 1) - 0.5) * EXT + HM_OFF_Z + (rng() - 0.5) * step * 1.4;
         const y = heightAt(x, z);
         let inLake = false;
         for (const lake of LAKES) {
           if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
         }
         if (inLake) continue;
+        if (distToRiver(x, z) < 42 && y < riverLevelNear(x, z) + 0.4) continue; // in the channel
         const d = forestDensity(era, x, z, y);
         if (d <= 0.02) continue;
         const dStage = Math.hypot(x - S.x, z - S.z);
-        const falloff = clamp(420 / Math.max(dStage, 1), 0.22, 1);
+        const falloff = clamp(480 / Math.max(dStage, 1), 0.22, 1);
         if (rng() > d * 0.82 * falloff) continue;
+        if (era === 0) {
+          // tundra: everything is a knee-high shrub
+          lists.shrub.push([x, y, z, 0.8 + rng() * 1.3, rng() * Math.PI * 2, 0.9 + rng() * 0.2]);
+          continue;
+        }
         const nearStage = dStage < 520;
         const wet = distToRiver(x, z) < 40;
         const high = y > 215;
@@ -153,8 +207,8 @@ export function buildVegetation(scene) {
         else lists[kind === 'spruce' || kind === 'pine' ? 'conifer' : 'leafy'].push([x, y, z, h, rng() * Math.PI * 2, 0.9 + rng() * 0.2]);
       }
     }
-    // orchard (eras 2-3): apple trees north of the dwelling
-    if (era >= 2) {
+    // orchard (manor-era farms): apple trees north of the dwelling
+    if (era === 3 || era === 4) {
       for (let i = 0; i < 12; i++) {
         const x = S.x - 26 + (i % 4) * 8 + rng() * 2;
         const z = S.z - 34 + Math.floor(i / 4) * 8 + rng() * 2;
@@ -180,8 +234,15 @@ export function buildVegetation(scene) {
         lists[rng() < 0.6 ? 'linden' : 'oak'].push([x, heightAt(x, z), z, 12 + rng() * 6, rng() * 6.3, 1]);
       }
     }
-    // the great oak by the stead — sacred grove tree in era 1, survives to 1935
-    lists.oak.push([LOC.OAK.x, heightAt(LOC.OAK.x, LOC.OAK.z), LOC.OAK.z, era === 0 ? 14 : 17 + era, 1.2, 1.35]);
+    // the great oak by the stead — sacred grove tree in the Latgalian era,
+    // still standing today; and the attested summit oak on Brežģa kalns
+    if (era >= 1) {
+      lists.oak.push([LOC.OAK.x, heightAt(LOC.OAK.x, LOC.OAK.z), LOC.OAK.z, era <= 1 ? 14 : 15 + era, 1.2, 1.35]);
+    }
+    if (era >= 3) {
+      const B = LOC.BREZGA;
+      lists.oak.push([B.x + 9, heightAt(B.x + 9, B.z + 11), B.z + 11, 15 + (era - 3) * 1.5, 0.8, 1.3]);
+    }
     eraCache.set(era, lists);
     return lists;
   }
@@ -214,7 +275,7 @@ export function buildVegetation(scene) {
   {
     const reedGeo = colored(new THREE.ConeGeometry(0.35, 2.2, 4), 0x7a7f46);
     reedGeo.translate(0, 1.1, 0);
-    const reeds = makeInstanced(reedGeo, 5200, false);
+    const reeds = makeInstanced(reedGeo, 11000, false);
     const rng = makeNoise(2211).rng;
     let i = 0;
     // reed belts along the real lake shorelines
@@ -224,7 +285,7 @@ export function buildVegetation(scene) {
         const [ax, az] = poly[e], [bx, bz] = poly[(e + 1) % poly.length];
         const len = Math.hypot(bx - ax, bz - az);
         const n = Math.ceil(len / 4);
-        for (let k = 0; k < n && i < 5200; k++) {
+        for (let k = 0; k < n && i < 11000; k++) {
           const t = (k + rng()) / n;
           const px = ax + (bx - ax) * t + (rng() - 0.5) * 10;
           const pz = az + (bz - az) * t + (rng() - 0.5) * 10;
@@ -240,7 +301,7 @@ export function buildVegetation(scene) {
     for (const p of RIVER_PTS) {
       if (rng() < 0.5) continue;
       for (const side of [-1, 1]) {
-        if (i >= 5200) break;
+        if (i >= 11000) break;
         const px = p[0] + side * (12 + rng() * 4), pz = p[1] + (rng() - 0.5) * 20;
         const y = heightAt(px, pz);
         if (y > p[2] + 2.5) continue;

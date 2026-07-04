@@ -51,7 +51,7 @@
   }
   .era-btn {
     position: relative; background: none; border: none; cursor: pointer;
-    width: 108px; padding: 0 0 2px; color: var(--ink-dim); font-family: var(--sans);
+    width: 96px; padding: 0 0 2px; color: var(--ink-dim); font-family: var(--sans);
   }
   .era-btn::before {
     content: ''; position: absolute; top: 5px; left: -50%; width: 100%; height: 1px; background: var(--line);
@@ -181,10 +181,12 @@
 </header>
 
 <nav id="timeline" aria-label="Choose era">
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">10,800 BC</span><span class="nm">Tundra</span></button>
   <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 50</span><span class="nm">Aurochs</span></button>
   <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 950</span><span class="nm">Latgalians</span></button>
   <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1860</span><span class="nm">Manor</span></button>
   <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1935</span><span class="nm">Taurene</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">2025</span><span class="nm">Šodiena</span></button>
 </nav>
 
 <aside id="panel">
@@ -206,7 +208,14 @@
     <button class="ctl" data-view="upe" type="button">Gauja</button>
     <button class="ctl" data-view="muiza" type="button">Muiža</button>
     <button class="ctl" data-view="ezers" type="button">Ezers</button>
+    <button class="ctl" data-view="brezga" type="button">Brežģis</button>
     <button class="ctl" data-view="putns" type="button">Putns</button>
+  </div>
+  <div class="ctl-label">Kustība · move</div>
+  <div class="ctl-row">
+    <button class="ctl active" data-mode="orbit" type="button">Orbīta</button>
+    <button class="ctl" data-mode="fly" type="button">Lidot</button>
+    <button class="ctl" data-mode="walk" type="button">Iet</button>
   </div>
   <div class="ctl-label">Diena · time of day</div>
   <div class="ctl-row">
@@ -218,7 +227,7 @@
   <div id="day-clock">--:--</div>
 </div>
 
-<div id="hint">drag to look · scroll to zoom · keys 1–4 travel in time</div>
+<div id="hint">drag to look · scroll to zoom · keys 1–6 travel in time</div>
 
 <div id="fade"></div>
 <div id="year-spin"></div>

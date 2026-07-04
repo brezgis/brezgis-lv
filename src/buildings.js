@@ -761,6 +761,161 @@ export function pyre() {
   return shadowize(g);
 }
 
+// Brežģa krogs — the roadside tavern that bought the manor's ale.
+// Latvian krogi were long log buildings under a massive hip roof, one end a
+// stable for travellers' horses.
+export function krogs() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(18, 2.6, 8.5), MAT.logOld);
+  body.position.y = 1.3;
+  g.add(body, cornerLogs(18, 8.5, 2.6));
+  const roof = hipRoof(8.5, 18, 3.8, MAT.thatchOld, 0.7);
+  roof.rotation.y = Math.PI / 2;
+  roof.position.y = 2.6;
+  g.add(roof);
+  const ch = chimney(2.2);
+  ch.position.set(-3, 4.4, 0);
+  g.add(ch);
+  // tavern door + wide stable door
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.9, 0.14), MAT.door);
+  door.position.set(-4, 0.95, 4.3);
+  const stable = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.2, 0.14), MAT.door);
+  stable.position.set(6, 1.1, 4.3);
+  g.add(door, stable);
+  for (const wx of [-7.5, -0.5]) {
+    const fr = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), MAT.darkWood);
+    fr.position.set(wx, 1.6, 4.28);
+    g.add(fr);
+  }
+  // hitching rail
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 5, 5), MAT.lightWood);
+  rail.rotation.z = Math.PI / 2;
+  rail.position.set(-4, 1, 6.4);
+  g.add(rail);
+  return shadowize(g);
+}
+
+// the 2017 observation tower on Brežģa kalns (11 m, timber lattice)
+export function observationTower() {
+  const g = new THREE.Group();
+  const H = 11;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, H, 6), MAT.lightWood);
+    leg.position.set(sx * 1.5, H / 2, sz * 1.5);
+    leg.rotation.set(sz * -0.045, 0, sx * 0.045);
+    g.add(leg);
+  }
+  for (let lvl = 1; lvl <= 3; lvl++) {
+    const y = lvl * (H / 3.2);
+    const s = 3.4 - lvl * 0.35;
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(s, 0.12, s), MAT.plank);
+    floor.position.y = y;
+    g.add(floor);
+    for (const [sx, sz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(sx ? 0.06 : s, 0.06, sz ? 0.06 : s), MAT.lightWood);
+      rail.position.set(sx * s / 2, y + 1, sz * s / 2);
+      g.add(rail);
+    }
+  }
+  const roof = hipRoof(3.2, 3.2, 1.1, MAT.shingle, 0.3);
+  roof.position.y = H + 0.4;
+  g.add(roof);
+  // stairs suggestion: diagonal stringers between floors
+  for (let lvl = 0; lvl < 3; lvl++) {
+    const st = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 3.6), MAT.plank);
+    st.position.set((lvl % 2 ? -0.9 : 0.9), lvl * (H / 3.2) + H / 6.4, 0);
+    st.rotation.x = (lvl % 2 ? 1 : -1) * 0.75;
+    g.add(st);
+  }
+  return shadowize(g);
+}
+
+// a renovated 2020s farmhouse: plank siding, metal roof
+export function modernHouse() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(9.5, 2.9, 7), MAT.plank);
+  body.position.y = 1.45;
+  g.add(body);
+  const metal = new THREE.MeshLambertMaterial({ color: 0x6e7880 });
+  const roof = gableRoof(7, 9.5, 2.3, metal, 0.5);
+  roof.rotation.y = Math.PI / 2;
+  roof.position.y = 2.9;
+  g.add(roof);
+  const ch = chimney(1.4);
+  ch.position.set(1.5, 4.4, 0);
+  g.add(ch);
+  for (let i = 0; i < 3; i++) {
+    const fr = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.25, 0.1), MAT.white);
+    fr.position.set(-3 + i * 3, 1.55, 3.55);
+    const gl = new THREE.Mesh(new THREE.BoxGeometry(1.05, 1.0, 0.08), MAT.glass);
+    gl.position.set(-3 + i * 3, 1.55, 3.62);
+    g.add(fr, gl);
+  }
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1, 2.1, 0.12), new THREE.MeshLambertMaterial({ color: 0x5a3c28 }));
+  door.position.set(3.9, 1.05, 3.55);
+  g.add(door);
+  return shadowize(g);
+}
+
+export function car() {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshPhongMaterial({ color: 0x44566b, shininess: 90 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.6, 1.8), paint);
+  body.position.y = 0.62;
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 1.65), paint);
+  cab.position.set(-0.2, 1.15, 0);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.4, 1.7), MAT.glass);
+  glass.position.set(-0.2, 1.12, 0);
+  g.add(body, cab, glass);
+  for (const [dx, dz] of [[-1.4, 0.85], [-1.4, -0.85], [1.4, 0.85], [1.4, -0.85]]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 10), MAT.iron);
+    w.rotation.x = Math.PI / 2;
+    w.position.set(dx, 0.34, dz);
+    g.add(w);
+  }
+  return shadowize(g);
+}
+
+// glacial erratics — big till boulders dropped by the ice
+export function erratics(count, area) {
+  const g = new THREE.Group();
+  const geo = new THREE.DodecahedronGeometry(1, 1);
+  const mesh = new THREE.InstancedMesh(geo, MAT.stone, count);
+  mesh.frustumCulled = false;
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < count; i++) {
+    const x = area.x + (rng() - 0.5) * area.w;
+    const z = area.z + (rng() - 0.5) * area.h;
+    const s = 0.4 + Math.pow(rng(), 2.2) * 2.4;
+    dummy.position.set(x, heightAt(x, z) + s * 0.25, z);
+    dummy.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+    dummy.scale.set(s, s * (0.7 + rng() * 0.4), s);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+  }
+  mesh.castShadow = true;
+  g.add(mesh);
+  return g;
+}
+
+// stranded dead-ice blocks melting into the future lake basins
+export function deadIce(x, z, s = 1) {
+  const g = new THREE.Group();
+  const iceMat = new THREE.MeshPhongMaterial({
+    color: 0xcfe6ee, shininess: 140, specular: 0xffffff, transparent: true, opacity: 0.92,
+  });
+  for (let i = 0; i < 3; i++) {
+    const blob = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), iceMat);
+    blob.position.set((rng() - 0.5) * 14 * s, -1.2 + i * 0.4, (rng() - 0.5) * 10 * s);
+    blob.scale.set((5 + rng() * 6) * s, (2 + rng() * 1.6) * s, (4 + rng() * 4) * s);
+    blob.rotation.set(rng(), rng(), rng());
+    blob.castShadow = true;
+    g.add(blob);
+  }
+  g.position.set(x, heightAt(x, z), z);
+  return g;
+}
+
 // stone/wooden grave markers on the barrows
 export function barrowStones(bumps) {
   const g = new THREE.Group();

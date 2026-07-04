@@ -112,16 +112,16 @@ export class Ambience {
           this._tone(555, t + 0.34, 0.28, 0.018, 'sine');
         }
         // corncrake rasps from the meadows at dusk (once there are meadows)
-        if (this.era >= 1 && this.sunLow > 0.5 && Math.random() < 0.3) {
+        if (this.era >= 2 && this.sunLow > 0.5 && Math.random() < 0.3) {
           this._noiseBurst(t, 0.05, 3400, 3, 0.05);
           this._noiseBurst(t + 0.09, 0.05, 3400, 3, 0.05);
         }
         // cowbell
-        if (this.era >= 1 && Math.random() < 0.07 * day) {
+        if (this.era >= 2 && this.era <= 4 && Math.random() < 0.07 * day) {
           this._tone(760 + Math.random() * 120, t, 0.4, 0.014, 'triangle');
         }
-        // distant church bell (manor & interwar eras)
-        if (this.era >= 2 && Math.random() < 0.012) {
+        // distant church bell (manor era onward)
+        if (this.era >= 3 && Math.random() < 0.012) {
           this._tone(311, t, 2.8, 0.02, 'sine');
           this._tone(466, t, 2.2, 0.008, 'sine');
         }

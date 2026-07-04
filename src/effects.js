@@ -65,7 +65,40 @@ export class Effects {
     // mist patches (shown at dawn/dusk over the water)
     this.mistMat = new THREE.SpriteMaterial({ map: this.blob, color: 0xe8eef2, transparent: true, opacity: 0, depthWrite: false });
     this.mists = [];
+
+    // aurora borealis — glacial-era dusk only
+    this.aurora = new THREE.Group();
+    const aMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uT: { value: 0 }, uOp: { value: 0 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: `varying vec2 vUv; uniform float uT; uniform float uOp;
+        void main(){
+          float bands = sin(vUv.x * 26.0 + uT * 0.6) * 0.5 + sin(vUv.x * 61.0 - uT * 0.9) * 0.3;
+          float body = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.35, vUv.y);
+          float a = body * (0.55 + bands * 0.45) * uOp;
+          vec3 col = mix(vec3(0.25, 1.0, 0.55), vec3(0.55, 0.35, 0.9), vUv.y);
+          gl_FragColor = vec4(col, a * 0.55);
+        }`,
+    });
+    this.auroraMat = aMat;
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(7000, 1400, 64, 4), aMat);
+      m.position.set(500 - i * 900, 1500 + i * 380, -3500 - i * 700);
+      m.rotation.y = 0.15 * (i - 1);
+      const posA = m.geometry.attributes.position;
+      for (let v = 0; v < posA.count; v++) {
+        posA.setZ(v, Math.sin(posA.getX(v) * 0.0016 + i * 2.1) * 320);
+      }
+      this.aurora.add(m);
+    }
+    this.aurora.visible = false;
+    this.group.add(this.aurora);
+    this.auroraOn = false;
   }
+
+  setAurora(on) { this.auroraOn = on; }
+  setFireflies(on) { this.fireflyOn = on; }
 
   setFireflyCenter(x, y, z) { this.fireflyCenter.set(x, y, z); }
 
@@ -143,8 +176,8 @@ export class Effects {
           s.x + sway + wind.x * u * u * 14,
           s.y + rise,
           s.z + Math.cos(p.age * 1.1 + p.drift) * 1.0 * u + Math.cos(p.drift * 5 + u * 7) * 0.5 * u + wind.y * u * u * 14);
-        size.setX(i, 0.6 + u * 5.5 + Math.sin(p.drift) * 0.3);
-        alpha.setX(i, 0.16 * Math.sin(Math.min(u * 2.6, Math.PI)) * (1 - u * 0.45));
+        size.setX(i, 0.5 + u * 3.6 + Math.sin(p.drift) * 0.3);
+        alpha.setX(i, 0.09 * Math.sin(Math.min(u * 2.6, Math.PI)) * (1 - u * 0.45));
       });
       pos.needsUpdate = true; size.needsUpdate = true; alpha.needsUpdate = true;
     }
@@ -156,8 +189,8 @@ export class Effects {
       f.flame.material.opacity = (0.5 + n * 0.2 + sunLow * 0.25) * Math.min(1, gate);
       f.flame.scale.set((0.8 + n * 0.15) * f.scale, (1.2 + n * 0.3) * f.scale, 1);
     }
-    // fireflies: emerge when the sun is low
-    const fo = Math.max(0, sunLow - 0.45) * 1.6;
+    // fireflies: emerge when the sun is low (not on the tundra)
+    const fo = this.fireflyOn === false ? 0 : Math.max(0, sunLow - 0.45) * 1.6;
     this.fireflyMat.opacity = Math.min(0.9, fo);
     if (fo > 0.01) {
       const pos = this.fireflies.geometry.attributes.position;
@@ -175,6 +208,13 @@ export class Effects {
     for (const m of this.mists) {
       m.material.opacity = sunLow * 0.34;
       m.position.x = m.userData.baseX + Math.sin(t * 0.05 + m.userData.phase) * 8;
+    }
+    // aurora fades in with deep dusk
+    const auroraOp = this.auroraOn ? Math.max(0, sunLow - 0.55) * 2.2 : 0;
+    this.aurora.visible = auroraOp > 0.01;
+    if (this.aurora.visible) {
+      this.auroraMat.uniforms.uT.value = t;
+      this.auroraMat.uniforms.uOp.value = Math.min(1, auroraOp);
     }
   }
 }

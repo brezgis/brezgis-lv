@@ -5,11 +5,13 @@ import { initTextures } from './textures.js';
 import { buildTerrain, paintEra, heightAt } from './terrain.js';
 import { buildWater } from './water.js';
 import { buildSky } from './sky.js';
-import { buildVegetation } from './vegetation.js';
+import { buildVegetation, WIND } from './vegetation.js';
+import { buildGrass } from './grass.js';
 import { buildEra, applySpawns } from './eras.js';
 import { AnimalManager } from './animals.js';
 import { Effects } from './effects.js';
 import { Ambience } from './audio.js';
+import { Rig } from './rig.js';
 import { LOC } from './landuse.js';
 import { RIVER_PTS, LAKES } from './geodata.js';
 import { ERAS } from './content.js';
@@ -52,6 +54,14 @@ async function boot() {
 
   await progress('Planting the forests…');
   const veg = buildVegetation(scene);
+  const grass = buildGrass(scene);
+
+  // sky reflections for the water, refreshed occasionally
+  const cubeRT = new THREE.WebGLCubeRenderTarget(128);
+  const cubeCam = new THREE.CubeCamera(1, 6000, cubeRT);
+  cubeCam.position.set(LOC.STEAD.x - 200, heightAt(LOC.STEAD.x - 200, LOC.STEAD.z) + 12, LOC.STEAD.z);
+  water.applyEnvMap(cubeRT.texture);
+  let envAge = 1e9;
 
   const effects = new Effects(scene);
   effects.setFireflyCenter(S.x - 40, steadY(), S.z + 30);
@@ -80,10 +90,30 @@ async function boot() {
   controls.dampingFactor = 0.06;
   controls.maxPolarAngle = Math.PI * 0.495;
   controls.minDistance = 6;
-  controls.maxDistance = 2800;
+  controls.maxDistance = 4600;
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.22;
   canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, { once: true });
+
+  // walk / fly / orbit rig
+  const rig = new Rig(camera, canvas);
+  const hintEl = $('hint');
+  rig.onModeChange = (mode) => {
+    document.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+    controls.enabled = mode === 'orbit';
+    if (mode === 'orbit') {
+      // look at what we were looking at
+      const fwd = new THREE.Vector3();
+      camera.getWorldDirection(fwd);
+      controls.target.copy(camera.position).addScaledVector(fwd, 30);
+      hintEl.textContent = 'drag to look · scroll to zoom · keys 1–6 travel in time';
+    } else if (mode === 'fly') {
+      hintEl.textContent = 'click to capture mouse · WASD fly, E/Q up/down, wheel = speed · V to walk · Esc frees mouse';
+    } else {
+      hintEl.textContent = 'click to capture mouse · WASD walk, Shift sprint, Space jump · V to fly · Esc frees mouse';
+    }
+  };
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => rig.setMode(b.dataset.mode)));
 
   // ------- era management -------
   const eraCache = new Map();
@@ -108,7 +138,10 @@ async function boot() {
     effects.clearDynamic();
     for (const [x, y, z, o] of built.smokes) effects.addSmoke(x, y, z, o);
     for (const [x, y, z, o] of built.fires) effects.addFire(x, y, z, o);
-    water.pond.visible = era >= 2;
+    water.pond.visible = era === 3 || era === 4;
+    water.setEra(era);
+    effects.setAurora(era === 0);
+    effects.setFireflies(era >= 1);
     ambience.setScene(era, sky.state.sunLow, built.fires.length > 0);
     // HUD
     document.querySelectorAll('.era-btn').forEach((b, i) => b.classList.toggle('active', i === era));
@@ -135,7 +168,7 @@ async function boot() {
         const u = Math.min(1, (performance.now() - t0) / 1100);
         const e = u < 0.5 ? 2 * u * u : -1 + (4 - 2 * u) * u;
         const y = Math.round(fromYear + (toYear - fromYear) * e);
-        yearEl.textContent = y < 0 ? `${-y} BC` : `AD ${y}`;
+        yearEl.textContent = y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${y}`;
         if (u < 1) requestAnimationFrame(spin);
         else setTimeout(() => { yearEl.style.opacity = 0; }, 600);
       };
@@ -168,10 +201,12 @@ async function boot() {
     },
     muiza: () => [[LOC.MANOR.x + 55, yAt(LOC.MANOR.x + 55, LOC.MANOR.z + 110, 16), LOC.MANOR.z + 110], [LOC.MANOR.x, yAt(LOC.MANOR.x, LOC.MANOR.z, 5), LOC.MANOR.z]],
     ezers: () => [[LOC.LAKE_VIEW.x - 600, yAt(LOC.LAKE_VIEW.x - 600, LOC.LAKE_VIEW.z + 200, 70), LOC.LAKE_VIEW.z + 200], [LOC.LAKE_VIEW.x + 200, LAKES[0] ? LAKES[0].level : 180, LOC.LAKE_VIEW.z]],
-    putns: () => [[S.x + 300, yAt(S.x, S.z, 640), S.z + 500], [S.x, steadY(), S.z - 200]],
+    brezga: () => [[LOC.BREZGA.x - 210, yAt(LOC.BREZGA.x - 210, LOC.BREZGA.z + 260, 55), LOC.BREZGA.z + 260], [LOC.BREZGA.x, yAt(LOC.BREZGA.x, LOC.BREZGA.z, 8), LOC.BREZGA.z]],
+    putns: () => [[S.x + 300, yAt(S.x, S.z, 780), S.z + 700], [S.x + 300, steadY(), S.z + 300]],
   };
   let camTween = null;
   function flyTo(name) {
+    rig.setMode('orbit');
     const [pos, tgt] = PRESETS[name]();
     controls.autoRotate = false;
     controls.enabled = false;
@@ -184,6 +219,7 @@ async function boot() {
 
   // ------- HUD wiring -------
   window.__scene = scene;
+  window.__rig = rig;
   window.__sim = {
     camera, controls, flyTo: (n) => flyTo(n), switchEra: (e) => switchEra(e), sky,
     jump: (n) => {
@@ -197,8 +233,8 @@ async function boot() {
   document.querySelectorAll('.era-btn').forEach((b, i) => b.addEventListener('click', () => switchEra(i)));
   document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => flyTo(b.dataset.view)));
   addEventListener('keydown', (e) => {
-    if (e.key >= '1' && e.key <= '4') switchEra(+e.key - 1);
-    if (e.key === 'ArrowRight') switchEra(Math.min(3, currentEra + 1));
+    if (e.key >= '1' && e.key <= '6') switchEra(+e.key - 1);
+    if (e.key === 'ArrowRight') switchEra(Math.min(ERAS.length - 1, currentEra + 1));
     if (e.key === 'ArrowLeft') switchEra(Math.max(0, currentEra - 1));
   });
   $('sound-btn').addEventListener('click', () => {
@@ -241,7 +277,7 @@ async function boot() {
 
   // ------- start -------
   await progress('Herding the aurochs…');
-  activateEra(1);                       // begin in the Latgalian age
+  activateEra(2);                       // begin in the Latgalian age
   $('loader').classList.add('done');
   setTimeout(() => $('loader').remove(), 900);
 
@@ -250,7 +286,9 @@ async function boot() {
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
     const t = clock.elapsedTime;
-    if (camTween) {
+    if (rig.mode !== 'orbit') {
+      rig.update(dt);
+    } else if (camTween) {
       camTween.t += dt / 2.2;
       const u = Math.min(1, camTween.t);
       const e = u * u * (3 - 2 * u);
@@ -259,13 +297,21 @@ async function boot() {
       if (u >= 1) { camTween = null; controls.enabled = true; }
     } else {
       controls.update();
+      // keep the orbit camera out of the dirt
+      const minY = heightAt(camera.position.x, camera.position.z) + 1.6;
+      if (camera.position.y < minY) camera.position.y = minY;
     }
-    // keep the camera out of the dirt
-    const minY = heightAt(camera.position.x, camera.position.z) + 1.6;
-    if (camera.position.y < minY) camera.position.y = minY;
 
-    sky.update(dt, controls.target);
+    const focus = rig.mode === 'orbit' ? controls.target : camera.position;
+    sky.update(dt, focus);
     water.tick(t);
+    WIND.time.value = t;
+    grass.update(focus, currentEra);
+    envAge += dt;
+    if (envAge > 5) {
+      envAge = 0;
+      cubeCam.update(renderer, scene);
+    }
     animals.tick(t, dt);
     effects.tick(t, dt, wind, sky.state.sunLow);
     for (const fn of eraTicks) fn(t, dt);

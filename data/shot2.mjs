@@ -11,6 +11,7 @@ await page.setViewport({ width: 1600, height: 1000 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 400)));
 await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
 await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
+  if (process.env.PLAIN) await page.evaluate(() => { window.__plain = true; });
 await new Promise((r) => setTimeout(r, 2500));
 for (const step of script.split(';').filter(Boolean)) {
   const [cmd, arg] = step.split('=');

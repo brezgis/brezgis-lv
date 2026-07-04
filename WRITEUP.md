@@ -175,6 +175,36 @@ laundry, a loaded cart, an axe left in the block.
 
 *Built 2026-07-04. Research: three source-verified reports in* `research/`.
 
+---
+
+## Second edition (same day): the map grows, and time deepens
+
+The reconstruction now covers **8.8 × 8.8 km**, so the real Brezgi ground is on the
+map: the Brezģis settlement / Brežģa krogs site and **Brežģa kalns** itself, with the
+old Cēsis–Vecpiebalga road climbing over the hill's flank, the Jāņi pyre on the summit
+(fires attested there through the 1930s [7]), the summit oak, and — in 2025 — the
+eleven-metre observation tower of 2017 [24]. The manor's ale, documented as sold at the
+Brezgi tavern, now has its tavern [2].
+
+Two eras were added at the ends of time. **~10,800 BC**: Younger Dryas tundra —
+dwarf-birch heath, glacial erratics, reindeer, a milky meltwater Gauja, dead ice
+melting in the future lake basins (kettle-hole collapse continued into the early
+Holocene [21]); no humans yet — Latvia's first reindeer hunters arrive ~10,500 BC at
+Salaspils Laukskola on the Daugava [22]; the aurora stands over the moraines at dusk.
+**2025**: the terrain draped in real Sentinel-2 imagery (EOX s2cloudless, CC-BY 4.0
+[23]) with the simulated forest placed exactly where the satellite sees forest; the
+quiet parish of ~347 people; the tower on the family hill.
+
+The engine gained a physical sky driving the light, wind through every plant, a
+walked-at-eye-level mode and free flight, near-field grass, terrain detail and water
+reflections — camera feel, wind law and realism standards adapted from **LAAS**, an
+MIT-licensed fully procedural WebGPU world [25].
+
+Additional sources: [21] Stivriņš et al. 2017, *The Holocene* (dead-ice meltdown);
+Zelčs et al., *Deglaciation history of Latvia*. [22] *Salaspils Laukskola Revisited*,
+Archaeologia Baltica. [23] Sentinel-2 cloudless by EOX (CC-BY 4.0, modified Copernicus
+data). [24] EnterGauja — Brežģa kalns tower. [25] github.com/Braffolk/fable5-world-demo.
+
 ## Sources
 
 1. Kārlis Bormanis — Vikipēdija. <https://lv.wikipedia.org/wiki/K%C4%81rlis_Bormanis>

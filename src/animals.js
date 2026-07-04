@@ -193,6 +193,12 @@ export const SPECIES = {
     belly: 0x5c5044, neckLen: 0.5, headSize: 0.44, tail: 0.1,
     horns: { len: 0.7, r: 0.045, spread: 1.15, fwd: -0.1 },
   }),
+  reindeer: () => quadruped({
+    shoulder: 1.1, length: 1.8, width: 0.5, legR: 0.05,
+    color: [0x8a8378, 0x9a938a, 0x7a7268][(rng() * 3) | 0],
+    belly: 0xb5afa4, headColor: 0x6e675e, neckLen: 0.42, headSize: 0.28, tail: 0.12,
+    horns: { len: 0.62, r: 0.028, spread: 0.55, fwd: -0.3 }, // swept-back branched antlers (both sexes)
+  }),
   chicken: () => fowl({ size: 0.16, color: [0xc8b490, 0x8a5a30, 0xd8d3c4][(rng() * 3) | 0] }),
   rooster: () => fowl({ size: 0.19, color: 0x8a3820, comb: true }),
   goose: () => fowl({ size: 0.3, color: 0xe6e2d6, neckLen: 0.3 }),

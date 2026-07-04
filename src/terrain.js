@@ -2,60 +2,60 @@
 // The height field is shared by every era (the land itself is the constant);
 // only the vertex colours (land use) change with time.
 import * as THREE from 'three';
-import { HM_GRID, HM_SPAN, decodeHeightmap } from './heightmap.js';
+import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, BUMPS, fieldAt, distToRoad, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
 import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
+import { SAT_JPEG_B64 } from './sat2025.js';
 
 const noise = makeNoise(1907);
-const G = HM_GRID, SPAN = HM_SPAN;
+const G = HM_GRID, SPAN = HM_SPAN, OX = HM_OFF_X, OZ = HM_OFF_Z;
 const field = decodeHeightmap(); // Float32, row-major, north = row 0
 
 // ---- one-time sculpt of the base field ----------------------------------
 function cellToWorld(gx, gy) {
-  return [((gx / (G - 1)) - 0.5) * SPAN, ((gy / (G - 1)) - 0.5) * SPAN];
+  return [((gx / (G - 1)) - 0.5) * SPAN + OX, ((gy / (G - 1)) - 0.5) * SPAN + OZ];
 }
 (function sculpt() {
-  for (let gy = 0; gy < G; gy++) {
-    for (let gx = 0; gx < G; gx++) {
-      const i = gy * G + gx;
+  // channel carving by POINT STAMPING (exact + fast at any map size):
+  // each water point lowers the cells inside its radius; candidates are
+  // computed from the pristine field so overlapping stamps stay idempotent.
+  const field0 = new Float32Array(field);
+  const worldToCell = (x, z) => [
+    (((x - OX) / SPAN) + 0.5) * (G - 1),
+    (((z - OZ) / SPAN) + 0.5) * (G - 1),
+  ];
+  function stamp(px, pz, radius, inner, target) {
+    const [cx, cy] = worldToCell(px, pz);
+    const cr = Math.ceil(radius / CELL) + 1;
+    for (let dy = -cr; dy <= cr; dy++) for (let dx = -cr; dx <= cr; dx++) {
+      const gx = Math.round(cx) + dx, gy = Math.round(cy) + dy;
+      if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
       const [x, z] = cellToWorld(gx, gy);
-      // river channel carve
-      let bd = Infinity, lvl = 0;
-      for (const p of RIVER_PTS) {
-        const d = Math.hypot(p[0] - x, p[1] - z);
-        if (d < bd) { bd = d; lvl = p[2]; }
-      }
-      // wide enough that bilinear interpolation across the 25 m grid cannot
-      // lift the channel back above the waterline
-      if (bd < 36) {
-        const t = smoothstep(36, 14, bd);
-        field[i] = lerp(field[i], Math.min(field[i], lvl - 1.8), t);
-      }
-      // stream channel carve (a soft swale)
-      for (const s of STREAMS) {
-        let sd = Infinity, sl = 0;
-        for (const p of s.pts) {
-          const d = Math.hypot(p[0] - x, p[1] - z);
-          if (d < sd) { sd = d; sl = p[2]; }
-        }
-        if (sd < 20) {
-          const t = smoothstep(20, 5, sd);
-          field[i] = lerp(field[i], Math.min(field[i], sl - 0.8), t);
-        }
-      }
-      // pads (farmyards) flatten
-      for (const p of PADS) {
-        const d = Math.hypot(p.x - x, p.z - z);
-        if (d < p.r + 24) {
-          if (p.y === undefined) {
-            // pad target height = field value at pad centre (lazily captured)
-            const cgx = Math.round(((p.x / SPAN) + 0.5) * (G - 1));
-            const cgy = Math.round(((p.z / SPAN) + 0.5) * (G - 1));
-            p.y = field[cgy * G + cgx];
-          }
-          field[i] = lerp(field[i], p.y, smoothstep(p.r + 24, p.r * 0.55, d));
-        }
+      const d = Math.hypot(x - px, z - pz);
+      if (d > radius) continue;
+      const i = gy * G + gx;
+      const cand = lerp(field0[i], Math.min(field0[i], target), smoothstep(radius, inner, d));
+      if (cand < field[i]) field[i] = cand;
+    }
+  }
+  for (const p of RIVER_PTS) stamp(p[0], p[1], 38, 14, p[2] - 1.8);
+  for (const s of STREAMS) for (const p of s.pts) stamp(p[0], p[1], 20, 5, p[2] - 0.8);
+
+  // pads (farmyards) flatten
+  for (const p of PADS) {
+    const cgx = Math.round((((p.x - OX) / SPAN) + 0.5) * (G - 1));
+    const cgy = Math.round((((p.z - OZ) / SPAN) + 0.5) * (G - 1));
+    if (p.y === undefined) p.y = field[cgy * G + cgx];
+    const cr = Math.ceil((p.r + 24) / CELL) + 1;
+    for (let dy = -cr; dy <= cr; dy++) for (let dx = -cr; dx <= cr; dx++) {
+      const gx = cgx + dx, gy = cgy + dy;
+      if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
+      const [x, z] = cellToWorld(gx, gy);
+      const d = Math.hypot(p.x - x, p.z - z);
+      if (d < p.r + 24) {
+        const i = gy * G + gx;
+        field[i] = lerp(field[i], p.y, smoothstep(p.r + 24, p.r * 0.55, d));
       }
     }
   }
@@ -75,11 +75,11 @@ function cellToWorld(gx, gy) {
       }
     }
   }
-  // burial barrows (low mounds, era 1 onward — they stay in the land)
+  // burial barrows (low mounds — they stay in the land once raised)
   for (const b of BUMPS) {
     const gr = Math.ceil((b.r + 2) / CELL);
-    const cgx = Math.round(((b.x / SPAN) + 0.5) * (G - 1));
-    const cgy = Math.round(((b.z / SPAN) + 0.5) * (G - 1));
+    const cgx = Math.round((((b.x - OX) / SPAN) + 0.5) * (G - 1));
+    const cgy = Math.round((((b.z - OZ) / SPAN) + 0.5) * (G - 1));
     for (let dy = -gr; dy <= gr; dy++) for (let dx = -gr; dx <= gr; dx++) {
       const gx = cgx + dx, gy = cgy + dy;
       if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
@@ -103,8 +103,8 @@ for (const lake of LAKES) {
 
 // ---- height queries -------------------------------------------------------
 function baseHeight(x, z) {
-  const fx = clamp(((x / SPAN) + 0.5) * (G - 1), 0, G - 1.001);
-  const fz = clamp(((z / SPAN) + 0.5) * (G - 1), 0, G - 1.001);
+  const fx = clamp((((x - OX) / SPAN) + 0.5) * (G - 1), 0, G - 1.001);
+  const fz = clamp((((z - OZ) / SPAN) + 0.5) * (G - 1), 0, G - 1.001);
   const x0 = Math.floor(fx), z0 = Math.floor(fz);
   const u = fx - x0, v = fz - z0;
   const h = (xx, zz) => field[Math.min(zz, G - 1) * G + Math.min(xx, G - 1)];
@@ -126,19 +126,64 @@ export function slopeAt(x, z) {
 }
 
 // ---- mesh -----------------------------------------------------------------
-const RES = 288;
+const RES = 352;
 let terrainMesh = null;
+
+// high-frequency detail so the ground doesn't read as flat vertex paint —
+// two octaves of neutral noise multiplied into the albedo in world space
+let detailTex = null;
+function makeDetailTex() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(256, 256);
+  const n = makeNoise(515);
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    const v = (n.fbm(x / 34, y / 34, 4) * 0.7 + n.noise2(x / 6.5, y / 6.5) * 0.3) * 255;
+    const i = (y * 256 + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping; // seamless tiling
+  tex.colorSpace = THREE.NoColorSpace;
+  return tex;
+}
+function detailify(material, strength) {
+  if (!detailTex) detailTex = makeDetailTex();
+  material.onBeforeCompile = (sh) => {
+    sh.uniforms.uDetail = { value: detailTex };
+    sh.uniforms.uDetailK = { value: strength };
+    sh.vertexShader = 'varying vec3 vWp;\n' + sh.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n vWp = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+    );
+    sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; varying vec3 vWp;\n' +
+      sh.fragmentShader.replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          float d1 = texture2D(uDetail, vWp.xz * 0.09).r;
+          float d2 = texture2D(uDetail, vWp.xz * 0.011).r;
+          diffuseColor.rgb *= mix(1.0, (0.72 + 0.56 * d1) * (0.8 + 0.4 * d2), uDetailK);
+        }`
+      );
+  };
+  return material;
+}
 
 export function buildTerrain() {
   const geo = new THREE.PlaneGeometry(SPAN, SPAN, RES - 1, RES - 1);
   geo.rotateX(-Math.PI / 2);
+  geo.translate(OX, 0, OZ);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
   }
   geo.computeVertexNormals();
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const mat = detailify(new THREE.MeshLambertMaterial({ vertexColors: true }), 1.0);
   terrainMesh = new THREE.Mesh(geo, mat);
   terrainMesh.receiveShadow = true;
   terrainMesh.name = 'terrain';
@@ -147,9 +192,54 @@ export function buildTerrain() {
 
 // ---- per-era painting ------------------------------------------------------
 const c = new THREE.Color();
+let satMaterial = null, colorMaterial = null;
 export function paintEra(era) {
+  if (!colorMaterial) colorMaterial = terrainMesh.material;
+  // era 5: the real Sentinel-2 drape replaces painted colours entirely
+  if (era === 5) {
+    if (!satMaterial) {
+      const tex = new THREE.TextureLoader().load(
+        'data:image/jpeg;base64,' + SAT_JPEG_B64,
+        (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; }
+      );
+      satMaterial = detailify(new THREE.MeshLambertMaterial({ map: tex }), 0.55);
+    }
+    terrainMesh.material = satMaterial;
+    return;
+  }
+  terrainMesh.material = colorMaterial;
   const pos = terrainMesh.geometry.attributes.position;
   const col = terrainMesh.geometry.attributes.color;
+
+  if (era === 0) {
+    // Younger Dryas tundra: till, gravel, moss, dryas heath — no meadow green
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const n1 = noise.fbm(x * 0.006, z * 0.006, 3);
+      const n2 = noise.noise2(x * 0.07, z * 0.07);
+      const dRiv = distToRiver(x, z);
+      let r = 0.36 + n1 * 0.13;
+      let g = 0.33 + n1 * 0.10 + n2 * 0.04;
+      let b = 0.23 + n2 * 0.04;
+      // moss carpets (green-dark) and dryas/rust heath patches
+      if (n2 > 0.62) { r += 0.05; g -= 0.015; b -= 0.05; }       // rust heath
+      else if (n2 < 0.32) { r -= 0.09; g -= 0.015; b -= 0.05; }  // dark moss
+      const n3 = noise.noise2(x * 0.02 + 9, z * 0.02);
+      if (n3 > 0.72) { r -= 0.05; g += 0.03; b -= 0.02; }        // sedge green flushes
+      // gravel outwash near water
+      if (dRiv < 26) {
+        const t = smoothstep(26, 7, dRiv);
+        r = lerp(r, 0.47, t); g = lerp(g, 0.43, t); b = lerp(b, 0.37, t);
+      }
+      // high till ridges paler
+      const high = smoothstep(210, 250, y);
+      r += high * 0.08; g += high * 0.07; b += high * 0.07;
+      col.setXYZ(i, r, g, b);
+    }
+    col.needsUpdate = true;
+    return;
+  }
+
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
     const n1 = noise.fbm(x * 0.008, z * 0.008, 3);
@@ -162,7 +252,7 @@ export function paintEra(era) {
     let b = 0.16 + n2 * 0.05;
 
     // wildflower sparkle on open meadow (midsummer)
-    if (n2 > 0.82 && dRiv < 120 && era < 2) { r += 0.16; g += 0.1; b += 0.12; }
+    if (n2 > 0.82 && dRiv < 120 && era < 3) { r += 0.16; g += 0.1; b += 0.12; }
 
     // forest floor — matched to where trees actually stand (vegetation thins
     // with distance from the stage, so the floor tint must too)
@@ -185,7 +275,7 @@ export function paintEra(era) {
     }
 
     // roads & yard earth
-    if (era > 0) {
+    if (era >= 2) {
       const dr = distToRoad(era, x, z);
       if (dr < 2.5) {
         const t = smoothstep(2.5, -1, dr);
@@ -193,8 +283,10 @@ export function paintEra(era) {
       }
     }
     for (const p of PADS) {
-      if (era === 0 && p !== PADS[2]) continue;             // only the camp pad reads as trodden in AD 50
-      if (era === 1 && Math.hypot(x - LOC.MANOR.x, z - LOC.MANOR.z) < 80) continue;
+      if (era === 1 && p !== PADS[2]) continue;             // only the camp pad reads as trodden in AD 50
+      if (era === 2 && Math.hypot(x - LOC.MANOR.x, z - LOC.MANOR.z) < 80) continue;
+      if (era <= 2 && Math.hypot(x - LOC.KROGS.x, z - LOC.KROGS.z) < 40) continue;
+      if (era <= 2 && Math.hypot(x - LOC.BREZGA.x, z - LOC.BREZGA.z) < 30) continue;
       const d = Math.hypot(x - p.x, z - p.z);
       if (d < p.r * 0.75) {
         const t = smoothstep(p.r * 0.75, p.r * 0.3, d) * 0.7;

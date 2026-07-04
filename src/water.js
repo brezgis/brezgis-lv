@@ -115,5 +115,22 @@ export function buildWater() {
   function tick(t) {
     for (const m of mats) m.normalMap.offset.set(t * 0.008, t * 0.013);
   }
-  return { group, pond, pondLevel, tick };
+  // glacial-era meltwater is milky with rock flour
+  const original = mats.map((m) => m.color.clone());
+  function setEra(era) {
+    mats.forEach((m, i) => {
+      if (era === 0) m.color.set(0x8fb6ba);
+      else m.color.copy(original[i]);
+    });
+  }
+  // sky reflections from an occasionally-refreshed cubemap
+  function applyEnvMap(tex) {
+    for (const m of mats) {
+      m.envMap = tex;
+      m.combine = THREE.MixOperation;
+      m.reflectivity = 0.42;
+      m.needsUpdate = true;
+    }
+  }
+  return { group, pond, pondLevel, tick, setEra, applyEnvMap };
 }

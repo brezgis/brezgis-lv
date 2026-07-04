@@ -18,12 +18,23 @@ function quadruped({
   const bodyH = shoulder * 0.52;
   const legH = shoulder - bodyH / 2;
   const bodyMat = M(color);
-  const body = new THREE.Mesh(new THREE.BoxGeometry(width, bodyH, length), bodyMat);
+  // rounded barrel: ellipsoid trunk + chest and rump volumes
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 9), bodyMat);
+  body.scale.set(width * 0.56, bodyH * 0.62, length * 0.53);
   body.position.y = legH + bodyH / 2;
   g.add(body);
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), bodyMat);
+  chest.scale.set(width * 0.5, bodyH * 0.56, bodyH * 0.6);
+  chest.position.set(0, legH + bodyH * 0.52, length * 0.3);
+  g.add(chest);
+  const rump = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), bodyMat);
+  rump.scale.set(width * 0.47, bodyH * 0.54, bodyH * 0.56);
+  rump.position.set(0, legH + bodyH * 0.54, -length * 0.3);
+  g.add(rump);
   if (belly) {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(width * 0.92, bodyH * 0.4, length * 0.92), M(belly));
-    b.position.y = legH + bodyH * 0.22;
+    const b = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), M(belly));
+    b.scale.set(width * 0.5, bodyH * 0.42, length * 0.46);
+    b.position.y = legH + bodyH * 0.28;
     g.add(b);
   }
   const legs = [];
@@ -37,13 +48,20 @@ function quadruped({
   // neck + head pivot
   const neck = new THREE.Group();
   neck.position.set(0, legH + bodyH * 0.75, length / 2 - 0.05);
-  const neckMesh = new THREE.Mesh(new THREE.BoxGeometry(width * 0.55, headSize * 1.1, neckLen + headSize), bodyMat);
-  neckMesh.position.set(0, headSize * 0.3, (neckLen + headSize) / 2 - 0.06);
-  neckMesh.rotation.x = -0.35;
+  const neckL = neckLen + headSize;
+  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.42, headSize * 0.62, neckL, 8), bodyMat);
+  neckMesh.position.set(0, headSize * 0.3 + neckL * 0.17, neckL * 0.5 - 0.06);
+  neckMesh.rotation.x = Math.PI / 2 - 0.42;
   neck.add(neckMesh);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(headSize, headSize * 0.85, headSize * 1.45), M(headColor || color));
-  head.position.set(0, headSize * 0.55, neckLen + headSize * 0.5);
+  const headMat = M(headColor || color);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), headMat);
+  head.scale.set(headSize * 0.48, headSize * 0.45, headSize * 0.56);
+  head.position.set(0, headSize * 0.55, neckLen + headSize * 0.4);
   neck.add(head);
+  const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.2, headSize * 0.3, headSize * 0.8, 8), headMat);
+  muzzle.rotation.x = Math.PI / 2 + 0.12;
+  muzzle.position.set(0, headSize * 0.44, neckLen + headSize * 0.85);
+  neck.add(muzzle);
   if (ears) {
     for (const s of [-1, 1]) {
       const ear = new THREE.Mesh(new THREE.ConeGeometry(headSize * 0.16, headSize * 0.42, 4), bodyMat);

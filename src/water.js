@@ -8,14 +8,19 @@ import { sampleSpline, canvasTexture, makeNoise } from './util.js';
 
 function waterNormalTex() {
   const n = makeNoise(777);
-  const tex = canvasTexture(128, 128, (ctx, w, h) => {
+  const tex = canvasTexture(256, 256, (ctx, w, h) => {
     const img = ctx.createImageData(w, h);
+    // proper tangent-space normals derived from a ripple height field
+    const hgt = (x, y) =>
+      n.fbm((x / w) * 6, (y / h) * 6, 4) * 0.75 + n.noise2((x / w) * 22, (y / h) * 22) * 0.25;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const v = n.fbm((x / w) * 6, (y / h) * 6, 3) * 255;
+      const dx = (hgt(x + 1, y) - hgt(x - 1, y)) * 3.2;
+      const dy = (hgt(x, y + 1) - hgt(x, y - 1)) * 3.2;
+      const inv = 1 / Math.hypot(dx, dy, 1);
       const i = (y * w + x) * 4;
-      img.data[i] = 120 + (v - 128) * 0.3;
-      img.data[i + 1] = 120 + (v - 128) * 0.3;
-      img.data[i + 2] = 255;
+      img.data[i] = (-dx * inv * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (-dy * inv * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (inv * 0.5 + 0.5) * 255;
       img.data[i + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);
@@ -25,16 +30,28 @@ function waterNormalTex() {
 }
 
 function makeWaterMaterial(color, opacity) {
-  return new THREE.MeshPhongMaterial({
+  const m = new THREE.MeshPhongMaterial({
     color,
-    shininess: 220,
-    specular: 0xbbccdd,
+    shininess: 300,
+    specular: 0xd8e4ee,
     transparent: true,
     opacity,
     normalMap: waterNormalTex(),
-    normalScale: new THREE.Vector2(0.35, 0.35),
+    normalScale: new THREE.Vector2(0.26, 0.26),
     side: THREE.DoubleSide, // river ribbons follow flow direction; don't let winding cull them
   });
+  // second ripple octave scrolling against the first — interference, not slide
+  m.userData.off2 = new THREE.Vector2();
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uOff2 = { value: m.userData.off2 };
+    sh.fragmentShader = 'uniform vec2 uOff2;\n' + sh.fragmentShader.replace(
+      'vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;',
+      `vec3 mapN1 = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+       vec3 mapN2 = texture2D( normalMap, vNormalMapUv * 3.7 + uOff2 ).xyz * 2.0 - 1.0;
+       vec3 mapN = normalize(vec3(mapN1.xy + mapN2.xy * 0.45, mapN1.z));`
+    );
+  };
+  return m;
 }
 
 function ribbon(pts, widthFn, mat, uvScale = 60) {
@@ -69,7 +86,7 @@ export function buildWater() {
   const mats = [];
 
   // --- lakes from OSM polygons
-  const lakeMat = makeWaterMaterial(0x2c4a52, 0.92);
+  const lakeMat = makeWaterMaterial(0x38565f, 0.92);
   mats.push(lakeMat);
   for (const lake of LAKES) {
     // store as (x, -z) so that rotateX(-PI/2) lands on (x, z) with the normal up
@@ -113,7 +130,10 @@ export function buildWater() {
   pond.name = 'pond';
 
   function tick(t) {
-    for (const m of mats) m.normalMap.offset.set(t * 0.008, t * 0.013);
+    for (const m of mats) {
+      m.normalMap.offset.set(t * 0.008, t * 0.013);
+      m.userData.off2.set(-t * 0.019, t * 0.011);
+    }
   }
   // glacial-era meltwater is milky with rock flour
   const original = mats.map((m) => m.color.clone());

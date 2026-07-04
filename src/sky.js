@@ -1,8 +1,11 @@
-// Sky & sun. The dome is three.js's analytic Sky (Preetham-style) driven by
-// the sun position; the directional light colour comes from a Rayleigh/Mie
-// transmittance integral so light, fog and sky always agree — the atmosphere
-// as the lighting rig (a LAAS design rule). One day-cycle loops in ~4 minutes
-// across the long Baltic midsummer day at 57°N.
+// Sky & sun. The dome is three.js's analytic Sky driven by the sun position;
+// the directional light colour comes from a Rayleigh/Mie transmittance
+// integral so light, fog and sky always agree — the atmosphere as the
+// lighting rig (a LAAS design rule). One day-cycle loops in ~4 minutes across
+// the long Baltic midsummer day at 57°N. Cumulus billboards carry a per-pixel
+// fbm density field lit toward the sun (Beer-Powder-ish core, silver lining),
+// stars rise at deep dusk, and a ring of far moraine silhouettes continues
+// the Vidzeme upland past the DEM edge.
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { canvasTexture, makeNoise, lerp, smoothstep, clamp } from './util.js';
@@ -32,18 +35,63 @@ function sunTransmittanceJS(sunY) {
   ];
 }
 
-function cloudTexture() {
+// ---- shader cumulus ---------------------------------------------------------
+const cloudVert = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const cloudFrag = /* glsl */ `
+varying vec2 vUv;
+uniform float uT, uSeed, uOp, uAspect, uSharp;
+uniform vec3 uSunL, uLitCol, uShadeCol;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x),
+             mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * vnoise(p); p = p * 2.03 + 17.7; a *= 0.5; }
+  return v;
+}
+void main() {
+  vec2 p = vUv * 2.0 - 1.0;
+  p.x *= uAspect;
+  float t = uT * 0.012 + uSeed * 9.0;
+  vec2 bp = p * vec2(1.35, 2.4) + vec2(t * 1.6, uSeed * 7.0);
+  float base = fbm(bp);
+  float detail = fbm(p * vec2(4.2, 7.5) - vec2(t * 3.8, uSeed * 3.0));
+  float env = 1.0 - length(vec2(p.x * 0.72, max(p.y, -0.12) * 1.5));
+  float dens = clamp((env + base * 0.85 - 0.62 + (detail - 0.5) * 0.5
+    - max(0.0, -p.y - 0.25) * 1.4) * uSharp, 0.0, 1.0);
+  if (dens < 0.006) discard;
+  vec2 gdir = normalize(uSunL.xy + vec2(1e-4, 0.0));
+  float dSun = fbm(bp + gdir * 0.15);
+  float lit = clamp(0.62 + (dSun - base) * 3.0, 0.0, 1.25);
+  float powder = 1.0 - exp(-dens * 2.8);
+  vec3 col = mix(uShadeCol, uLitCol, lit) * (1.0 - powder * 0.38);
+  col *= 0.68 + 0.32 * smoothstep(-0.7, 0.55, p.y);
+  float rim = smoothstep(0.4, 0.02, dens) * max(0.0, -uSunL.z);
+  col += uLitCol * rim * 0.55;
+  gl_FragColor = vec4(col, dens * uOp);
+}`;
+
+function cirrusTexture() {
   const n = makeNoise(31);
-  return canvasTexture(256, 128, (ctx, w, h) => {
+  return canvasTexture(256, 96, (ctx, w, h) => {
     const img = ctx.createImageData(w, h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const u = x / w - 0.5, v = y / h - 0.5;
-      const r = Math.hypot(u * 1.6, v * 2.6);
-      const d = n.fbm(u * 5 + 9, v * 8, 5) - r * 1.15;
-      const a = clamp((d - 0.18) * 4, 0, 1);
+      const d = n.fbm(u * 8 + 9, v * 3, 4) - Math.abs(v) * 2.4 - 0.28;
       const i = (y * w + x) * 4;
       img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
-      img.data[i + 3] = a * 210;
+      // fade the u edges too or the quad ends show as hard vertical seams
+      const edge = smoothstep(0.5, 0.4, Math.abs(u));
+      img.data[i + 3] = clamp(d * 3.2, 0, 1) * 110 * edge;
     }
     ctx.putImageData(img, 0, 0);
   });
@@ -66,13 +114,14 @@ export function buildSky(scene, renderer) {
   sun.shadow.camera.top = SC; sun.shadow.camera.bottom = -SC;
   sun.shadow.camera.near = 50; sun.shadow.camera.far = 2600;
   sun.shadow.bias = -0.0005;
+  sun.shadow.normalBias = 0.5;
   sun.shadow.radius = 2.2;
   scene.add(sun, sun.target);
 
   const hemi = new THREE.HemisphereLight(0xbcd4e8, 0x51603e, 0.75);
   scene.add(hemi);
 
-  scene.fog = new THREE.Fog(0xcfe0e8, 600, 7200);
+  scene.fog = new THREE.Fog(0xcfe0e8, 420, 7200);
 
   // colour keys for fog/ambient across the day (t: 0 = 4:00, 1 = 23:00)
   const stops = [
@@ -94,26 +143,160 @@ export function buildSky(scene, renderer) {
     return target.copy(cA).lerp(cB, u);
   }
 
-  // drifting cumulus + a thin high cirrus veil
-  const cloudMat = new THREE.MeshBasicMaterial({
-    map: cloudTexture(), transparent: true, depthWrite: false, opacity: 0.85, fog: false,
-  });
+  // ---- cumulus fleet (shared lit/shade uniforms, per-cloud sun-local dir)
+  const uLitCol = { value: new THREE.Color(1, 1, 1) };
+  const uShadeCol = { value: new THREE.Color(0.6, 0.66, 0.74) };
+  const uTime = { value: 0 };
   const clouds = new THREE.Group();
+  clouds.name = 'clouds';
   const crng = makeNoise(55).rng;
-  for (let i = 0; i < 16; i++) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cloudMat.clone());
-    const s = 420 + crng() * 700;
-    const high = i > 13;
-    m.scale.set(s * (high ? 1.5 : 1), s * (high ? 0.3 : 0.4), 1);
-    m.material.opacity = high ? 0.14 : 0.55 + crng() * 0.3;
-    m.position.set((crng() - 0.5) * 9000, high ? 2400 + crng() * 500 : 700 + crng() * 500, (crng() - 0.5) * 9000);
-    m.userData.speed = (high ? 6 : 3) + crng() * 5;
+  for (let i = 0; i < 14; i++) {
+    const aspect = 2.0 + crng() * 1.6;
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, fog: false,
+      uniforms: {
+        uT: uTime, uLitCol, uShadeCol,
+        uSeed: { value: crng() * 10 },
+        uOp: { value: 0.6 + crng() * 0.3 },
+        uAspect: { value: aspect },
+        uSharp: { value: 2.2 + crng() * 1.4 },
+        uSunL: { value: new THREE.Vector3(0, 1, 0) },
+      },
+      vertexShader: cloudVert, fragmentShader: cloudFrag,
+    });
+    const s = 520 + crng() * 780;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    m.scale.set(s * aspect * 0.5, s * 0.42, 1);
+    m.position.set((crng() - 0.5) * 9000, 750 + crng() * 700, (crng() - 0.5) * 9000);
+    m.userData.speed = 4 + crng() * 6;
+    m.renderOrder = 2;
+    clouds.add(m);
+  }
+  // thin high cirrus veil
+  const cirrusMat = new THREE.MeshBasicMaterial({
+    map: cirrusTexture(), transparent: true, depthWrite: false, opacity: 0.5, fog: false,
+  });
+  for (let i = 0; i < 3; i++) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cirrusMat.clone());
+    m.scale.set(2600 + crng() * 1400, 420 + crng() * 200, 1);
+    m.position.set((crng() - 0.5) * 8000, 2500 + crng() * 600, (crng() - 0.5) * 8000);
+    m.userData.speed = 9 + crng() * 6;
+    m.userData.cirrus = true;
+    m.renderOrder = 1;
     clouds.add(m);
   }
   scene.add(clouds);
 
-  const state = { t: 0.3, hour: 4 + 0.3 * 19, sunLow: 0, paused: false };
+  // ---- stars (deep-dusk only; faint milky-way band)
+  const stars = (() => {
+    const srng = makeNoise(77).rng;
+    const N = 1400;
+    const pos = new Float32Array(N * 3);
+    const cols = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const inBand = i > N * 0.55;
+      let x, y, z;
+      do {
+        x = srng() * 2 - 1; y = srng(); z = srng() * 2 - 1;
+        if (inBand) {
+          // cluster along one great circle, tilted like the summer Milky Way
+          const a = srng() * Math.PI * 2;
+          const off = (srng() - 0.5) * 0.3;
+          x = Math.cos(a); z = Math.sin(a) * 0.4 + off;
+          y = Math.abs(Math.sin(a) * 0.85 + off * 0.5);
+        }
+      } while (Math.hypot(x, y, z) < 0.2 || y < 0.03);
+      const l = Math.hypot(x, y, z);
+      pos[i * 3] = (x / l) * 8600; pos[i * 3 + 1] = (y / l) * 8600; pos[i * 3 + 2] = (z / l) * 8600;
+      const mag = inBand ? 0.25 + srng() * 0.4 : 0.4 + srng() * 0.7;
+      const warm = srng();
+      cols[i * 3] = mag * (0.85 + warm * 0.15);
+      cols[i * 3 + 1] = mag * (0.88 + warm * 0.06);
+      cols[i * 3 + 2] = mag * (1.0 - warm * 0.18);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    const mat = new THREE.PointsMaterial({
+      size: 2.2, sizeAttenuation: false, vertexColors: true, transparent: true,
+      opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    pts.renderOrder = 0;
+    return pts;
+  })();
+  stars.name = 'stars';
+  scene.add(stars);
+
+  // ---- sun disc + glow
+  const sunGlow = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    let g = ctx.createRadialGradient(64, 64, 2, 64, 64, 14);
+    g.addColorStop(0, 'rgba(255,252,240,1)');
+    g.addColorStop(1, 'rgba(255,244,214,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+    g = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+    g.addColorStop(0, 'rgba(255,240,200,0.55)');
+    g.addColorStop(1, 'rgba(255,230,180,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(c), transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: true, fog: false,
+    }));
+    spr.scale.setScalar(1350);
+    spr.renderOrder = 1;
+    return spr;
+  })();
+  sunGlow.name = 'sunglow';
+  scene.add(sunGlow);
+
+  // ---- far moraine silhouettes: the upland continues past the DEM edge
+  const horizon = (() => {
+    const group = new THREE.Group();
+    const hn = makeNoise(929);
+    const mk = (radius, base, amp, seedOff, col) => {
+      const SEGS = 220;
+      const pos = [], idx = [], colArr = [];
+      const cTop = new THREE.Color(col).multiplyScalar(1.12);
+      const cBot = new THREE.Color(col).multiplyScalar(0.9);
+      for (let i = 0; i <= SEGS; i++) {
+        const a = (i / SEGS) * Math.PI * 2;
+        const x = Math.cos(a) * radius, z = Math.sin(a) * radius;
+        const h = base + hn.fbm(Math.cos(a) * 3 + seedOff, Math.sin(a) * 3, 4) * amp
+          + hn.noise2(Math.cos(a) * 9 + seedOff, Math.sin(a) * 9) * amp * 0.3;
+        pos.push(x, -60, z, x, h, z);
+        colArr.push(cBot.r, cBot.g, cBot.b, cTop.r, cTop.g, cTop.b);
+        if (i < SEGS) {
+          const b = i * 2;
+          idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
+      geo.setIndex(idx);
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        vertexColors: true, fog: true, side: THREE.DoubleSide,
+      }));
+      m.frustumCulled = false;
+      return m;
+    };
+    // two ridgelines for layered depth; heights in m ASL (terrain ~165-259)
+    group.add(mk(6100, 186, 90, 3.7, 0x323e32));
+    group.add(mk(4900, 172, 66, 9.2, 0x3a4635));
+    return group;
+  })();
+  horizon.name = 'horizon';
+  scene.add(horizon);
+
+  const state = { t: 0.3, hour: 4 + 0.3 * 19, sunLow: 0, paused: false, sunColor: new THREE.Color(), ambient: 0.8 };
   const fogSun = new THREE.Color();
+  const sunWorld = new THREE.Vector3();
+  const qInv = new THREE.Quaternion();
+  const sunLocal = new THREE.Vector3();
 
   function update(dt, focus) {
     if (!state.paused) state.t = (state.t + dt / DAY_SECONDS) % 1;
@@ -133,25 +316,46 @@ export function buildSky(scene, renderer) {
     const tr = sunTransmittanceJS(sd.y);
     sun.color.setRGB(tr[0], tr[1], tr[2]);
     sun.intensity = 3.0 * clamp((sd.y + 0.03) / 0.1, 0, 1) * (0.4 + 0.6 * clamp(sd.y * 3 + 0.2, 0, 1));
+    state.sunColor.copy(sun.color);
 
     // ambient + fog: colour keys, fog warmed toward the sun's colour at dusk
     stopLerp(t, 'zen', hemi.color);
     hemi.intensity = stopLerp(t, 'hemiI');
+    state.ambient = hemi.intensity;
     stopLerp(t, 'fog', scene.fog.color);
     fogSun.setRGB(tr[0], tr[1], tr[2]);
     scene.fog.color.lerp(fogSun, state.sunLow * 0.35);
 
     sky.position.copy(focus);
+    horizon.position.set(focus.x, 0, focus.z);
+    sunWorld.copy(sd).multiplyScalar(8800).add(focus);
+    sunGlow.position.copy(sunWorld);
+    sunGlow.material.opacity = clamp((sd.y + 0.06) * 6, 0, 1) * 0.9;
+
+    // stars & aurora darkness gate
+    const dark = clamp(-sd.y * 9 + 0.25, 0, 1) * 0.9 + state.sunLow * 0.12;
+    stars.material.opacity = clamp(dark, 0, 0.95);
+    stars.position.set(focus.x, 0, focus.z);
+
+    // cloud lighting: shared lit/shade colours, per-cloud sun-local dirs
+    const nite = clamp(sd.y * 6 + 0.3, 0.05, 1);
+    uTime.value += dt;
+    uLitCol.value.setRGB(
+      (0.72 + tr[0] * 0.5) * nite, (0.72 + tr[1] * 0.48) * nite, (0.74 + tr[2] * 0.44) * nite);
+    uShadeCol.value.copy(hemi.color).multiplyScalar(0.36 * nite + 0.1);
     for (const m of clouds.children) {
       m.position.x += m.userData.speed * dt;
-      if (m.position.x > 4700) m.position.x = -4700;
+      if (m.position.x - focus.x > 4700) m.position.x -= 9400;
+      if (m.position.x - focus.x < -4700) m.position.x += 9400;
       m.lookAt(focus.x, m.position.y, focus.z);
-      const nite = clamp(sd.y * 6 + 0.3, 0.06, 1); // clouds go dark after sunset
-      m.material.color.setRGB(
-        (0.62 + tr[0] * 0.38) * nite,
-        (0.62 + tr[1] * 0.38) * nite,
-        (0.66 + tr[2] * 0.34) * nite
-      );
+      if (m.userData.cirrus) {
+        m.material.color.setRGB(
+          (0.62 + tr[0] * 0.38) * nite, (0.62 + tr[1] * 0.38) * nite, (0.66 + tr[2] * 0.34) * nite);
+      } else {
+        qInv.copy(m.quaternion).invert();
+        sunLocal.copy(sd).applyQuaternion(qInv);
+        m.material.uniforms.uSunL.value.copy(sunLocal);
+      }
     }
   }
   return { update, state, sun, hemi };

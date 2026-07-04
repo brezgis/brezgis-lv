@@ -126,11 +126,13 @@ export function slopeAt(x, z) {
 }
 
 // ---- mesh -----------------------------------------------------------------
-const RES = 352;
+const RES = 512;
 let terrainMesh = null;
 
 // high-frequency detail so the ground doesn't read as flat vertex paint —
-// two octaves of neutral noise multiplied into the albedo in world space
+// multi-octave albedo modulation + a bump channel for micro-relief
+// (tussocks, soil crumb), and a slope rule that bares the glacial till on
+// steep river banks. All in world space so it survives the vertex paint.
 let detailTex = null;
 function makeDetailTex() {
   const c = document.createElement('canvas');
@@ -155,18 +157,25 @@ function detailify(material, strength) {
   material.onBeforeCompile = (sh) => {
     sh.uniforms.uDetail = { value: detailTex };
     sh.uniforms.uDetailK = { value: strength };
-    sh.vertexShader = 'varying vec3 vWp;\n' + sh.vertexShader.replace(
+    sh.vertexShader = 'varying vec3 vWp; varying float vSlope;\n' + sh.vertexShader.replace(
       '#include <begin_vertex>',
-      '#include <begin_vertex>\n vWp = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+      `#include <begin_vertex>
+       vWp = (modelMatrix * vec4(transformed, 1.0)).xyz;
+       vSlope = 1.0 - normalize(normal).y;`
     );
-    sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; varying vec3 vWp;\n' +
+    sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; varying vec3 vWp; varying float vSlope;\n' +
       sh.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
-          float d1 = texture2D(uDetail, vWp.xz * 0.09).r;
-          float d2 = texture2D(uDetail, vWp.xz * 0.011).r;
-          diffuseColor.rgb *= mix(1.0, (0.72 + 0.56 * d1) * (0.8 + 0.4 * d2), uDetailK);
+          float d0 = texture2D(uDetail, vWp.xz * 0.31).r;   // soil crumb
+          float d1 = texture2D(uDetail, vWp.xz * 0.09).r;   // tussocks
+          float d2 = texture2D(uDetail, vWp.xz * 0.011).r;  // field-scale patchiness
+          diffuseColor.rgb *= mix(1.0, (0.84 + 0.3 * d0) * (0.74 + 0.5 * d1) * (0.8 + 0.4 * d2), uDetailK);
+          // steep ground bares mineral soil / till between the grass
+          float bare = smoothstep(0.16, 0.45, vSlope + (d1 - 0.5) * 0.14);
+          diffuseColor.rgb = mix(diffuseColor.rgb,
+            vec3(0.40, 0.345, 0.26) * (0.7 + 0.5 * d0), bare * 0.75 * uDetailK);
         }`
       );
   };
@@ -183,7 +192,13 @@ export function buildTerrain() {
   }
   geo.computeVertexNormals();
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));
-  const mat = detailify(new THREE.MeshLambertMaterial({ vertexColors: true }), 1.0);
+  if (!detailTex) detailTex = makeDetailTex();
+  const bump = detailTex.clone();
+  bump.repeat.set(1400, 1400);
+  bump.needsUpdate = true;
+  const mat = detailify(new THREE.MeshLambertMaterial({
+    vertexColors: true, bumpMap: bump, bumpScale: 0.6,
+  }), 1.0);
   terrainMesh = new THREE.Mesh(geo, mat);
   terrainMesh.receiveShadow = true;
   terrainMesh.name = 'terrain';
@@ -294,8 +309,12 @@ export function paintEra(era) {
       }
     }
 
-    // water margins: mud + sand
-    let wet = dRiv < 9 ? smoothstep(9, 3, dRiv) : 0;
+    // water margins, outside-in: moist lush band -> dark mud -> gravel bar
+    if (dRiv < 26) {
+      const moist = smoothstep(26, 10, dRiv);
+      g += moist * 0.05; r -= moist * 0.03;                     // damp grass greens up
+    }
+    let wet = dRiv < 9 ? smoothstep(9, 3.5, dRiv) : 0;
     const dStr = distToStreams(x, z);
     if (dStr < 5) wet = Math.max(wet, smoothstep(5, 1.5, dStr));
     for (const lake of LAKES) {
@@ -305,6 +324,12 @@ export function paintEra(era) {
     }
     if (wet > 0) {
       r = lerp(r, 0.25, wet); g = lerp(g, 0.22, wet); b = lerp(b, 0.14, wet);
+      // sand & pebble bars right at the waterline (speckled by n2)
+      const bar = dRiv < 4.5 ? smoothstep(4.5, 1.2, dRiv) : 0;
+      if (bar > 0) {
+        const gravel = 0.36 + n2 * 0.14;
+        r = lerp(r, gravel + 0.05, bar); g = lerp(g, gravel, bar); b = lerp(b, gravel * 0.8, bar);
+      }
     }
 
     col.setXYZ(i, c.set(r, g, b).r, c.g, c.b);

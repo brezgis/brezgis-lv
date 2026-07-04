@@ -76,6 +76,8 @@ export class Effects {
         void main(){
           float bands = sin(vUv.x * 26.0 + uT * 0.6) * 0.5 + sin(vUv.x * 61.0 - uT * 0.9) * 0.3;
           float body = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.35, vUv.y);
+          // fade the curtain ends or the plane edges read as hard columns
+          body *= smoothstep(0.0, 0.16, vUv.x) * smoothstep(1.0, 0.84, vUv.x);
           float a = body * (0.55 + bands * 0.45) * uOp;
           vec3 col = mix(vec3(0.25, 1.0, 0.55), vec3(0.55, 0.35, 0.9), vUv.y);
           gl_FragColor = vec4(col, a * 0.55);

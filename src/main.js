@@ -1,6 +1,9 @@
 // Brezgi / Taurene time machine — entry point.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { initTextures } from './textures.js';
 import { buildTerrain, paintEra, heightAt } from './terrain.js';
 import { buildWater } from './water.js';
@@ -19,7 +22,11 @@ import { ERAS } from './content.js';
 const S = LOC.STEAD;
 const $ = (id) => document.getElementById(id);
 
+let bootT0 = 0;
 const progress = (msg) => {
+  const now = performance.now();
+  if (bootT0) console.log(`[boot] +${((now - bootT0) / 1000).toFixed(2)}s — ${msg}`);
+  else bootT0 = now;
   const el = $('loader-status');
   if (el) el.textContent = msg;
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -52,9 +59,22 @@ async function boot() {
   await progress('Raising the sky…');
   const sky = buildSky(scene, renderer);
 
-  await progress('Planting the forests…');
-  const veg = buildVegetation(scene);
+  await progress('Growing the forests — branches, twig atlases, impostors…');
+  const veg = buildVegetation(scene, renderer);
+  await progress('Sowing half a million blades of grass…');
   const grass = buildGrass(scene);
+
+  // post chain: MSAA render target -> subtle bloom -> tone-mapped output
+  const rtSamples = renderer.capabilities.isWebGL2 ? 4 : 0;
+  const composerRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
+    type: THREE.HalfFloatType, samples: rtSamples,
+  });
+  // No bloom: the analytic sky's radiance spans 1-100 and any bloom pass —
+  // pre- or post-tonemap — smears it into a white wash facing the sun.
+  // MSAA + HalfFloat + OutputPass give clean AA and filmic tone mapping.
+  const composer = new EffectComposer(renderer, composerRT);
+  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new OutputPass());
 
   // sky reflections for the water, refreshed occasionally
   const cubeRT = new THREE.WebGLCubeRenderTarget(128);
@@ -106,11 +126,11 @@ async function boot() {
       const fwd = new THREE.Vector3();
       camera.getWorldDirection(fwd);
       controls.target.copy(camera.position).addScaledVector(fwd, 30);
-      hintEl.textContent = 'drag to look · scroll to zoom · keys 1–6 travel in time';
+      hintEl.textContent = 'drag to look · scroll to zoom · WASD/arrows to walk · 1–6 or [ ] travel in time';
     } else if (mode === 'fly') {
-      hintEl.textContent = 'click to capture mouse · WASD fly, E/Q up/down, wheel = speed · V to walk · Esc frees mouse';
+      hintEl.textContent = 'WASD/arrows fly · E/Q up & down · wheel = speed · V to walk · O orbit · [ ] travel in time';
     } else {
-      hintEl.textContent = 'click to capture mouse · WASD walk, Shift sprint, Space jump · V to fly · Esc frees mouse';
+      hintEl.textContent = 'WASD/arrows walk · Shift sprint · Space jump · V to fly · O orbit · [ ] travel in time';
     }
   };
   document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => rig.setMode(b.dataset.mode)));
@@ -232,10 +252,12 @@ async function boot() {
   };
   document.querySelectorAll('.era-btn').forEach((b, i) => b.addEventListener('click', () => switchEra(i)));
   document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => flyTo(b.dataset.view)));
+  // arrows belong to walking now — time travel lives on 1-6 and [ ] , .
   addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     if (e.key >= '1' && e.key <= '6') switchEra(+e.key - 1);
-    if (e.key === 'ArrowRight') switchEra(Math.min(ERAS.length - 1, currentEra + 1));
-    if (e.key === 'ArrowLeft') switchEra(Math.max(0, currentEra - 1));
+    if (e.key === ']' || e.key === '.') switchEra(Math.min(ERAS.length - 1, currentEra + 1));
+    if (e.key === '[' || e.key === ',') switchEra(Math.max(0, currentEra - 1));
   });
   $('sound-btn').addEventListener('click', () => {
     const on = ambience.toggle();
@@ -258,6 +280,7 @@ async function boot() {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight);
   });
 
   // high birds circling the valley
@@ -278,14 +301,39 @@ async function boot() {
   // ------- start -------
   await progress('Herding the aurochs…');
   activateEra(2);                       // begin in the Latgalian age
+  console.log(`[boot] total ${((performance.now() - bootT0) / 1000).toFixed(2)}s`);
   $('loader').classList.add('done');
   setTimeout(() => $('loader').remove(), 900);
 
   const clock = new THREE.Clock();
   const wind = new THREE.Vector2(0.6, 0.25);
+
+  // FPS governor: shed pixel ratio, then grass density — never the trees
+  const gov = { acc: 0, frames: 0, level: 0 };
+  const GOV_STEPS = [
+    { pr: Math.min(devicePixelRatio, 2), grass: 1 },
+    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.7 },
+    { pr: 1.15, grass: 0.45 },
+  ];
+  function govern(dt) {
+    gov.acc += dt; gov.frames++;
+    if (gov.acc < 4) return;
+    const fps = gov.frames / gov.acc;
+    gov.acc = 0; gov.frames = 0;
+    if (fps < 27 && gov.level < GOV_STEPS.length - 1) {
+      gov.level++;
+      const s = GOV_STEPS[gov.level];
+      renderer.setPixelRatio(s.pr);
+      composer.setPixelRatio(s.pr);
+      grass.setBudget(s.grass);
+    }
+  }
+  window.__gov = gov;
+
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
     const t = clock.elapsedTime;
+    govern(dt);
     if (rig.mode !== 'orbit') {
       rig.update(dt);
     } else if (camTween) {
@@ -304,9 +352,10 @@ async function boot() {
 
     const focus = rig.mode === 'orbit' ? controls.target : camera.position;
     sky.update(dt, focus);
+    veg.tick(sky.state.sunColor, sky.state.ambient);
     water.tick(t);
     WIND.time.value = t;
-    grass.update(focus, currentEra);
+    grass.update(focus, currentEra, camera.position);
     envAge += dt;
     if (envAge > 5) {
       envAge = 0;
@@ -327,7 +376,7 @@ async function boot() {
       const h = Math.floor(sky.state.hour), m = Math.floor((sky.state.hour % 1) * 60);
       clockEl.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     }
-    renderer.render(scene, camera);
+    composer.render();
   });
 }
 

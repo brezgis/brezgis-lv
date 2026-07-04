@@ -29,13 +29,47 @@ node data/bake-geodata.mjs     # (optional) re-bake river/lake geometry
 node build.mjs                 # bundle -> artifact/brezgi-taurene.html
 ```
 
-Open `artifact/brezgi-taurene.html` in a browser. Keys 1–4 travel in time;
-drag to look, scroll to zoom.
+Open `artifact/brezgi-taurene.html` in a browser.
+
+**Controls**: drag to look, scroll to zoom. Press **WASD or the arrow keys**
+to start walking (Shift sprints, Space jumps, V toggles flight, O returns to
+orbit). Keys **1–6** or **[ ]** travel in time.
+
+## Graphics pipeline (third edition)
+
+Rendering techniques adapted from LAAS (MIT,
+[Braffolk/fable5-world-demo](https://github.com/Braffolk/fable5-world-demo)),
+re-implemented for WebGL and re-tuned from its Estonian old-growth reference
+to Vidzeme species:
+
+- **Trees** — parametric branching grammar (tropisms, crown envelopes,
+  whorled/spiral phyllotaxis) meshed as parallel-transport bark tubes with
+  root flare; real leaf/needle-spray twig meshes are rendered once at boot
+  into a per-species atlas, then placed as alpha-tested cluster cards at the
+  grammar's foliage anchors. Nine species: spruce, Scots pine, silver birch,
+  pedunculate oak, black alder, small-leaved lime, apple, tundra dwarf
+  shrub, snag. Far trees are whole-tree impostors captured from the same
+  meshes.
+- **Understory** — ferns (pinnate frond cards), mossy deadfall, stumps,
+  glacial erratic boulders, lake-shore reed clumps.
+- **Grass** — three camera-following bands of instanced blade clumps
+  (~70k instances, ~350k blades) with cantilever tip² wind riding the same
+  travelling gust field as the trees; midsummer flowers (meadowsweet,
+  ox-eye daisy, buttercup).
+- **Sky** — analytic dome + Rayleigh/Mie sun transmittance driving the
+  light rig; per-pixel fbm cumulus billboards lit toward the sun; cirrus,
+  dusk stars with a Milky Way band, and a fog-blended moraine horizon ring
+  continuing the upland past the DEM edge.
+- **Terrain** — real DEM with multi-octave albedo detail, micro-relief
+  bump, slope-baring of glacial till, and river margins that read
+  moist-grass → mud → gravel bar.
 
 ## Verification screenshots
 
 ```bash
 node data/shot2.mjs out.png "eraNow=2;view=muiza;time=0.9;wait=900"
+node data/dbg.mjs out.png "era=1;time=0.42;cam=-410,200,-16;tgt=-730,187,715;hide=clouds;probe=1"
+node data/walktest.mjs   # controls regression: arrows must walk
 ```
 
 (Headless Chrome throttles requestAnimationFrame, hence the instant-jump hooks

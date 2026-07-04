@@ -1,3 +1,5 @@
+// Controls test: pressing ArrowUp in orbit mode must auto-enter walk mode
+// and actually move the player forward (the arrow-key alias path).
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new',
@@ -11,20 +13,22 @@ await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
 await page.evaluate(() => {
   window.__sim.era(3);
   window.__sim.jump('pagalms');
-  window.__rig.setMode('walk');
-  window.__rig.yaw = 2.2; window.__rig.pitch = 0.02;
 });
-// simulate holding W for a while: rAF is throttled headless, so step manually via screenshots
-for (let i = 0; i < 10; i++) {
-  await page.evaluate(() => { window.__rig.keys.add('KeyW'); });
-  await page.screenshot({ path: '/dev/null' }).catch(() => {});
-}
-await page.evaluate(() => window.__rig.keys.delete('KeyW'));
-const pose = await page.evaluate(() => {
+const before = await page.evaluate(() => {
   const c = window.__sim.camera.position;
-  return `walk cam(${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)}) grounded=${window.__rig.grounded}`;
+  return { x: c.x, z: c.z, mode: window.__rig.mode };
 });
-console.log(pose);
-await page.screenshot({ path: process.argv[2] });
+// real keyboard event: orbit -> walk via the ArrowUp alias
+await page.keyboard.down('ArrowUp');
+// headless throttles rAF; screenshots force frames
+for (let i = 0; i < 12; i++) await page.screenshot({ path: '/dev/null' }).catch(() => {});
+await page.keyboard.up('ArrowUp');
+const after = await page.evaluate(() => {
+  const c = window.__sim.camera.position;
+  return { x: c.x, z: c.z, mode: window.__rig.mode, grounded: window.__rig.grounded };
+});
+const dist = Math.hypot(after.x - before.x, after.z - before.z);
+console.log(`mode ${before.mode} -> ${after.mode}, moved ${dist.toFixed(2)}m, grounded=${after.grounded}`);
+console.log(after.mode === 'walk' && dist > 0.5 ? 'PASS' : 'FAIL');
+if (process.argv[2]) await page.screenshot({ path: process.argv[2] });
 await browser.close();
-console.log('saved');

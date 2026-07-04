@@ -105,7 +105,7 @@ export class Effects {
     return pts;
   }
 
-  addFire(x, y, z, { intensity = 5, dist = 26 } = {}) {
+  addFire(x, y, z, { intensity = 5, dist = 26, duskOnly = false, scale = 1 } = {}) {
     const light = new THREE.PointLight(0xff7a28, intensity, dist, 1.8);
     light.position.set(x, y + 0.7, z);
     this.group.add(light);
@@ -113,10 +113,10 @@ export class Effects {
       map: this.blob, color: 0xffa030, transparent: true, opacity: 0.85,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    flame.position.set(x, y + 0.55, z);
-    flame.scale.set(0.9, 1.3, 1);
+    flame.position.set(x, y + 0.55 * scale, z);
+    flame.scale.set(0.9 * scale, 1.3 * scale, 1);
     this.group.add(flame);
-    this.fires.push({ light, flame, base: intensity, phase: rng() * 9 });
+    this.fires.push({ light, flame, base: intensity, phase: rng() * 9, duskOnly, scale });
     return light;
   }
 
@@ -151,9 +151,10 @@ export class Effects {
     // fire flicker
     for (const f of this.fires) {
       const n = Math.sin(t * 11 + f.phase) * 0.3 + Math.sin(t * 23 + f.phase * 2) * 0.2;
-      f.light.intensity = f.base * (1 + n * 0.45) * (0.55 + sunLow * 0.8);
-      f.flame.material.opacity = 0.5 + n * 0.2 + sunLow * 0.25;
-      f.flame.scale.set(0.8 + n * 0.15, 1.2 + n * 0.3, 1);
+      const gate = f.duskOnly ? Math.max(0, sunLow - 0.35) * 1.6 : 1; // Jāņi fires wake at dusk
+      f.light.intensity = f.base * (1 + n * 0.45) * (0.55 + sunLow * 0.8) * gate;
+      f.flame.material.opacity = (0.5 + n * 0.2 + sunLow * 0.25) * Math.min(1, gate);
+      f.flame.scale.set((0.8 + n * 0.15) * f.scale, (1.2 + n * 0.3) * f.scale, 1);
     }
     // fireflies: emerge when the sun is low
     const fo = Math.max(0, sunLow - 0.45) * 1.6;

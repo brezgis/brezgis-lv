@@ -89,6 +89,39 @@ export function initTextures() {
     }
   }, { repeat: [3, 2] });
 
+  // birch/spruce bark roof sheets (Āraiši roofing)
+  TEX.bark = canvasTexture(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#6e5c46';
+    ctx.fillRect(0, 0, w, h);
+    // large overlapping bark sheets
+    for (let i = 0; i < 26; i++) {
+      const x = Math.random() * w, y = Math.random() * h;
+      const sw = 40 + Math.random() * 60, sh = 26 + Math.random() * 34;
+      const g = 88 + Math.random() * 46;
+      ctx.fillStyle = `rgb(${g + 18},${g - 2},${(g * 0.68) | 0})`;
+      ctx.fillRect(x - sw / 2, y - sh / 2, sw, sh);
+      ctx.strokeStyle = 'rgba(30,22,12,0.5)';
+      ctx.strokeRect(x - sw / 2, y - sh / 2, sw, sh);
+    }
+    grainStreaks(ctx, w, h, 'rgba(0,0,0,0)', 'rgba(230,220,200,0.35)', 18, true); // birch-bark pale streaks
+  }, { repeat: [2, 2] });
+
+  // two-tone brick (the 1888 neo-Renaissance new manor)
+  TEX.brick = canvasTexture(256, 256, (ctx, w, h) => {
+    const rows = 16, rh = h / rows, bw = 32;
+    for (let r = 0; r < rows; r++) {
+      const band = r % 5 === 0; // lighter decorative band courses
+      for (let c = -1; c < w / bw + 1; c++) {
+        const off = (r % 2) * bw * 0.5;
+        const g = band ? 190 + Math.random() * 20 : 118 + Math.random() * 24;
+        ctx.fillStyle = band
+          ? `rgb(${g},${g - 14},${g - 40})`
+          : `rgb(${g + 30},${(g * 0.52) | 0},${(g * 0.36) | 0})`;
+        ctx.fillRect(c * bw + off + 1, r * rh + 1, bw - 2, rh - 2);
+      }
+    }
+  }, { repeat: [6, 3] });
+
   // wood shingles
   TEX.shingle = canvasTexture(256, 256, (ctx, w, h) => {
     ctx.fillStyle = '#7d6a52';
@@ -164,6 +197,8 @@ export function initTextures() {
   const L = (map, extra = {}) => new THREE.MeshLambertMaterial({ map, ...extra });
   MAT.log = L(TEX.log);
   MAT.logOld = L(TEX.logOld);
+  MAT.bark = L(TEX.bark);
+  MAT.brick = L(TEX.brick);
   MAT.thatch = L(TEX.thatch);
   MAT.thatchOld = L(TEX.thatchOld);
   MAT.shingle = L(TEX.shingle);

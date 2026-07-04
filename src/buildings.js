@@ -104,7 +104,7 @@ export function logCabin({
   walls.position.y = wallH / 2;
   g.add(walls, cornerLogs(w, d, wallH));
 
-  const roofMat = { thatchGable: MAT.thatch, thatchGableOld: MAT.thatchOld, shingleGable: MAT.shingle, tileGable: MAT.tile }[roof] || MAT.thatch;
+  const roofMat = { thatchGable: MAT.thatch, thatchGableOld: MAT.thatchOld, shingleGable: MAT.shingle, tileGable: MAT.tile, barkGable: MAT.bark }[roof] || MAT.thatch;
   if (roof.includes('Hip')) {
     const r = hipRoof(w, d, roofH, roof.includes('thatch') ? (old ? MAT.thatchOld : MAT.thatch) : MAT.shingle);
     r.position.y = wallH;
@@ -114,6 +114,21 @@ export function logCabin({
     const r = gableRoof(w, d, roofH, roofMat);
     r.position.y = wallH;
     g.add(r);
+    if (roof === 'barkGable') {
+      // bark sheets are held down by weight poles laid along the slope (Āraiši)
+      const slope = Math.atan2(roofH, w / 2 + 0.45);
+      for (const s of [-1, 1]) {
+        for (let k = 0; k < 3; k++) {
+          const t = 0.28 + k * 0.26;
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, d + 0.8, 5), MAT.logOld);
+          pole.rotation.x = Math.PI / 2;
+          pole.position.set(s * (w / 2 + 0.45) * t, wallH + roofH * (1 - t) + 0.1, 0);
+          pole.rotation.z = 0;
+          void slope;
+          g.add(pole);
+        }
+      }
+    }
   }
 
   // door
@@ -592,6 +607,158 @@ export function churchSilhouette() {
   spire.position.set(14, 22, 0);
   g.add(nave, naveRoof, tower, spire);
   return g;
+}
+
+// palisade ring for the hillfort refuge (Lejstupu pilskalns)
+export function palisadeRing(cx, cz, radius = 17) {
+  const g = new THREE.Group();
+  const geo = new THREE.CylinderGeometry(0.09, 0.11, 2.4, 5);
+  const N = Math.floor((2 * Math.PI * radius) / 0.28);
+  const mesh = new THREE.InstancedMesh(geo, MAT.logOld, N);
+  mesh.frustumCulled = false;
+  const dummy = new THREE.Object3D();
+  let i = 0;
+  for (let k = 0; k < N; k++) {
+    const a = (k / N) * Math.PI * 2;
+    if (a > 5.6 && a < 5.95) continue;                        // gate gap (NE)
+    const x = cx + Math.cos(a) * radius, z = cz + Math.sin(a) * radius;
+    dummy.position.set(x, heightAt(x, z) + 1.05, z);
+    dummy.rotation.set((rng() - 0.5) * 0.06, 0, (rng() - 0.5) * 0.06);
+    dummy.scale.setScalar(0.9 + rng() * 0.25);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i++, dummy.matrix);
+  }
+  mesh.count = i;
+  mesh.castShadow = true;
+  g.add(mesh);
+  return g;
+}
+
+// the 1888 neo-Renaissance new manor (arch. R. G. Šmēlings), two-tone brick
+export function manorNew({ flag = false } = {}) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(24, 7.4, 11), MAT.brick);
+  body.position.y = 3.7;
+  g.add(body);
+  // central risalit with a low gable
+  const ris = new THREE.Mesh(new THREE.BoxGeometry(7.5, 8.4, 12.6), MAT.brick);
+  ris.position.set(0, 4.2, 0);
+  g.add(ris);
+  const risGable = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape([
+    new THREE.Vector2(-3.75, 0), new THREE.Vector2(3.75, 0), new THREE.Vector2(0, 1.9),
+  ])), MAT.plaster);
+  risGable.position.set(0, 8.4, 6.32);
+  g.add(risGable);
+  const roof = hipRoof(11, 24, 2.6, MAT.tile, 0.6);
+  roof.rotation.y = Math.PI / 2;
+  roof.position.y = 7.4;
+  g.add(roof);
+  const risRoof = gableRoof(12.6, 7.5, 2.2, MAT.tile, 0.3);
+  risRoof.rotation.y = Math.PI / 2;
+  risRoof.position.y = 8.4;
+  g.add(risRoof);
+  for (const dx of [-7, 7]) {
+    const ch = chimney(2.0);
+    ch.position.set(dx, 8.9, 0);
+    g.add(ch);
+  }
+  // two storeys of windows with pale surrounds
+  for (const side of [1, -1]) {
+    for (let fl = 0; fl < 2; fl++) {
+      for (let i = 0; i < 6; i++) {
+        const x = -9.5 + i * 3.8;
+        if (Math.abs(x) < 4 && side > 0) continue;            // risalit face handled below
+        const fr = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.0, 0.12), MAT.plaster);
+        fr.position.set(x, 2.1 + fl * 3.1, side * 5.55);
+        const gl = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.7, 0.08), MAT.glass);
+        gl.position.set(x, 2.1 + fl * 3.1, side * 5.63);
+        g.add(fr, gl);
+      }
+    }
+  }
+  // risalit door + windows
+  const door = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 0.16), MAT.door);
+  door.position.set(0, 1.5, 6.34);
+  const arch = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.5, 0.2), MAT.plaster);
+  arch.position.set(0, 3.2, 6.34);
+  g.add(door, arch);
+  for (const dx of [-2.2, 2.2]) {
+    const fr = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.0, 0.12), MAT.plaster);
+    fr.position.set(dx, 5.6, 6.36);
+    const gl = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.7, 0.08), MAT.glass);
+    gl.position.set(dx, 5.6, 6.42);
+    g.add(fr, gl);
+  }
+  const steps = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 2), MAT.stone);
+  steps.position.set(0, 0.3, 7.4);
+  g.add(steps);
+  if (flag) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 9, 6), MAT.white);
+    pole.position.set(11.5, 4.5, 8);
+    const flagGeo = new THREE.PlaneGeometry(2.4, 1.2, 10, 4);
+    const fl = new THREE.Mesh(flagGeo, MAT.flagRed);
+    fl.position.set(12.75, 8.4, 8);
+    g.add(pole, fl);
+    const base = flagGeo.attributes.position.array.slice();
+    g.userData.tick = (t) => {
+      const p = flagGeo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const x = base[i * 3];
+        p.setZ(i, Math.sin(x * 2.4 + t * 5) * 0.1 * (x + 1.2) * 0.5);
+      }
+      p.needsUpdate = true;
+      flagGeo.computeVertexNormals();
+    };
+  }
+  return shadowize(g);
+}
+
+// the manor ale brewery on the Gauja bank — three vaulted cellars in the slope
+export function brewery() {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(16, 2.2, 7.5), MAT.stone);
+  base.position.y = 1.1;
+  const top = new THREE.Mesh(new THREE.BoxGeometry(16, 2.2, 7.5), MAT.plaster);
+  top.position.y = 3.3;
+  g.add(base, top);
+  const roof = gableRoof(7.5, 16, 2.4, MAT.tile);
+  roof.rotation.y = Math.PI / 2;
+  roof.position.y = 4.4;
+  g.add(roof);
+  const chim = chimney(1.8);
+  chim.position.set(-4, 5.5, 0);
+  g.add(chim);
+  // cellar arches facing the river (local -z)
+  for (const dx of [-5, 0, 5]) {
+    const archGeo = new THREE.CylinderGeometry(1.1, 1.1, 0.7, 12, 1, false, 0, Math.PI);
+    const arch = new THREE.Mesh(archGeo, MAT.stone);
+    arch.rotation.set(0, 0, Math.PI / 2);
+    arch.rotation.x = Math.PI / 2;
+    arch.position.set(dx, 1.0, -3.9);
+    const mouth = new THREE.Mesh(new THREE.CircleGeometry(0.95, 12, 0, Math.PI), new THREE.MeshBasicMaterial({ color: 0x120d08 }));
+    mouth.position.set(dx, 1.0, -3.86);
+    g.add(arch, mouth);
+  }
+  return shadowize(g);
+}
+
+// unlit Jāņi bonfire pyre (lit by the era manager at dusk)
+export function pyre() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2;
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.6, 5), MAT.lightWood);
+    log.position.set(Math.cos(a) * 0.55, 1.1, Math.sin(a) * 0.55);
+    log.rotation.set(Math.sin(a) * 0.42, 0, -Math.cos(a) * 0.42);
+    g.add(log);
+  }
+  // the tar-barrel pole beside it
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 4.4, 5), MAT.logOld);
+  pole.position.set(1.6, 2.2, 0);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.5, 9), MAT.darkWood);
+  barrel.position.set(1.6, 4.5, 0);
+  g.add(pole, barrel);
+  return shadowize(g);
 }
 
 // stone/wooden grave markers on the barrows

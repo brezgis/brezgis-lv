@@ -68,6 +68,7 @@ export const LOC = {
   STONE: { x: rvx + 245, z: -25 },           // 1935 poem stone by the road
   CHURCH: { x: -1450, z: -2050 },            // distant church silhouette NW (Dzērbene direction)
   LAKE_VIEW: { x: 1500, z: -350 },           // Taurenes ezers overlook
+  HILLFORT: { x: -1080, z: 820 },            // Lejstupu (Briediņu) pilskalns, west of Dabaru ezers
   HILL: { x: -1500, z: -900 },               // the high hills west of the river
 };
 
@@ -77,17 +78,19 @@ export const PADS = [
   { x: LOC.MANOR.x, z: LOC.MANOR.z, r: 62 },
   { x: LOC.CAMP.x, z: LOC.CAMP.z, r: 18 },
   { x: LOC.OAK.x, z: LOC.OAK.z, r: 12 },
+  { x: LOC.HILLFORT.x, z: LOC.HILLFORT.z, r: 22 },
 ];
-// Terrain bumps to add (burial barrows — they persist as landscape from era 1 on)
+// Terrain bumps to add (burial barrows: hemispherical, 4-7 m across per
+// Latgalian practice — they persist as landscape once raised)
 export const BUMPS = [];
 {
   const r = makeNoise(99).rng;
   for (let i = 0; i < 7; i++) {
     BUMPS.push({
-      x: LOC.BARROWS.x + (r() - 0.5) * 90,
-      z: LOC.BARROWS.z + (r() - 0.5) * 70,
-      r: 5.5 + r() * 3,
-      h: 0.9 + r() * 0.7,
+      x: LOC.BARROWS.x + (r() - 0.5) * 70,
+      z: LOC.BARROWS.z + (r() - 0.5) * 55,
+      r: 2.1 + r() * 1.4,
+      h: 0.75 + r() * 0.45,
     });
   }
 }

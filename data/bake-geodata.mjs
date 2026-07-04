@@ -108,6 +108,43 @@ for (const e of osm) {
   console.log(`lake "${e.name}" level ${level.toFixed(1)}m, ${poly.length} pts, centroid (${cx.toFixed(0)}, ${cz.toFixed(0)})`);
 }
 
+// ---- Dabaru ezers ------------------------------------------------------------
+// The Gauja flows through Dabaru ezers just SW of the village (17.8 ha, surface
+// ~185.4 m; Taurene sits on its eastern bank). It is absent from the OSM pull,
+// so derive its outline from the DEM: bounded flood fill of the flat valley
+// floor around its true coordinates (57.1517 N 25.6525 E -> scene ~(-737, 862)).
+{
+  const SEED = [-737, 862], LEVEL = 185.45;
+  const inb = (x, z) => Math.abs(x - SEED[0]) < 320 && Math.abs(z - SEED[1]) < 330;
+  const seen = new Set();
+  const cells = [];
+  const stack = [SEED];
+  while (stack.length) {
+    const [x, z] = stack.pop();
+    const key = `${Math.round(x / CELL)},${Math.round(z / CELL)}`;
+    if (seen.has(key) || !inb(x, z) || elevAt(x, z) > LEVEL + 0.35) continue;
+    seen.add(key);
+    cells.push([x, z]);
+    stack.push([x + CELL, z], [x - CELL, z], [x, z + CELL], [x, z - CELL]);
+  }
+  // convex-ish outline: sort boundary cells by angle around the centroid
+  const cx = cells.reduce((s, c) => s + c[0], 0) / cells.length;
+  const cz = cells.reduce((s, c) => s + c[1], 0) / cells.length;
+  const byAngle = cells
+    .map(([x, z]) => ({ a: Math.atan2(z - cz, x - cx), r: Math.hypot(x - cx, z - cz), x, z }))
+    .sort((p, q) => p.a - q.a);
+  const poly = [];
+  const BINS = 26;
+  for (let b = 0; b < BINS; b++) {
+    const lo = -Math.PI + (b / BINS) * 2 * Math.PI, hi = lo + (2 * Math.PI) / BINS;
+    let best = null;
+    for (const p of byAngle) if (p.a >= lo && p.a < hi && (!best || p.r > best.r)) best = p;
+    if (best) poly.push([Math.round(best.x), Math.round(best.z)]);
+  }
+  LAKES.push({ name: 'Dabaru ezers', level: LEVEL - 0.55, poly });
+  console.log(`lake "Dabaru ezers" (DEM-derived) ${cells.length} cells, ${poly.length}-pt outline, centroid (${cx.toFixed(0)}, ${cz.toFixed(0)})`);
+}
+
 writeFileSync(new URL('../src/geodata.js', import.meta.url), `// Baked from OpenStreetMap water geometry + the real Taurene DEM
 // (see data/bake-geodata.mjs). Scene meters, y = m ASL. River pts ordered downstream.
 export const RIVER_PTS = ${JSON.stringify(RIVER_PTS)};

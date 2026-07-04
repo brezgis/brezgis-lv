@@ -107,7 +107,7 @@ async function boot() {
     applySpawns(animals, built.spawns);
     effects.clearDynamic();
     for (const [x, y, z, o] of built.smokes) effects.addSmoke(x, y, z, o);
-    for (const [x, y, z] of built.fires) effects.addFire(x, y, z);
+    for (const [x, y, z, o] of built.fires) effects.addFire(x, y, z, o);
     water.pond.visible = era >= 2;
     ambience.setScene(era, sky.state.sunLow, built.fires.length > 0);
     // HUD
@@ -161,8 +161,10 @@ async function boot() {
     seta: () => [[S.x + 68, yAt(S.x + 68, S.z + 88, 24), S.z + 88], [S.x, steadY() + 4, S.z]],
     pagalms: () => [[S.x + 26, steadY() + 4.5, S.z + 24], [S.x - 6, steadY() + 2.5, S.z - 8]],
     upe: () => {
-      const a = riverPtNear(S.z + 300), b = riverPtNear(S.z - 80);
-      return [[a[0], a[2] + 13, a[1]], [b[0], b[2] + 1.5, b[1]]];
+      // over the water, looking downstream-to-upstream: Dabaru ezers and the
+      // old fort hill rise to the south
+      const a = riverPtNear(S.z - 70), b = riverPtNear(S.z + 560);
+      return [[a[0], a[2] + 14, a[1]], [b[0], b[2] + 2, b[1]]];
     },
     muiza: () => [[LOC.MANOR.x + 55, yAt(LOC.MANOR.x + 55, LOC.MANOR.z + 110, 16), LOC.MANOR.z + 110], [LOC.MANOR.x, yAt(LOC.MANOR.x, LOC.MANOR.z, 5), LOC.MANOR.z]],
     ezers: () => [[LOC.LAKE_VIEW.x - 600, yAt(LOC.LAKE_VIEW.x - 600, LOC.LAKE_VIEW.z + 200, 70), LOC.LAKE_VIEW.z + 200], [LOC.LAKE_VIEW.x + 200, LAKES[0] ? LAKES[0].level : 180, LOC.LAKE_VIEW.z]],

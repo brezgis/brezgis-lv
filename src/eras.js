@@ -6,9 +6,10 @@
 import * as THREE from 'three';
 import {
   logCabin, postGranary, rija, wellSweep, rikuFence, wattleFence, manorHouse,
-  manorOutbuilding, watermill, bridge, campfire, haystack, woodpile, choppingBlock,
-  dugoutCanoe, rowboat, cart, beehiveLog, laundryLine, poemStone, storkNestPole,
-  churchSilhouette, barrowStones, placeOnGround,
+  manorNew, manorOutbuilding, watermill, brewery, bridge, campfire, haystack,
+  woodpile, choppingBlock, dugoutCanoe, rowboat, cart, beehiveLog, laundryLine,
+  poemStone, storkNestPole, churchSilhouette, barrowStones, palisadeRing, pyre,
+  placeOnGround,
 } from './buildings.js';
 import { MAT } from './textures.js';
 import { heightAt } from './terrain.js';
@@ -134,13 +135,16 @@ export function buildEra(era, ctx) {
   }
 
   if (era === 1) {
-    // Latgalian farmstead — dimensions after the Āraiši dwellings
-    const dw = add(logCabin({ w: 5, d: 6, wallH: 2.0, roofH: 2.6, roof: 'thatchGable', doorEnd: true }), S.x - 5, S.z - 9, 0.15);
+    // Latgalian farmstead — dimensions and bark-sheet roofs after the Āraiši dwellings
+    const dw = add(logCabin({ w: 5, d: 6, wallH: 2.0, roofH: 2.2, roof: 'barkGable', doorEnd: true }), S.x - 5, S.z - 9, 0.15);
     void dw;
-    smokes.push([S.x - 5, heightAt(S.x - 5, S.z - 9) + 4.4, S.z - 6.6, { rate: 0.65, gray: 0.74 }]); // smoke seeps at the gable
-    add(logCabin({ w: 4, d: 5, wallH: 1.8, roofH: 2.2, roof: 'thatchGableOld', old: true }), S.x + 10, S.z + 6, 1.62);
+    smokes.push([S.x - 5, heightAt(S.x - 5, S.z - 9) + 4.0, S.z - 6.6, { rate: 0.65, gray: 0.74 }]); // smoke seeps at the gable
+    add(logCabin({ w: 4, d: 5, wallH: 1.8, roofH: 1.9, roof: 'barkGable', old: true }), S.x + 10, S.z + 6, 1.62);
     add(postGranary(), S.x + 2, S.z + 13, -0.1);
     add(logCabin({ w: 4.5, d: 7, wallH: 1.6, roofH: 2.0, roof: 'thatchGableOld', old: true }), S.x - 14, S.z + 7, 1.55); // byre
+    // the refuge fort on the hill west of Dabaru ezers (Lejstupu pilskalns)
+    addRaw(palisadeRing(LOC.HILLFORT.x, LOC.HILLFORT.z, 17));
+    add(logCabin({ w: 3.6, d: 4.4, wallH: 1.7, roofH: 1.8, roof: 'barkGable', old: true }), LOC.HILLFORT.x + 4, LOC.HILLFORT.z - 3, 0.7);
     // outdoor cooking hearth
     add(campfire(), S.x + 1.5, S.z - 1);
     fires.push([S.x + 1.5, heightAt(S.x + 1.5, S.z - 1) + 0.15, S.z - 1]);
@@ -203,11 +207,22 @@ export function buildEra(era, ctx) {
     nb.position.y = BRIDGE2.level + 0.2;
     add(storkNestPole(), S.x + 30, S.z + 22);
 
-    // ----- the manor / the school -----
-    const mh = add(manorHouse({ flag: modern }), Mn.x, Mn.z, 0.35);
+    // ----- the manor -----
+    // 1860: the old 18th-c. classicist house. 1935: the 1888 neo-Renaissance
+    // brick "new manor" (arch. R. G. Šmēlings), by then the parish's civic heart.
+    const mh = add(modern ? manorNew({ flag: true }) : manorHouse({ flag: false }), Mn.x, Mn.z, 0.35);
     if (mh.userData.tick) ticks.push(mh.userData.tick);
+    if (modern) {
+      // the old house still stands nearer the river bank
+      add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
+    }
     add(manorOutbuilding(22), Mn.x - 46, Mn.z - 26, 0.35 + Math.PI / 2);
     add(manorOutbuilding(16), Mn.x + 44, Mn.z - 22, 0.2);
+    // the ale brewery on the Gauja bank, cellars vaulted into the slope
+    add(brewery(), P.x + 58, P.z + 48, Math.PI * 0.72);
+    // Jāņi bonfire pyre on the old fort hill — lit when the sun sinks
+    add(pyre(), LOC.HILLFORT.x, LOC.HILLFORT.z, 0.4);
+    fires.push([LOC.HILLFORT.x, heightAt(LOC.HILLFORT.x, LOC.HILLFORT.z) + 0.8, LOC.HILLFORT.z, { intensity: 26, dist: 130, duskOnly: true, scale: 3.2 }]);
     smokes.push([Mn.x - 8, heightAt(Mn.x, Mn.z) + 9.6, Mn.z, { rate: 0.4, gray: 0.88 }]);
     // watermill + pond dam (the pond floods the Gauja bend below the manor)
     const mill = add(watermill(ctx.water.pondLevel), P.x + 30, P.z + 16, Math.PI * 0.75);

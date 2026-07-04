@@ -194,10 +194,11 @@ export function buildTerrain() {
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));
   if (!detailTex) detailTex = makeDetailTex();
   const bump = detailTex.clone();
-  bump.repeat.set(1400, 1400);
+  // 12m tiles at moderate strength: finer/stronger shimmers at distance
+  bump.repeat.set(700, 700);
   bump.needsUpdate = true;
   const mat = detailify(new THREE.MeshLambertMaterial({
-    vertexColors: true, bumpMap: bump, bumpScale: 0.6,
+    vertexColors: true, bumpMap: bump, bumpScale: 0.35,
   }), 1.0);
   terrainMesh = new THREE.Mesh(geo, mat);
   terrainMesh.receiveShadow = true;

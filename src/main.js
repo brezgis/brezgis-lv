@@ -35,10 +35,16 @@ const progress = (msg) => {
 async function boot() {
   const canvas = $('scene');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // 1.75 cap: with 4x MSAA in the composer, full hi-DPI supersampling is
+  // wasted fill — this keeps text-sharpness without doubling the pixel bill
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // the sun crawls (4-min day): re-rendering the 7M-tri shadow pass every
+  // frame is the single biggest waste — refresh it on a cadence instead
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -73,6 +79,10 @@ async function boot() {
   // pre- or post-tonemap — smears it into a white wash facing the sun.
   // MSAA + HalfFloat + OutputPass give clean AA and filmic tone mapping.
   const composer = new EffectComposer(renderer, composerRT);
+  // size the composer's targets by pixel ratio — without this the frame is
+  // rendered at CSS resolution and upscaled, which reads as grainy on hi-DPI
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(innerWidth, innerHeight);
   composer.addPass(new RenderPass(scene, camera));
   composer.addPass(new OutputPass());
 
@@ -308,24 +318,35 @@ async function boot() {
   const clock = new THREE.Clock();
   const wind = new THREE.Vector2(0.6, 0.25);
 
-  // FPS governor: shed pixel ratio, then grass density — never the trees
-  const gov = { acc: 0, frames: 0, level: 0 };
+  // FPS governor: shed pixel ratio, shadow rate/size, then grass density —
+  // never the trees. Kicks in early (below ~34fps) so it never feels laggy
+  // for long.
+  const gov = { acc: 0, frames: 0, level: 0, shadowEvery: 3, shadowTick: 0 };
   const GOV_STEPS = [
-    { pr: Math.min(devicePixelRatio, 2), grass: 1 },
-    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.7 },
-    { pr: 1.15, grass: 0.45 },
+    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 3, shadowMap: 4096 },
+    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 4, shadowMap: 4096 },
+    { pr: 1.25, grass: 0.65, shadowEvery: 5, shadowMap: 2048 },
+    { pr: 1.0, grass: 0.45, shadowEvery: 6, shadowMap: 2048 },
   ];
+  function applyGov(s) {
+    renderer.setPixelRatio(s.pr);
+    composer.setPixelRatio(s.pr);
+    composer.setSize(innerWidth, innerHeight);
+    grass.setBudget(s.grass);
+    gov.shadowEvery = s.shadowEvery;
+    if (sky.sun.shadow.mapSize.x !== s.shadowMap) {
+      sky.sun.shadow.mapSize.set(s.shadowMap, s.shadowMap);
+      if (sky.sun.shadow.map) { sky.sun.shadow.map.dispose(); sky.sun.shadow.map = null; }
+    }
+  }
   function govern(dt) {
     gov.acc += dt; gov.frames++;
-    if (gov.acc < 4) return;
+    if (gov.acc < 3) return;
     const fps = gov.frames / gov.acc;
     gov.acc = 0; gov.frames = 0;
-    if (fps < 27 && gov.level < GOV_STEPS.length - 1) {
+    if (fps < 34 && gov.level < GOV_STEPS.length - 1) {
       gov.level++;
-      const s = GOV_STEPS[gov.level];
-      renderer.setPixelRatio(s.pr);
-      composer.setPixelRatio(s.pr);
-      grass.setBudget(s.grass);
+      applyGov(GOV_STEPS[gov.level]);
     }
   }
   window.__gov = gov;
@@ -352,6 +373,12 @@ async function boot() {
 
     const focus = rig.mode === 'orbit' ? controls.target : camera.position;
     sky.update(dt, focus);
+    // shadow cadence: the pass costs as much as the main render — 20Hz is
+    // visually identical for a slow-moving sun
+    if (++gov.shadowTick >= gov.shadowEvery) {
+      gov.shadowTick = 0;
+      renderer.shadowMap.needsUpdate = true;
+    }
     veg.tick(sky.state.sunColor, sky.state.ambient);
     water.tick(t);
     WIND.time.value = t;

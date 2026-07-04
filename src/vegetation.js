@@ -173,8 +173,11 @@ function barkMaterial(tex) {
   return windifyVeg(new THREE.MeshLambertMaterial({ map: tex, vertexColors: true }));
 }
 function cardMaterial(atlas) {
+  // alpha-to-coverage rides the composer's 4x MSAA: soft dithered leaf edges
+  // instead of the hard alpha-test fizz that reads as grit in the mips
   const m = new THREE.MeshLambertMaterial({
-    map: atlas, vertexColors: true, alphaTest: 0.38, side: THREE.DoubleSide,
+    map: atlas, vertexColors: true, alphaTest: 0.15, alphaToCoverage: true,
+    side: THREE.DoubleSide,
   });
   windifyVeg(m);
   const prev = m.onBeforeCompile;
@@ -254,7 +257,8 @@ export function buildVegetation(scene, renderer) {
   // ---- far-tier impostors ---------------------------------------------------
   const impostor = captureImpostorAtlas(renderer, impostorEntries);
   const impostorMat = new THREE.MeshBasicMaterial({
-    map: impostor.texture, alphaTest: 0.3, side: THREE.DoubleSide, fog: true,
+    map: impostor.texture, alphaTest: 0.15, alphaToCoverage: true,
+    side: THREE.DoubleSide, fog: true,
   });
   const farMeshes = {};
   impostorEntries.forEach((e, i) => {

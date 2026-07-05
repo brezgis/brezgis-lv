@@ -49,7 +49,9 @@ function cellToWorld(gx, gy) {
     const SAMP = Math.min(1700, RIVER_PTS.length * 4);
     for (let i = 0; i <= SAMP; i++) {
       const [x, z, y] = sampleSpline(RIVER_PTS, i / SAMP);
-      stamp(x, z, 27, 12, y - 1.7);
+      // bed fully below the surface out to 13.5m — past the ribbon's
+      // widest reach — so the flat water plane always meets rising ground
+      stamp(x, z, 30, 13.5, y - 2.0);
     }
   }
   for (const s of STREAMS) {
@@ -374,7 +376,7 @@ export function paintEra(era) {
     if (wet > 0) {
       r = lerp(r, 0.25, wet); g = lerp(g, 0.22, wet); b = lerp(b, 0.14, wet);
       // sand & pebble bars right at the waterline (speckled by n2)
-      const bar = dRiv < 4.5 ? smoothstep(4.5, 1.2, dRiv) : 0;
+      const bar = dRiv < 6.5 ? smoothstep(6.5, 1.5, dRiv) : 0;
       if (bar > 0) {
         const gravel = 0.36 + n2 * 0.14;
         r = lerp(r, gravel + 0.05, bar); g = lerp(g, gravel, bar); b = lerp(b, gravel * 0.8, bar);

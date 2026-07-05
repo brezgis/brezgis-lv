@@ -21,11 +21,15 @@ function cellSeed(ix, iz, salt) {
 }
 
 // bands: cell size (m), expected instances per cell, regen threshold, widen
+// VERY dense: ~110 blades/m² in the walking circle (carpet + tall clumps
+// overlaid), and the dense rings reach ~50m so growth never materialises
+// right in front of the walker. cellRules bands evaluate the exclusion
+// rules once per cell so the walk-regen stays hitch-free.
 const BANDS = [
-  { key: 'carpet', r0: 0, r1: 36, cell: 1.6, perCell: 15.4, thresh: 12, wide: 0.8, carpet: true, hiOff: true },
-  { key: 'near', r0: 0, r1: 32, cell: 1.6, perCell: 12.8, thresh: 10, wide: 1.05, hiOff: true },
-  { key: 'mid', r0: 27, r1: 100, cell: 3.2, perCell: 13.3, thresh: 34, wide: 1.75 },
-  { key: 'far', r0: 90, r1: 430, cell: 8, perCell: 6.4, thresh: 120, wide: 2.7 },
+  { key: 'carpet', r0: 0, r1: 55, cell: 1.3, perCell: 14, thresh: 16, wide: 0.8, carpet: true, hiOff: true, cellRules: true },
+  { key: 'near', r0: 0, r1: 48, cell: 1.3, perCell: 11.5, thresh: 14, wide: 1.05, hiOff: true, cellRules: true },
+  { key: 'mid', r0: 40, r1: 110, cell: 2.6, perCell: 11.5, thresh: 36, wide: 1.75 },
+  { key: 'far', r0: 100, r1: 430, cell: 8, perCell: 8, thresh: 120, wide: 2.7 },
 ];
 
 function bladeGeometry(segs) {
@@ -272,7 +276,7 @@ export function buildGrass(scene) {
   }
 
   function regenerate(band, cx, cz, era) {
-    const { mesh, cell, carpet, wide } = band;
+    const { mesh, cell, carpet, wide, cellRules } = band;
     const r0 = band.r0Dyn !== undefined ? band.r0Dyn : band.r0;
     const r1 = band.r1;
     const perCell = band.perCell * band.budget;
@@ -296,6 +300,34 @@ export function buildGrass(scene) {
       if (i >= cap) break;
       const rng = mulberry32(cellSeed(ix, iz, salt));
       const n = (perCell | 0) + (rng() < perCell % 1 ? 1 : 0);
+      // dense bands: rules once per 1.3m cell — blades that close together
+      // share their fate, and per-blade rule checks made walk-regen hitch
+      let cellOK = true, cFa = null, cTrodden = false, cDRiv = 0, cY = 0;
+      if (cellRules) {
+        const ccx = (ix + 0.5) * cell, ccz = (iz + 0.5) * cell;
+        cY = heightAt(ccx, ccz);
+        cDRiv = distToRiver(ccx, ccz);
+        if (cDRiv < 15 || (cDRiv < 20 && cY < riverLevelNear(ccx, ccz) + 0.6)) cellOK = false;
+        if (cellOK) {
+          for (const lake of LAKES) {
+            if (cY < lake.level + 0.5 && pointInPoly(ccx, ccz, lake.poly)) { cellOK = false; break; }
+          }
+        }
+        let cFd = 0;
+        if (cellOK) {
+          cFd = forestDensity(era, ccx, ccz, cY);
+          if (era >= 2 && distToRoad(era, ccx, ccz) < 1.2) cellOK = false;
+        }
+        if (cellOK) {
+          for (const p of PADS) {
+            if (era === 1 && p !== PADS[2]) continue;
+            if (Math.hypot(ccx - p.x, ccz - p.z) < p.r * 0.8) { cTrodden = true; break; }
+          }
+          cFa = era >= 2 ? fieldAt(era, ccx, ccz) : null;
+        }
+        if (!cellOK) continue;
+        band._cFd = cFd;
+      }
       for (let k = 0; k < n && i < cap; k++) {
         // every draw below comes from the CELL stream — consume in fixed
         // order so a blade's look never depends on its neighbours' fate
@@ -307,30 +339,37 @@ export function buildGrass(scene) {
         // feathered rims: this band ramps up where the denser one ramps down
         if (r0 > 0 && gate > 0.3 + smoothstepJ(r0 * 0.8, r0 * 1.15, r) * 0.7) continue;
         if (gate < smoothstepJ(r1 * 0.82, r1, r) * 0.9) continue;
-        const y = heightAt(x, z);
-        // the channel is up to ~12m half-width plus bank overshoot: never
-        // let blades stand in open water
-        const dRiv = distToRiver(x, z);
-        if (dRiv < 13) continue;                 // ribbon reaches ~12.6m half-width
-        if (dRiv < 18 && y < riverLevelNear(x, z) + 0.6) continue;
-        let inLake = false;
-        for (const lake of LAKES) {
-          if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
+        let y, dRiv, fd, trodden, fa;
+        if (cellRules) {
+          y = heightAt(x, z);
+          dRiv = cDRiv;
+          fd = band._cFd;
+          trodden = cTrodden;
+          fa = cFa;
+        } else {
+          y = heightAt(x, z);
+          dRiv = distToRiver(x, z);
+          if (dRiv < 15) continue;               // ribbon reaches ~12.6m half-width
+          if (dRiv < 20 && y < riverLevelNear(x, z) + 0.6) continue;
+          let inLake = false;
+          for (const lake of LAKES) {
+            if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
+          }
+          if (inLake) continue;
+          fd = forestDensity(era, x, z, y);
+          if (era >= 2 && distToRoad(era, x, z) < 1.2) continue;
+          trodden = false;
+          for (const p of PADS) {
+            if (era === 1 && p !== PADS[2]) continue;
+            if (Math.hypot(x - p.x, z - p.z) < p.r * 0.8) { trodden = true; break; }
+          }
+          fa = era >= 2 ? fieldAt(era, x, z) : null;
         }
-        if (inLake) continue;
-        const fd = forestDensity(era, x, z, y);
         // the carpet creeps into the forest as a thin moss-grass floor
         if (fd > 0.62 && (!carpet || cJ1 < 0.5)) continue;
         if (!carpet && fd > 0.35 && cJ1 < 0.6) continue;
-        if (era >= 2 && distToRoad(era, x, z) < 1.2) continue;
-        let trodden = false;
-        for (const p of PADS) {
-          if (era === 1 && p !== PADS[2]) continue;
-          if (Math.hypot(x - p.x, z - p.z) < p.r * 0.8) { trodden = true; break; }
-        }
         // yards: tall clumps die, the short carpet merely thins
         if (trodden && cJ2 < (carpet ? 0.6 : 0.93)) continue;
-        const fa = era >= 2 ? fieldAt(era, x, z) : null;
         dummy.position.set(x, y - 0.02, z);
         dummy.rotation.set(0, rot, 0);
         const tall = carpet

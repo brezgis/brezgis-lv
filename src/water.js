@@ -55,13 +55,14 @@ function makeWaterMaterial(color, opacity) {
 }
 
 // Water ribbon, LAAS-shore rules: high tessellation so bends are CURVES
-// (the old 63m segments read as rectangles), and a shallow-V cross-section —
-// the edge verts sit ~0.7m below the centreline so the surface always tucks
-// UNDER the rising bank instead of floating over hollows in the 30m DEM.
-function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 2.0) {
+// (the old 63m segments read as rectangles), and a FLAT surface — the
+// shoreline comes from the carved bank rising through the plane.
+function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 0.35) {
   const SEG = Math.min(1400, pts.length * 4);
-  // edge verts must sink BELOW the carved bed (1.7m) or the surface still
-  // hovers over hollows near steep banks
+  // LAAS shore rule: the water surface is FLAT (a sloped surface reads as a
+  // convex hump from the bank) — only a slight edge tuck hides the seam.
+  // The shoreline itself comes from the bank rising THROUGH the plane, so
+  // the spline-following channel carve must clear the full ribbon width.
   const EDGE_DROP = edgeDrop;
   const positions = [], uvs = [], indices = [];
   for (let i = 0; i <= SEG; i++) {
@@ -124,7 +125,7 @@ export function buildWater() {
   const streamMat = makeWaterMaterial(0x314f58, 0.92);
   mats.push(streamMat);
   for (const s of STREAMS) {
-    const st = ribbon(s.pts, () => 2.1, streamMat, 90, 1.2);
+    const st = ribbon(s.pts, () => 2.1, streamMat, 90, 0.3);
     st.name = s.name || 'stream';
     group.add(st);
   }

@@ -9,10 +9,10 @@
 //       4 = 1935     (Taurene, independent Latvia)
 //       5 = 2025     (today — terrain draped in Sentinel-2 imagery)
 import { RIVER_PTS, STREAMS, BREZGA } from './geodata.js';
-import { ROADS_OSM } from './geodata-osm.js';
+import { ROADS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
-import { makeNoise, clamp, smoothstep, distToPolyline } from './util.js';
+import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, sampleSpline } from './util.js';
 
 const noise = makeNoise(4217);
 
@@ -42,6 +42,36 @@ const wdStream = new Float32Array(WD_N * WD_N).fill(1e9);
   for (let i = 0; i < WD_N * WD_N; i++) {
     wdRiver[i] = Math.sqrt(wdRiver[i]);
     wdStream[i] = Math.sqrt(wdStream[i]);
+  }
+  // refine near the channels with the SMOOTHED course the water ribbon
+  // actually follows — the raw 43m points overestimate by up to ~20m
+  // mid-span and miss the spline bulges on bends entirely (grass stood in
+  // the river on exactly those bends)
+  const sx0 = HM_OFF_X - HM_SPAN / 2, sz0 = HM_OFF_Z - HM_SPAN / 2;
+  const splat = (samples, arr, levelToo) => {
+    const W = 8; // 240m accuracy window; the coarse field covers beyond
+    for (const p of samples) {
+      const cgx = Math.round((p[0] - sx0) / WD_RES), cgz = Math.round((p[1] - sz0) / WD_RES);
+      for (let dz = -W; dz <= W; dz++) {
+        for (let dx = -W; dx <= W; dx++) {
+          const gx = cgx + dx, gz = cgz + dz;
+          if (gx < 0 || gz < 0 || gx >= WD_N || gz >= WD_N) continue;
+          const d = Math.hypot(sx0 + gx * WD_RES - p[0], sz0 + gz * WD_RES - p[1]);
+          const i = gz * WD_N + gx;
+          if (d < arr[i]) { arr[i] = d; if (levelToo) wdLevel[i] = p[2]; }
+        }
+      }
+    }
+  };
+  const NR = Math.min(2200, RIVER_PTS.length * 5);
+  const fineR = [];
+  for (let i = 0; i <= NR; i++) fineR.push(sampleSpline(RIVER_PTS, i / NR));
+  splat(fineR, wdRiver, true);
+  for (const st of STREAMS) {
+    const NS = st.pts.length * 5;
+    const fineS = [];
+    for (let i = 0; i <= NS; i++) fineS.push(sampleSpline(st.pts, i / NS));
+    splat(fineS, wdStream, false);
   }
 }
 function wdSample(arr, x, z) {
@@ -180,7 +210,54 @@ export function roadsForEra(era) {
 }
 
 // --- Fields per era: soft-edged ellipses {cx,cz,rx,rz,rot,type}
+// every farm feeds itself: 1-2 small fields per background viensēta,
+// deterministic per site, era 3/4 only (2025 satellite carries its own)
+function bgFieldsFor(era) {
+  const out = [];
+  const TYPES = ['rye', 'barley', 'flax', 'potato', 'clover', 'fallow'];
+  DWELLINGS_OSM.forEach(([x, z], si) => {
+    if (!farmSiteKept(si, era)) return;
+    const r = mulberry32(si * 449 + era * 61);
+    const n = 1 + (r() < 0.6 ? 1 : 0);
+    for (let k = 0; k < n; k++) {
+      const a = r() * 6.28, dist = 60 + r() * 60;
+      out.push({
+        cx: x + Math.cos(a) * dist, cz: z + Math.sin(a) * dist,
+        rx: 42 + r() * 42, rz: 28 + r() * 26, rot: r() * 3.1,
+        type: TYPES[(r() * 6) | 0],
+      });
+    }
+  });
+  return out;
+}
+
+const fieldsCache = new Map();
+const FIELD_CELL = 128;
+function fieldsIndexed(era) {
+  let f = fieldsCache.get(era);
+  if (f) return f;
+  const fields = rawFieldsForEra(era).concat(era === 3 || era === 4 ? bgFieldsFor(era) : []);
+  const map = new Map();
+  fields.forEach((fl, i) => {
+    const R = Math.max(fl.rx, fl.rz);
+    for (let ix = Math.floor((fl.cx - R) / FIELD_CELL); ix <= Math.floor((fl.cx + R) / FIELD_CELL); ix++) {
+      for (let iz = Math.floor((fl.cz - R) / FIELD_CELL); iz <= Math.floor((fl.cz + R) / FIELD_CELL); iz++) {
+        const k = ix + ':' + iz;
+        let arr = map.get(k);
+        if (!arr) map.set(k, arr = []);
+        arr.push(i);
+      }
+    }
+  });
+  f = { fields, map };
+  fieldsCache.set(era, f);
+  return f;
+}
 export function fieldsForEra(era) {
+  return fieldsIndexed(era).fields;
+}
+
+function rawFieldsForEra(era) {
   if (era <= 1 || era === 5) return [];
   if (era === 2) return [
     { cx: S.x + 95, cz: S.z - 55, rx: 55, rz: 38, rot: 0.4, type: 'barley' },
@@ -207,7 +284,11 @@ export function fieldsForEra(era) {
   ];
 }
 export function fieldAt(era, x, z) {
-  for (const f of fieldsForEra(era)) {
+  const { fields, map } = fieldsIndexed(era);
+  const arr = map.get(Math.floor(x / FIELD_CELL) + ':' + Math.floor(z / FIELD_CELL));
+  if (!arr) return null;
+  for (const i of arr) {
+    const f = fields[i];
     const dx = x - f.cx, dz = z - f.cz;
     const c = Math.cos(-f.rot), s = Math.sin(-f.rot);
     const u = (dx * c - dz * s) / f.rx, v = (dx * s + dz * c) / f.rz;
@@ -269,6 +350,13 @@ function roadGridFor(era) {
 
 // distance (minus road half-width) and road class of the nearest road.
 // Only exact within ~ROAD_CELL — every caller thresholds far below that.
+// which OSM farmstead sites exist in a given era — shared by the buildings
+// (eras.js), the orchards (vegetation.js) and the yard props so one farm
+// never gets an orchard without a house
+export function farmSiteKept(i, era) {
+  return mulberry32(i * 977 + era * 131)() < (era === 4 ? 0.96 : 0.6);
+}
+
 export function distToRoadEx(era, x, z) {
   if (era <= 1) return { d: Infinity, c: 2 };
   const { segs, map } = roadGridFor(era);

@@ -15,7 +15,7 @@ import {
 } from './buildings.js';
 import { MAT } from './textures.js';
 import { heightAt } from './terrain.js';
-import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt } from './landuse.js';
+import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept } from './landuse.js';
 import { LAKES } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { mulberry32 } from './util.js';
@@ -156,8 +156,9 @@ function bgAssets() {
   return bgGeos;
 }
 
-function bgSettlement(group, era) {
+function bgSettlement(group, era, smokes) {
   const rng = mulberry32(4300 + era * 17);
+  const props = { hay: [], wood: [], vinda: [], fence: [] };
   const { wall, roof } = bgAssets();
   const nearP = (x, z, p, r) => Math.hypot(x - p.x, z - p.z) < r;
   const skip = (x, z) =>
@@ -170,27 +171,41 @@ function bgSettlement(group, era) {
       items.push({ x, z, w, d, rot, big: w * d > 220, kind: 'new' });
     }
   } else {
-    const keep = era === 4 ? 0.96 : 0.6;
-    for (const [x, z] of DWELLINGS_OSM) {
-      const h = rng();
-      if (skip(x, z) || h > keep) continue;
-      const rot = rng() * Math.PI;
+    DWELLINGS_OSM.forEach(([x, z], si) => {
+      if (skip(x, z) || !farmSiteKept(si, era)) return;
+      const sr = mulberry32(si * 613 + era * 37);
+      const rot = sr() * Math.PI;
       const ca = Math.cos(rot), sa = Math.sin(rot);
-      items.push({ x, z, w: 8 + rng() * 5, d: 5.5 + rng() * 2, rot, kind: 'dwell' });
-      const yd = 15 + rng() * 8;
+      items.push({ x, z, w: 8 + sr() * 5, d: 5.5 + sr() * 2, rot, kind: 'dwell', site: si });
+      const yd = 15 + sr() * 8;
       items.push({
         x: x + ca * yd, z: z + sa * yd,
-        w: 10 + rng() * 7, d: 6 + rng() * 3,
-        rot: rot + (rng() - 0.5) * 0.5, kind: 'barn',
+        w: 10 + sr() * 7, d: 6 + sr() * 3,
+        rot: rot + (sr() - 0.5) * 0.5, kind: 'barn',
       });
-      if (rng() < 0.65) {
-        const yd2 = 12 + rng() * 6;
+      if (sr() < 0.65) {
+        const yd2 = 12 + sr() * 6;
         items.push({
           x: x - sa * yd2, z: z + ca * yd2,
-          w: 5 + rng() * 2, d: 4 + rng(), rot: rot + 1.57, kind: 'klets',
+          w: 5 + sr() * 2, d: 4 + sr(), rot: rot + 1.57, kind: 'klets',
         });
       }
-    }
+      // signs of life in the yard (period props, instanced below)
+      if (era < 5) {
+        const py = 9 + sr() * 5;
+        props.hay.push([x + sa * py, z - ca * py, sr() * 6.3, 0.8 + sr() * 0.5]);
+        if (sr() < 0.6) props.hay.push([x + sa * (py + 5), z - ca * (py + 4), sr() * 6.3, 0.7 + sr() * 0.4]);
+        if (sr() < 0.75) props.wood.push([x + ca * 6 - sa * 4, z + sa * 6 + ca * 4, rot + 1.57, 0.8 + sr() * 0.4]);
+        if (sr() < 0.55) props.vinda.push([x - ca * 8, z - sa * 8, sr() * 6.3]);
+        // a run of riķu fence closing the yard
+        if (sr() < 0.8) {
+          const fl = 16 + sr() * 14, fx = x - ca * 12, fz = z - sa * 12;
+          for (let fp = 0; fp < fl; fp += 0.9) {
+            props.fence.push([fx + sa * (fp - fl / 2), fz - ca * (fp - fl / 2), rot + 0.9 + (fp % 2) * 1.3]);
+          }
+        }
+      }
+    });
   }
   const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff }), items.length);
   const roofs = new THREE.InstancedMesh(roof, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), items.length);
@@ -243,6 +258,83 @@ function bgSettlement(group, era) {
   });
   walls.instanceMatrix.needsUpdate = roofs.instanceMatrix.needsUpdate = true;
   group.add(walls, roofs);
+
+  // --- yard props, all instanced: haystacks, woodpiles, well-sweeps -------
+  if (era < 5 && props.hay.length + props.wood.length + props.vinda.length + props.fence.length > 0) {
+    const put = (mesh, arr, fill) => {
+      arr.forEach((p, i) => { fill(p, i); mesh.setMatrixAt(i, dummy.matrix); });
+      mesh.count = arr.length;
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = true;
+      group.add(mesh);
+    };
+    const hayCone = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 2.4, 9), MAT.hay, props.hay.length);
+    put(hayCone, props.hay, ([x, z, r, sc]) => {
+      dummy.position.set(x, heightAt(x, z) + 1.2 * sc - 0.05, z);
+      dummy.rotation.set(0, r, 0);
+      dummy.scale.setScalar(sc);
+      dummy.updateMatrix();
+    });
+    const woodGeo = new THREE.BoxGeometry(2.1, 1.05, 1.0);
+    const wood = new THREE.InstancedMesh(woodGeo, MAT.logOld, props.wood.length);
+    put(wood, props.wood, ([x, z, r, sc]) => {
+      dummy.position.set(x, heightAt(x, z) + 0.5 * sc, z);
+      dummy.rotation.set(0, r, 0);
+      dummy.scale.setScalar(sc);
+      dummy.updateMatrix();
+    });
+    // vinda: post + counterweighted sweep beam + hanging rod, baked into one
+    // transform frame
+    const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.12, 3.2, 6), MAT.logOld, props.vinda.length);
+    const beamGeo = new THREE.CylinderGeometry(0.05, 0.07, 4.8, 5);
+    beamGeo.rotateZ(1.05);
+    beamGeo.translate(0.9, 3.1, 0);
+    const beam = new THREE.InstancedMesh(beamGeo, MAT.lightWood, props.vinda.length);
+    const rodGeo = new THREE.CylinderGeometry(0.025, 0.025, 2.2, 4);
+    rodGeo.translate(2.9, 2.2, 0);
+    const rod = new THREE.InstancedMesh(rodGeo, MAT.lightWood, props.vinda.length);
+    props.vinda.forEach(([x, z, r], i) => {
+      dummy.position.set(x, heightAt(x, z) + 1.55, z);
+      dummy.rotation.set(0, r, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      post.setMatrixAt(i, dummy.matrix);
+      dummy.position.y -= 1.55;
+      dummy.updateMatrix();
+      beam.setMatrixAt(i, dummy.matrix);
+      rod.setMatrixAt(i, dummy.matrix);
+    });
+    for (const m of [post, beam, rod]) {
+      m.count = props.vinda.length;
+      m.instanceMatrix.needsUpdate = true;
+      m.castShadow = true;
+      group.add(m);
+    }
+    // slanted riķu-fence poles
+    const fenceGeo = new THREE.CylinderGeometry(0.035, 0.05, 2.1, 4);
+    fenceGeo.rotateZ(0.42);
+    const fence = new THREE.InstancedMesh(fenceGeo, MAT.logOld, props.fence.length);
+    props.fence.forEach(([x, z, r], i) => {
+      dummy.position.set(x, heightAt(x, z) + 0.8, z);
+      dummy.rotation.set(0, r, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      fence.setMatrixAt(i, dummy.matrix);
+    });
+    fence.count = props.fence.length;
+    fence.instanceMatrix.needsUpdate = true;
+    group.add(fence);
+  }
+  // hearth smoke at the farms nearest the stage — the horizon breathes
+  if (smokes && era < 5) {
+    const dwells = items.filter((it) => it.kind === 'dwell')
+      .map((it) => ({ ...it, d: Math.hypot(it.x - S.x, it.z - S.z) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 6);
+    for (const it of dwells) {
+      smokes.push([it.x, heightAt(it.x, it.z) + 4.2, it.z, { rate: 0.3, gray: 0.86 }]);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +483,7 @@ export function buildEra(era, ctx) {
       add(poemStone(), LOC.STONE.x, LOC.STONE.z, -0.5);
       utilityPoles(g, false);
     }
-    bgSettlement(g, modern ? 4 : 3);
+    bgSettlement(g, modern ? 4 : 3, smokes);
 
     spawns.push(['cattleFarm', modern ? 6 : 5, { x: S.x - 115, z: S.z + 35, r: 60 }]);
     spawns.push(['sheepWhite', modern ? 4 : 6, { x: S.x - 55, z: S.z - 35, r: 35 }]);
@@ -430,7 +522,7 @@ export function buildEra(era, ctx) {
 
     // Brežģa kalns: the 2017 observation tower, the summit oak, the Jāņi pyre
     add(observationTower(), B.x, B.z, 0.2);
-    bgSettlement(g, 5);
+    bgSettlement(g, 5, smokes);
     add(pyre(), B.x + 22, B.z + 10, 0.4);
     fires.push([B.x + 22, heightAt(B.x + 22, B.z + 10) + 0.9, B.z + 10, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
 

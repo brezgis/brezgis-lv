@@ -7,8 +7,9 @@
 // moraine, birch and alder along water, oaks on the terrace, manor lindens.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, riverLevelNear, fieldAt, LOC } from './landuse.js';
+import { forestDensity, distToRiver, riverLevelNear, fieldAt, farmSiteKept, LOC } from './landuse.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
+import { DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { makeNoise, clamp, pointInPoly, canvasTexture } from './util.js';
 import { SPECIES, buildTree, buildFern, buildLog, buildStump, buildBoulder } from './treegen.js';
@@ -218,9 +219,9 @@ const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'linden', 'apple', '
 // instance capacity per species: [full, far]. Two tiers only — real geometry
 // close to the points of interest, captured impostors beyond.
 const CAPS = {
-  spruce: [1500, 44000], pine: [1000, 32000], birch: [1200, 38000],
-  oak: [500, 11000], alder: [800, 16000], linden: [260, 3600],
-  apple: [80, 220], shrub: [5500, 18000], snag: [180, 0],
+  spruce: [1700, 92000], pine: [1150, 64000], birch: [1400, 78000],
+  oak: [560, 22000], alder: [900, 32000], linden: [280, 7000],
+  apple: [90, 1400], shrub: [6000, 30000], snag: [200, 0],
 };
 const FULL_R = 260; // full-detail radius around points of interest
 
@@ -270,12 +271,14 @@ export function buildVegetation(scene, renderer) {
     // unit-height cross-quads, uv from the atlas tile
     const w = tile.halfW / tile.height;
     const pos = [], uv = [], idx = [], nrm = [];
-    for (let pl = 0; pl < 2; pl++) {
-      const c = pl === 0 ? 1 : 0, s = pl === 0 ? 0 : 1;
+    // three planes at 60°: two-plane crosses read as flat cutouts from the
+    // diagonals — exactly where a walking player usually approaches them
+    for (const ang of [0, Math.PI / 3, (2 * Math.PI) / 3]) {
+      const c = Math.cos(ang), s = Math.sin(ang);
       const b = pos.length / 3;
       pos.push(-w * c, 0, -w * s, w * c, 0, w * s, w * c, 1, w * s, -w * c, 1, -w * s);
       uv.push(tile.u0, 0, tile.u1, 0, tile.u1, 1, tile.u0, 1);
-      for (let k = 0; k < 4; k++) nrm.push(s, 0.25, c);
+      for (let k = 0; k < 4; k++) nrm.push(-s, 0.25, c);
       idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
     }
     const geo = new THREE.BufferGeometry();
@@ -357,7 +360,7 @@ export function buildVegetation(scene, renderer) {
     for (const k of SP_KEYS) lists[k] = { full: [], far: [] };
     lists.fern = []; lists.log = []; lists.stump = [];
     const S = LOC.STEAD;
-    const step = 17;
+    const step = 12;   // real hemiboreal forest runs hundreds of stems/ha
     const EXT = HM_SPAN - 120;
     const N = Math.floor(EXT / step);
     for (let iz = 0; iz < N; iz++) {
@@ -377,9 +380,12 @@ export function buildVegetation(scene, renderer) {
         // impostors are cheap — keep the deep landscape forested: primeval
         // eras are near-closed canopy, and even the agrarian mosaic reads
         // starved if the falloff bites too hard
-        const falloff = clamp(560 / Math.max(dp, 1), era <= 2 ? 0.82 : 0.6, 1);
-        if (rng() > d * 0.88 * falloff) continue;
+        const falloff = clamp(560 / Math.max(dp, 1), era <= 2 ? 0.9 : 0.7, 1);
+        if (rng() > d * 0.97 * falloff) continue;
         const tier = dp < FULL_R ? 'full' : 'far';
+        // the denser grid would melt the full-geometry tier — thin it back
+        // to roughly the old stem count; the far impostors take the density
+        if (tier === 'full' && rng() < 0.44) continue;
         if (era === 0) {
           // tundra: knee-high dwarf birch / juniper heath
           lists.shrub[tier].push([x, y, z, 0.8 + rng() * 1.1, rng() * 6.3, 0.9 + rng() * 0.25]);
@@ -399,14 +405,14 @@ export function buildVegetation(scene, renderer) {
 
         // understory in closed forest, near tiers only
         if (tier !== 'far' && d > 0.42) {
-          if (rng() < (era <= 2 ? 0.5 : 0.25)) {
+          if (rng() < (era <= 2 ? 0.3 : 0.15)) {
             const fx = x + (rng() - 0.5) * 10, fz = z + (rng() - 0.5) * 10;
             lists.fern.push([fx, heightAt(fx, fz), fz, 0.7 + rng() * 0.9, rng() * 6.3]);
           }
-          if ((era === 1 || era === 2) && rng() < 0.09) {
+          if ((era === 1 || era === 2) && rng() < 0.05) {
             const lx = x + (rng() - 0.5) * 12, lz = z + (rng() - 0.5) * 12;
             lists.log.push([lx, heightAt(lx, lz), lz, rng() * 6.3, 0.8 + rng() * 0.7, (rng() * 3) | 0]);
-          } else if (era >= 3 && rng() < 0.05) {
+          } else if (era >= 3 && rng() < 0.03) {
             const sx = x + (rng() - 0.5) * 9, sz = z + (rng() - 0.5) * 9;
             lists.stump.push([sx, heightAt(sx, sz), sz, rng() * 6.3, 0.8 + rng() * 0.6]);
           }
@@ -415,6 +421,18 @@ export function buildVegetation(scene, renderer) {
     }
     // orchard + manor park (identical layout to the researched plans)
     if (era === 3 || era === 4) {
+      // every viensēta keeps a few apple trees by the dwelling (the classic
+      // Latvian farm orchard) — same site-keep rule as the buildings
+      DWELLINGS_OSM.forEach(([dx, dz], si) => {
+        if (!farmSiteKept(si, era)) return;
+        const n = 2 + ((si * 7) % 3);
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * 6.28 + si;
+          const ox = dx + Math.cos(a) * (14 + (si % 5)), oz = dz + Math.sin(a) * (13 + (k * 3) % 6);
+          const tier = dPOI(ox, oz) < FULL_R ? 'full' : 'far';
+          lists.apple[tier].push([ox, heightAt(ox, oz), oz, 3.4 + ((si + k) % 4) * 0.35, si + k, 1]);
+        }
+      });
       for (let i = 0; i < 12; i++) {
         const x = S.x - 26 + (i % 4) * 8 + rng() * 2;
         const z = S.z - 34 + Math.floor(i / 4) * 8 + rng() * 2;
@@ -656,11 +674,13 @@ export function buildVegetation(scene, renderer) {
     reeds.instanceMatrix.needsUpdate = true;
     group.add(reeds);
 
-    // cobbled shores (LAAS streambed rule): waterworn pebbles on the bars
-    const pebbles = makeInstanced(buildBoulder(47), boulderMat, 3200, false);
+    // cobbled shores AND a stony bed (LAAS streambed rule): waterworn
+    // pebbles on the bars, real rocks down IN the channel — the bigger ones
+    // break the surface in the shallows
+    const pebbles = makeInstanced(buildBoulder(47), boulderMat, 5600, false);
     let pi = 0;
     for (const p of RIVER_PTS) {
-      for (let k = 0; k < 5 && pi < 3200; k++) {
+      for (let k = 0; k < 5 && pi < 5600; k++) {
         const side = rng() < 0.5 ? -1 : 1;
         const px = p[0] + side * (9.5 + rng() * 5.5), pz = p[1] + (rng() - 0.5) * 40;
         const y = heightAt(px, pz);
@@ -669,6 +689,19 @@ export function buildVegetation(scene, renderer) {
         dummy.position.set(px, y - s * 0.35, pz);
         dummy.rotation.set(rng() * 0.6, rng() * 6.3, rng() * 0.6);
         dummy.scale.set(s * (0.9 + rng() * 0.5), s * (0.55 + rng() * 0.3), s * (0.9 + rng() * 0.5));
+        dummy.updateMatrix();
+        pebbles.setMatrixAt(pi++, dummy.matrix);
+      }
+      // channel bed stones: sit on the carved bottom; the largest shoulder
+      // out of the water on the inside of bends
+      for (let k = 0; k < 3 && pi < 5600; k++) {
+        const px = p[0] + (rng() - 0.5) * 16, pz = p[1] + (rng() - 0.5) * 36;
+        const y = heightAt(px, pz);
+        if (y > p[2] + 0.4) continue;             // in or at the water only
+        const s = 0.14 + Math.pow(rng(), 1.6) * 0.55;
+        dummy.position.set(px, y - s * 0.25, pz);
+        dummy.rotation.set(rng() * 0.6, rng() * 6.3, rng() * 0.6);
+        dummy.scale.set(s * (0.9 + rng() * 0.6), s * (0.6 + rng() * 0.35), s * (0.9 + rng() * 0.6));
         dummy.updateMatrix();
         pebbles.setMatrixAt(pi++, dummy.matrix);
       }

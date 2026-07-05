@@ -66,7 +66,8 @@ oak in the last summers before 1940 [7][2]. Wait for dusk, then look south.`,
     year: 2025, label: '2025', title: 'Šodiena — today',
     body: `The land you see now wears its real present-day colours — Sentinel-2 satellite
 imagery draped over the same terrain — and the forest stands exactly where the satellite
-sees it [23]. Taurene counts around 347 people, down from 1,303 in 1935; the parish is
+sees it [23]. Taurene counts around 347 people, down from the 1,303 of the 1935 parish
+description (the census itself counted 1,535); the parish is
 quiet, the forest has been coming back [4][3]. The new manor still keeps the parish's
 civic life, the stork still keeps the nest, and the storks' Latvia holds more of them
 than anywhere. On Brežģa kalns stands the observation tower raised in 2017 — eleven

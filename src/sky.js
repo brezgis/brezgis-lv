@@ -335,6 +335,9 @@ export function buildSky(scene, renderer) {
     stopLerp(t, 'fog', scene.fog.color);
     fogSun.setRGB(tr[0], tr[1], tr[2]);
     scene.fog.color.lerp(fogSun, state.sunLow * 0.35);
+    // fog is scattered SUNLIGHT: after the sun goes it must darken with the
+    // sky or the horizon glows all night
+    scene.fog.color.multiplyScalar(0.22 + 0.78 * clamp(sd.y * 5 + 0.6, 0.1, 1));
 
     sky.position.copy(focus);
     horizon.position.set(focus.x, 0, focus.z);

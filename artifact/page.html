@@ -184,12 +184,12 @@
 </header>
 
 <nav id="timeline" aria-label="Choose era">
-  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">10,800 BC</span><span class="nm">Tundra</span></button>
-  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 50</span><span class="nm">Aurochs</span></button>
-  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 950</span><span class="nm">Latgalians</span></button>
-  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1860</span><span class="nm">Manor</span></button>
-  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1935</span><span class="nm">Taurene</span></button>
-  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">2025</span><span class="nm">Šodiena</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">10,800 BC</span><span class="nm" data-i18n="era0">Tundra</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 50</span><span class="nm" data-i18n="era1">Tauri</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 950</span><span class="nm" data-i18n="era2">Latgaļi</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1860</span><span class="nm" data-i18n="era3">Muiža</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1935</span><span class="nm" data-i18n="era4">Taurene</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">2025</span><span class="nm" data-i18n="era5">Šodiena</span></button>
 </nav>
 
 <aside id="panel">
@@ -197,46 +197,46 @@
   <p id="era-body"></p>
   <div id="era-facts"></div>
 </aside>
-<button class="ctl" id="panel-toggle" type="button">Stāsts / story</button>
+<button class="ctl" id="panel-toggle" type="button" data-i18n="story">Stāsts / story</button>
 
 <div id="controls">
   <div class="ctl-row">
+    <button class="ctl" id="lang-btn" type="button" title="Valoda / language">EN</button>
     <button class="ctl" id="sound-btn" type="button">🔇 skaņa</button>
-    <button class="ctl" id="about-btn" type="button">Chronicle &amp; sources</button>
+    <button class="ctl" id="about-btn" type="button" data-i18n="chronicle">Hronika un avoti</button>
   </div>
-  <div class="ctl-label">Skats · view</div>
+  <div class="ctl-label" data-i18n="lblView">Skats</div>
   <div class="ctl-row">
-    <button class="ctl" data-view="seta" type="button">Sēta</button>
-    <button class="ctl" data-view="pagalms" type="button">Pagalms</button>
-    <button class="ctl" data-view="upe" type="button">Gauja</button>
-    <button class="ctl" data-view="muiza" type="button">Muiža</button>
-    <button class="ctl" data-view="ezers" type="button">Ezers</button>
-    <button class="ctl" data-view="brezga" type="button">Brežģis</button>
-    <button class="ctl" data-view="putns" type="button">Putns</button>
+    <button class="ctl" data-view="seta" type="button" data-i18n="seta">Sēta</button>
+    <button class="ctl" data-view="pagalms" type="button" data-i18n="pagalms">Pagalms</button>
+    <button class="ctl" data-view="upe" type="button" data-i18n="upe">Gauja</button>
+    <button class="ctl" data-view="muiza" type="button" data-i18n="muiza">Muiža</button>
+    <button class="ctl" data-view="ezers" type="button" data-i18n="ezers">Ezers</button>
+    <button class="ctl" data-view="brezga" type="button" data-i18n="brezga">Brežģis</button>
+    <button class="ctl" data-view="putns" type="button" data-i18n="putns">Putns</button>
   </div>
-  <div class="ctl-label">Kustība · move</div>
+  <div class="ctl-label" data-i18n="lblMove">Kustība</div>
   <div class="ctl-row">
-    <button class="ctl active" data-mode="orbit" type="button">Orbīta</button>
-    <button class="ctl" data-mode="fly" type="button">Lidot</button>
-    <button class="ctl" data-mode="walk" type="button">Iet</button>
+    <button class="ctl" data-mode="fly" type="button" data-i18n="fly">Lidot</button>
+    <button class="ctl" data-mode="walk" type="button" data-i18n="walk">Iet</button>
   </div>
-  <div class="ctl-label">Diena · time of day</div>
+  <div class="ctl-label" data-i18n="lblTime">Diennakts</div>
   <div class="ctl-row">
-    <button class="ctl active" data-time="flow" type="button">Rit</button>
-    <button class="ctl" data-time="dawn" type="button">Rīts</button>
-    <button class="ctl" data-time="noon" type="button">Diena</button>
-    <button class="ctl" data-time="evening" type="button">Vakars</button>
+    <button class="ctl active" data-time="flow" type="button" data-i18n="flow">Rit</button>
+    <button class="ctl" data-time="dawn" type="button" data-i18n="dawn">Rīts</button>
+    <button class="ctl" data-time="noon" type="button" data-i18n="noon">Diena</button>
+    <button class="ctl" data-time="evening" type="button" data-i18n="evening">Vakars</button>
   </div>
   <div id="day-clock">--:--</div>
 </div>
 
-<div id="hint">drag to look · scroll to zoom · WASD/arrows to walk · 1–6 or [ ] travel in time</div>
+<div id="hint">klikšķini vai spied WASD, lai lidotu · 1–6 vai [ ] ceļo laikā</div>
 
 <div id="fade"></div>
 <div id="year-spin"></div>
 
 <div id="about" role="dialog" aria-label="Chronicle and sources">
-  <button class="ctl" id="about-close" type="button">Close ✕</button>
+  <button class="ctl" id="about-close" type="button" data-i18n="close">Aizvērt ✕</button>
   <div class="inner" id="about-content"><!--ABOUT--></div>
 </div>
 

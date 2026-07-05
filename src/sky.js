@@ -124,13 +124,16 @@ export function buildSky(scene, renderer) {
   scene.fog = new THREE.Fog(0xcfe0e8, 420, 7200);
 
   // colour keys for fog/ambient across the day (t: 0 = 4:00, 1 = 23:00)
+  // dusk/dawn ambient raised so the land never falls far behind the
+  // sky-reflecting water (grazing-bright rivers vs near-black meadow read
+  // as glare, not evening)
   const stops = [
-    { t: 0.0, zen: 0x2e4a72, fog: 0xdec3a8, hemiI: 0.45 },
-    { t: 0.12, zen: 0x3c6ba4, fog: 0xd5e0da, hemiI: 0.7 },
+    { t: 0.0, zen: 0x2e4a72, fog: 0xdec3a8, hemiI: 0.56 },
+    { t: 0.12, zen: 0x3c6ba4, fog: 0xd5e0da, hemiI: 0.72 },
     { t: 0.35, zen: 0x3f6fa8, fog: 0xcfe0e8, hemiI: 0.85 },
     { t: 0.62, zen: 0x3f6fa8, fog: 0xd3e2e6, hemiI: 0.8 },
-    { t: 0.82, zen: 0x35577f, fog: 0xe6cba6, hemiI: 0.6 },
-    { t: 1.0, zen: 0x27395c, fog: 0xcfa084, hemiI: 0.4 },
+    { t: 0.82, zen: 0x35577f, fog: 0xe6cba6, hemiI: 0.66 },
+    { t: 1.0, zen: 0x27395c, fog: 0xcfa084, hemiI: 0.52 },
   ];
   const cA = new THREE.Color(), cB = new THREE.Color();
   function stopLerp(t, key, target) {
@@ -294,11 +297,12 @@ export function buildSky(scene, renderer) {
 
   const state = { t: 0.3, hour: 4 + 0.3 * 19, sunLow: 0, paused: false, sunColor: new THREE.Color(), ambient: 0.8 };
   const fogSun = new THREE.Color();
+  const _snapFocus = new THREE.Vector3();
   const sunWorld = new THREE.Vector3();
   const qInv = new THREE.Quaternion();
   const sunLocal = new THREE.Vector3();
 
-  function update(dt, focus) {
+  function update(dt, focus, shadowNow = true) {
     if (!state.paused) state.t = (state.t + dt / DAY_SECONDS) % 1;
     const t = state.t;
     state.hour = 4 + t * 19;
@@ -309,8 +313,14 @@ export function buildSky(scene, renderer) {
     const sd = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
     sky.material.uniforms.sunPosition.value.copy(sd);
     state.sunLow = 1 - smoothstep(0.05, 0.28, el);
-    sun.position.copy(sd).multiplyScalar(1600).add(focus);
-    sun.target.position.copy(focus);
+    // reposition the shadow rig ONLY on map-refresh frames: sampling a stale
+    // map through a fresh light matrix made every shadow jitter and snap
+    // while walking. Snapped to 0.5m so the frustum crawls in steady steps.
+    if (shadowNow) {
+      _snapFocus.set(Math.round(focus.x * 2) / 2, Math.round(focus.y * 2) / 2, Math.round(focus.z * 2) / 2);
+      sun.position.copy(sd).multiplyScalar(1600).add(_snapFocus);
+      sun.target.position.copy(_snapFocus);
+    }
 
     // direct light: physically-reddened by transmittance
     const tr = sunTransmittanceJS(sd.y);

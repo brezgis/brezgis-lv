@@ -1,6 +1,5 @@
 // Brezgi / Taurene time machine — entry point.
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
@@ -21,6 +20,33 @@ import { ERAS } from './content.js';
 
 const S = LOC.STEAD;
 const $ = (id) => document.getElementById(id);
+
+// ---------------- UI language (chrome only; the chronicle stays English) ----
+const I18N = {
+  lv: {
+    seta: 'Sēta', pagalms: 'Pagalms', upe: 'Gauja', muiza: 'Muiža', ezers: 'Ezers',
+    brezga: 'Brežģis', putns: 'Putns', fly: 'Lidot', walk: 'Iet',
+    flow: 'Rit', dawn: 'Rīts', noon: 'Diena', evening: 'Vakars',
+    lblView: 'Skats', lblMove: 'Kustība', lblTime: 'Diennakts',
+    sound: 'skaņa', chronicle: 'Hronika un avoti', story: 'Stāsts / story', close: 'Aizvērt ✕',
+    era0: 'Tundra', era1: 'Tauri', era2: 'Latgaļi', era3: 'Muiža', era4: 'Taurene', era5: 'Šodiena',
+    hintCinema: 'klikšķini vai spied WASD, lai lidotu · 1–6 vai [ ] ceļo laikā',
+    hintFly: 'WASD/bultiņas lido · Space augšup, Shift lejup — nolaidies zemē, lai ietu · ritenis = ātrums',
+    hintWalk: 'WASD/bultiņas iet · Shift skrien · Space lec · dubult-Space = lidot',
+  },
+  en: {
+    seta: 'Farmstead', pagalms: 'Yard', upe: 'Gauja', muiza: 'Manor', ezers: 'Lake',
+    brezga: 'Brežģis hill', putns: "Bird's eye", fly: 'Fly', walk: 'Walk',
+    flow: 'Flow', dawn: 'Dawn', noon: 'Noon', evening: 'Evening',
+    lblView: 'View', lblMove: 'Move', lblTime: 'Time of day',
+    sound: 'sound', chronicle: 'Chronicle & sources', story: 'Story', close: 'Close ✕',
+    era0: 'Tundra', era1: 'Aurochs', era2: 'Latgalians', era3: 'Manor', era4: 'Taurene', era5: 'Today',
+    hintCinema: 'click or press WASD to fly · 1–6 or [ ] travel in time',
+    hintFly: 'WASD/arrows fly · Space up, Shift down — settle onto the ground to walk · wheel = speed',
+    hintWalk: 'WASD/arrows walk · Shift sprint · Space jump · double-Space to fly',
+  },
+};
+let lang = localStorage.getItem('brezgi-lang') || 'lv';
 
 let bootT0 = 0;
 const progress = (msg) => {
@@ -114,36 +140,107 @@ async function boot() {
 
   // camera start: from the south-east, farmstead in front, valley behind
   camera.position.set(S.x + 68, steadY() + 24, S.z + 88);
-  const controls = new OrbitControls(camera, canvas);
-  controls.target.set(S.x, steadY() + 4, S.z);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
-  controls.maxPolarAngle = Math.PI * 0.495;
-  controls.minDistance = 6;
-  controls.maxDistance = 4600;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.22;
-  canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, { once: true });
+  camera.lookAt(S.x, steadY() + 4, S.z);
 
-  // walk / fly / orbit rig
+  // Minecraft-style rig: fly + walk only; 'cinema' idles until first input
   const rig = new Rig(camera, canvas);
+  const cinema = { angle: Math.atan2(88, 68), r: 110, h: 26 };
   const hintEl = $('hint');
+  const applyHints = () => {
+    const L = I18N[lang];
+    hintEl.textContent = rig.mode === 'cinema' ? L.hintCinema
+      : rig.mode === 'fly' ? L.hintFly : L.hintWalk;
+  };
   rig.onModeChange = (mode) => {
     document.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
-    controls.enabled = mode === 'orbit';
-    if (mode === 'orbit') {
-      // look at what we were looking at
-      const fwd = new THREE.Vector3();
-      camera.getWorldDirection(fwd);
-      controls.target.copy(camera.position).addScaledVector(fwd, 30);
-      hintEl.textContent = 'drag to look · scroll to zoom · WASD/arrows to walk · 1–6 or [ ] travel in time';
-    } else if (mode === 'fly') {
-      hintEl.textContent = 'WASD/arrows fly · E/Q up & down · wheel = speed · V to walk · O orbit · [ ] travel in time';
-    } else {
-      hintEl.textContent = 'WASD/arrows walk · Shift sprint · Space jump · V to fly · O orbit · [ ] travel in time';
-    }
+    applyHints();
   };
-  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => rig.setMode(b.dataset.mode)));
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+    if (rig.mode === 'cinema') rig.setMode('fly');
+    rig.setMode(b.dataset.mode);
+  }));
+
+  // the player's body: invisible to the camera, real to the sun. Minecraft
+  // says you have a shadow when you stand on the ground — you do now.
+  const shadowProxy = (() => {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ colorWrite: false, depthWrite: false });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.95, 3, 8), mat);
+    body.position.y = 1.0;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), mat);
+    head.position.y = 1.62;
+    g.add(body, head);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    g.visible = false;
+    return g;
+  })();
+  scene.add(shadowProxy);
+
+  // ------- collision: era buildings/fences as AABBs + tree trunks ---------
+  const COLL = { cell: 14, map: new Map(), list: [] };
+  const _box = new THREE.Box3();
+  function rebuildColliders(group, era) {
+    COLL.map.clear();
+    COLL.list.length = 0;
+    group.updateMatrixWorld(true);
+    group.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh) return;
+      _box.setFromObject(o);
+      const w = _box.max.x - _box.min.x, d = _box.max.z - _box.min.z, h = _box.max.y - _box.min.y;
+      if (!Number.isFinite(w) || w > 36 || d > 36) return;   // bridges, wires
+      if (h < 0.5 || (w < 0.26 && d < 0.26)) return;         // props, twigs
+      COLL.list.push({ circ: false, x0: _box.min.x, x1: _box.max.x, z0: _box.min.z, z1: _box.max.z, y0: _box.min.y, y1: _box.max.y });
+    });
+    for (const [x, z, r] of veg.getColliders(era)) {
+      COLL.list.push({ circ: true, x, z, r });
+    }
+    COLL.list.forEach((c, idx) => {
+      const x0 = c.circ ? c.x - c.r : c.x0, x1 = c.circ ? c.x + c.r : c.x1;
+      const z0 = c.circ ? c.z - c.r : c.z0, z1 = c.circ ? c.z + c.r : c.z1;
+      for (let ix = Math.floor(x0 / COLL.cell); ix <= Math.floor(x1 / COLL.cell); ix++) {
+        for (let iz = Math.floor(z0 / COLL.cell); iz <= Math.floor(z1 / COLL.cell); iz++) {
+          const k = ix + ':' + iz;
+          let a = COLL.map.get(k);
+          if (!a) COLL.map.set(k, a = []);
+          a.push(idx);
+        }
+      }
+    });
+  }
+  const R_PLAYER = 0.38;
+  rig.collideFn = (px, pz, feetY) => {
+    const cix = Math.floor(px / COLL.cell), ciz = Math.floor(pz / COLL.cell);
+    for (let ix = cix - 1; ix <= cix + 1; ix++) {
+      for (let iz = ciz - 1; iz <= ciz + 1; iz++) {
+        const arr = COLL.map.get(ix + ':' + iz);
+        if (!arr) continue;
+        for (const idx of arr) {
+          const c = COLL.list[idx];
+          if (c.circ) {
+            const dx = px - c.x, dz = pz - c.z, rr = c.r + R_PLAYER;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < rr * rr && d2 > 1e-8) {
+              const d = Math.sqrt(d2);
+              px = c.x + (dx / d) * rr;
+              pz = c.z + (dz / d) * rr;
+            }
+          } else {
+            if (c.y0 > feetY + 1.62 || c.y1 < feetY + 0.32) continue; // duck under / step over
+            const ex0 = c.x0 - R_PLAYER, ex1 = c.x1 + R_PLAYER;
+            const ez0 = c.z0 - R_PLAYER, ez1 = c.z1 + R_PLAYER;
+            if (px > ex0 && px < ex1 && pz > ez0 && pz < ez1) {
+              const m = Math.min(px - ex0, ex1 - px, pz - ez0, ez1 - pz);
+              if (m === px - ex0) px = ex0;
+              else if (m === ex1 - px) px = ex1;
+              else if (m === pz - ez0) pz = ez0;
+              else pz = ez1;
+            }
+          }
+        }
+      }
+    }
+    return [px, pz];
+  };
 
   // ------- era management -------
   const eraCache = new Map();
@@ -173,6 +270,7 @@ async function boot() {
     effects.setAurora(era === 0);
     effects.setFireflies(era >= 1);
     ambience.setScene(era, sky.state.sunLow, built.fires.length > 0);
+    rebuildColliders(built.group, era);
     // HUD
     document.querySelectorAll('.era-btn').forEach((b, i) => b.classList.toggle('active', i === era));
     $('era-title').textContent = ERAS[era].title;
@@ -234,30 +332,41 @@ async function boot() {
     brezga: () => [[LOC.BREZGA.x - 210, yAt(LOC.BREZGA.x - 210, LOC.BREZGA.z + 260, 55), LOC.BREZGA.z + 260], [LOC.BREZGA.x, yAt(LOC.BREZGA.x, LOC.BREZGA.z, 8), LOC.BREZGA.z]],
     putns: () => [[S.x + 300, yAt(S.x, S.z, 780), S.z + 700], [S.x + 300, steadY(), S.z + 300]],
   };
+  // preset moves tween the camera, then hand control back in fly mode
   let camTween = null;
+  const _lookT = new THREE.Vector3();
   function flyTo(name) {
-    rig.setMode('orbit');
     const [pos, tgt] = PRESETS[name]();
-    controls.autoRotate = false;
-    controls.enabled = false;
+    if (rig.mode === 'cinema') rig.setMode('fly');
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
     camTween = {
       t: 0,
       p0: camera.position.clone(), p1: new THREE.Vector3(...pos),
-      t0: controls.target.clone(), t1: new THREE.Vector3(...tgt),
+      t0: camera.position.clone().addScaledVector(fwd, 60), t1: new THREE.Vector3(...tgt),
     };
+  }
+  function jumpTo(pos, tgt) {
+    if (rig.mode === 'cinema') rig.setMode('fly');
+    camTween = null;
+    camera.position.set(pos[0], pos[1], pos[2]);
+    camera.lookAt(tgt[0], tgt[1], tgt[2]);
+    rig.adoptCamera();
+    simControls.target.set(tgt[0], tgt[1], tgt[2]);
   }
 
   // ------- HUD wiring -------
+  // harness compatibility stub (shot2/dbg read a controls.target)
+  const simControls = { target: new THREE.Vector3(S.x, steadY() + 4, S.z), autoRotate: false, enabled: false };
   window.__scene = scene;
   window.__rig = rig;
   window.__sim = {
-    camera, controls, flyTo: (n) => flyTo(n), switchEra: (e) => switchEra(e), sky,
+    camera, controls: simControls, flyTo: (n) => flyTo(n), switchEra: (e) => switchEra(e), sky,
     jump: (n) => {
       const [pos, tgt] = PRESETS[n]();
-      controls.autoRotate = false;
-      camera.position.set(...pos);
-      controls.target.set(...tgt);
+      jumpTo(pos, tgt);
     },
+    setCam: (px, py, pz, tx, ty, tz) => jumpTo([px, py, pz], [tx, ty, tz]),
     era: (e) => { activateEra(e); },
   };
   document.querySelectorAll('.era-btn').forEach((b, i) => b.addEventListener('click', () => switchEra(i)));
@@ -269,9 +378,25 @@ async function boot() {
     if (e.key === ']' || e.key === '.') switchEra(Math.min(ERAS.length - 1, currentEra + 1));
     if (e.key === '[' || e.key === ',') switchEra(Math.max(0, currentEra - 1));
   });
+  // ------- language toggle -------
+  let soundOn = false;
+  function setLang(l) {
+    lang = l;
+    localStorage.setItem('brezgi-lang', l);
+    const L = I18N[l];
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.dataset.i18n;
+      if (L[key]) el.textContent = L[key];
+    });
+    $('sound-btn').textContent = (soundOn ? '🔊 ' : '🔇 ') + L.sound;
+    $('lang-btn').textContent = l === 'lv' ? 'EN' : 'LV';
+    applyHints();
+  }
+  $('lang-btn').addEventListener('click', () => setLang(lang === 'lv' ? 'en' : 'lv'));
+
   $('sound-btn').addEventListener('click', () => {
-    const on = ambience.toggle();
-    $('sound-btn').textContent = on ? '🔊 skaņa' : '🔇 skaņa';
+    soundOn = ambience.toggle();
+    $('sound-btn').textContent = (soundOn ? '🔊 ' : '🔇 ') + I18N[lang].sound;
     ambience.setScene(currentEra, sky.state.sunLow, current?.fires.length > 0);
   });
   $('about-btn').addEventListener('click', () => $('about').classList.add('open'));
@@ -310,6 +435,7 @@ async function boot() {
 
   // ------- start -------
   await progress('Herding the aurochs…');
+  setLang(lang);
   activateEra(2);                       // begin in the Latgalian age
   console.log(`[boot] total ${((performance.now() - bootT0) / 1000).toFixed(2)}s`);
   $('loader').classList.add('done');
@@ -355,30 +481,48 @@ async function boot() {
     const dt = Math.min(clock.getDelta(), 0.05);
     const t = clock.elapsedTime;
     govern(dt);
-    if (rig.mode !== 'orbit') {
-      rig.update(dt);
-    } else if (camTween) {
+    if (camTween) {
       camTween.t += dt / 2.2;
       const u = Math.min(1, camTween.t);
       const e = u * u * (3 - 2 * u);
       camera.position.lerpVectors(camTween.p0, camTween.p1, e);
-      controls.target.lerpVectors(camTween.t0, camTween.t1, e);
-      if (u >= 1) { camTween = null; controls.enabled = true; }
+      _lookT.lerpVectors(camTween.t0, camTween.t1, e);
+      camera.lookAt(_lookT);
+      if (u >= 1) {
+        camTween = null;
+        rig.adoptCamera();
+      }
+    } else if (rig.mode === 'cinema') {
+      // intro: drift slowly around the farmstead until the first input
+      cinema.angle += dt * 0.05;
+      camera.position.set(
+        S.x + Math.cos(cinema.angle) * cinema.r,
+        steadY() + cinema.h,
+        S.z + Math.sin(cinema.angle) * cinema.r);
+      camera.lookAt(S.x, steadY() + 4, S.z);
     } else {
-      controls.update();
-      // keep the orbit camera out of the dirt
-      const minY = heightAt(camera.position.x, camera.position.z) + 1.6;
-      if (camera.position.y < minY) camera.position.y = minY;
+      rig.update(dt);
     }
 
-    const focus = rig.mode === 'orbit' ? controls.target : camera.position;
-    sky.update(dt, focus);
+    // player shadow: your body is real to the sun while you stand on earth
+    if (rig.mode === 'walk') {
+      shadowProxy.visible = true;
+      shadowProxy.position.set(rig.basePos.x, rig.basePos.y - 1.7, rig.basePos.z);
+      shadowProxy.rotation.y = rig.yaw;
+    } else {
+      shadowProxy.visible = false;
+    }
+
+    const focus = camera.position;
     // shadow cadence: the pass costs as much as the main render — 20Hz is
-    // visually identical for a slow-moving sun
-    if (++gov.shadowTick >= gov.shadowEvery) {
+    // visually identical for a slow-moving sun. The shadow rig only MOVES on
+    // refresh frames (sky.update) so matrix and map always agree.
+    const shadowNow = ++gov.shadowTick >= gov.shadowEvery;
+    if (shadowNow) {
       gov.shadowTick = 0;
       renderer.shadowMap.needsUpdate = true;
     }
+    sky.update(dt, focus, shadowNow);
     veg.tick(sky.state.sunColor, sky.state.ambient);
     water.tick(t);
     WIND.time.value = t;

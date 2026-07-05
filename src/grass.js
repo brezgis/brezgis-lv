@@ -1,24 +1,34 @@
-// Near-field grass — LAAS GroundRing, WebGL edition. Three camera-following
-// bands: BLADE CLUMPS near (N real blades merged per instance — per-pixel
-// blade overlap is what reads as "lush"), lighter clumps mid, crossed wide
-// tufts far. Wind is a cantilever tip² bend riding the same travelling gust
-// field as the trees, plus a fine per-blade shimmer; blade normals are pulled
-// toward 'up' so the sward lights like the hillside it grows on.
+// Near-field grass — LAAS GroundRing, WebGL edition, stable-world variant.
+// Four camera-following bands: a SHORT DENSE CARPET everywhere the ground is
+// green, tall blade CLUMPS near (per-pixel blade overlap is what reads as
+// "lush"), lighter clumps mid, crossed wide tufts far out to ~430m; beyond
+// that the terrain shader's sward speckle carries the look. Placement is
+// DETERMINISTIC PER WORLD CELL (hashed grid): as the rings move with the
+// camera the same world positions yield the same blades, so walking never
+// reshuffles the sward — new growth only fades in at the feathered rim.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
 import { forestDensity, distToRiver, distToRoad, fieldAt, riverLevelNear, PADS } from './landuse.js';
 import { LAKES } from './geodata.js';
-import { makeNoise, pointInPoly, smoothstep as smoothstepJ } from './util.js';
+import { mulberry32, makeNoise, pointInPoly, smoothstep as smoothstepJ } from './util.js';
 import { WIND } from './vegetation.js';
 
-// band setup: [count, radius, regenerate-threshold]
+// world-cell hash → deterministic rng stream per cell
+function cellSeed(ix, iz, salt) {
+  let h = Math.imul(ix, 374761393) ^ Math.imul(iz, 668265263) ^ Math.imul(salt, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+// bands: cell size (m), expected instances per cell, regen threshold, widen
 const BANDS = [
-  { count: 18000, r0: 0, r1: 46, thresh: 13 },
-  { count: 32000, r0: 40, r1: 135, thresh: 42 },
-  { count: 20000, r0: 125, r1: 300, thresh: 95 },
+  { key: 'carpet', r0: 0, r1: 36, cell: 1.6, perCell: 15.4, thresh: 12, wide: 0.8, carpet: true, hiOff: true },
+  { key: 'near', r0: 0, r1: 32, cell: 1.6, perCell: 12.8, thresh: 10, wide: 1.05, hiOff: true },
+  { key: 'mid', r0: 27, r1: 100, cell: 3.2, perCell: 13.3, thresh: 34, wide: 1.75 },
+  { key: 'far', r0: 90, r1: 430, cell: 8, perCell: 6.4, thresh: 120, wide: 2.7 },
 ];
 
-function bladeGeometry(segs, mini) {
+function bladeGeometry(segs) {
   const pos = [], nrm = [], col = [], idx = [];
   const W = 0.023, H = 1;
   for (let i = 0; i <= segs; i++) {
@@ -37,18 +47,15 @@ function bladeGeometry(segs, mini) {
       idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
     }
   }
-  // tip
   pos.push(0, H + 0.045, 0.19);
   nrm.push(0, 0.35, -0.9);
   col.push(0.36, 0.5, 0.18);
-  const tipI = pos.length / 3 - 1;
-  idx.push(segs * 2, segs * 2 + 1, tipI);
+  idx.push(segs * 2, segs * 2 + 1, pos.length / 3 - 1);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.setIndex(idx);
-  void mini;
   return g;
 }
 
@@ -63,10 +70,10 @@ function bladeClump(blades, segs) {
   for (let b = 0; b < blades; b++) {
     const yaw = rnd() * Math.PI * 2;
     const c = Math.cos(yaw), sn = Math.sin(yaw);
-    const ox = (rnd() - 0.5) * 0.2, oz = (rnd() - 0.5) * 0.2;
+    const ox = (rnd() - 0.5) * 0.22, oz = (rnd() - 0.5) * 0.22;
     const hk = 0.62 + rnd() * 0.65;
     const lean = (rnd() - 0.5) * 0.42;
-    const vJ = 0.85 + rnd() * 0.3; // per-blade value jitter
+    const vJ = 0.85 + rnd() * 0.3;
     const v0 = pos.length / 3;
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i) * 1.25, y = p.getY(i) * hk, z = p.getZ(i);
@@ -95,7 +102,7 @@ function tuftGeometry(W = 0.06) {
       pos.push(u * c, v, u * s);
       const sgn = u < 0 ? -1 : 1;
       nrm.push(-s * 0.76 + sgn * 0.62 * c, 0.25, c * 0.76 + sgn * 0.62 * s);
-      col.push(0.17 + v * 0.25, 0.25 + v * 0.3, 0.1 + v * 0.12);
+      col.push((0.17 + v * 0.25) * 1.15, (0.25 + v * 0.3) * 1.15, (0.1 + v * 0.12) * 1.15);
     }
     idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
   }
@@ -152,7 +159,6 @@ function flowerGeometry(kind) {
     for (let k = 0; k < 4; k++) { nrm.push(0, 1, 0); col.push(cr, cg, cb); }
     idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
   };
-  // stem (green so the legacy wind rule flexes it)
   const b0 = pos.length / 3;
   pos.push(-0.012, 0, 0, 0.012, 0, 0, 0.008, H, 0.05, -0.008, H, 0.05);
   for (let k = 0; k < 4; k++) { nrm.push(0, 0, 1); col.push(0.2, 0.34, 0.12); }
@@ -177,16 +183,18 @@ function flowerGeometry(kind) {
 }
 
 export function buildGrass(scene) {
-  const geos = [bladeClump(5, 3), bladeClump(3, 2), tuftGeometry()];
+  const geos = [bladeClump(6, 2), bladeClump(8, 3), bladeClump(4, 2), tuftGeometry()];
   const mat = grassMaterial();
   const bands = BANDS.map((b, i) => {
-    const mesh = new THREE.InstancedMesh(geos[i], mat, b.count);
+    const cells = Math.PI * b.r1 * b.r1 / (b.cell * b.cell);
+    const cap = Math.ceil(cells * b.perCell * 0.75); // rules thin ~40%+; headroom
+    const mesh = new THREE.InstancedMesh(geos[i], mat, cap);
     mesh.frustumCulled = false;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(mesh);
-    return { ...b, mesh, lastX: 1e9, lastZ: 1e9, lastEra: -1, on: true };
+    return { ...b, mesh, cap, lastX: 1e9, lastZ: 1e9, lastEra: -1, on: true, budget: 1 };
   });
   const flowerMeshes = [flowerGeometry(0), flowerGeometry(1), flowerGeometry(2)].map((g) => {
     const mesh = new THREE.InstancedMesh(g, mat, 1400);
@@ -198,96 +206,128 @@ export function buildGrass(scene) {
 
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
-  const rng = makeNoise(7134).rng;
 
+  // flowers on the same stable world grid (cell 6m, deterministic kinds)
   function regenFlowers(cx, cz, era) {
     const counts = [0, 0, 0];
     if (era >= 1) {
-      const budget = era === 5 ? 350 : era >= 3 ? 700 : 1400; // mown/grazed carry fewer
-      for (let k = 0; k < budget * 3; k++) {
-        const a = rng() * Math.PI * 2;
-        const r = 4 + Math.sqrt(rng()) * 120;
-        const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
-        const y = heightAt(x, z);
-        if (forestDensity(era, x, z, y) > 0.3) continue;
-        if (era >= 2 && (fieldAt(era, x, z) || distToRoad(era, x, z) < 2)) continue;
-        const dRiv = distToRiver(x, z);
-        if (dRiv < 4) continue;
-        // meadowsweet crowds the damp riverside; daisies & buttercups the dry
-        const kind = dRiv < 45 ? (rng() < 0.7 ? 0 : 2) : (rng() < 0.55 ? 1 : 2);
-        if (counts[kind] >= 1400) continue;
-        dummy.position.set(x, y - 0.02, z);
-        dummy.rotation.y = rng() * 6.3;
-        const s = 0.7 + rng() * 0.7;
-        dummy.scale.set(s, s, s);
-        dummy.updateMatrix();
-        flowerMeshes[kind].setMatrixAt(counts[kind]++, dummy.matrix);
+      const perCell = (era === 5 ? 0.28 : era >= 3 ? 0.56 : 1.12);
+      const R = 125, CELL = 6;
+      const ix0 = Math.floor((cx - R) / CELL), ix1 = Math.ceil((cx + R) / CELL);
+      const iz0 = Math.floor((cz - R) / CELL), iz1 = Math.ceil((cz + R) / CELL);
+      for (let iz = iz0; iz <= iz1; iz++) for (let ix = ix0; ix <= ix1; ix++) {
+        const rng = mulberry32(cellSeed(ix, iz, 51 + era));
+        const n = (perCell | 0) + (rng() < perCell % 1 ? 1 : 0);
+        for (let k = 0; k < n; k++) {
+          const x = (ix + rng()) * CELL, z = (iz + rng()) * CELL;
+          const rot = rng() * 6.3, sc = 0.7 + rng() * 0.7, pick = rng();
+          const d = Math.hypot(x - cx, z - cz);
+          if (d > R || d < 3) continue;
+          if (rng() < smoothstepJ(R * 0.75, R, d)) continue;   // feathered rim
+          const y = heightAt(x, z);
+          if (forestDensity(era, x, z, y) > 0.3) continue;
+          if (era >= 2 && (fieldAt(era, x, z) || distToRoad(era, x, z) < 2)) continue;
+          const dRiv = distToRiver(x, z);
+          if (dRiv < 4) continue;
+          const kind = dRiv < 45 ? (pick < 0.7 ? 0 : 2) : (pick < 0.55 ? 1 : 2);
+          if (counts[kind] >= 1400) continue;
+          dummy.position.set(x, y - 0.02, z);
+          dummy.rotation.set(0, rot, 0);
+          dummy.scale.set(sc, sc, sc);
+          dummy.updateMatrix();
+          flowerMeshes[kind].setMatrixAt(counts[kind]++, dummy.matrix);
+        }
       }
     }
     flowerMeshes.forEach((m, i) => { m.count = counts[i]; m.instanceMatrix.needsUpdate = true; });
   }
 
-  // coverage conservation (LAAS): sparser bands get wider blades so the
-  // sward reads continuous instead of a dense disc around the camera
-  const BAND_WIDE = [1, 1.8, 2.4];
-
-  function regenerate(band, cx, cz, era, bandIndex) {
-    const { mesh, count, r1 } = band;
+  function regenerate(band, cx, cz, era) {
+    const { mesh, cell, carpet, wide } = band;
     const r0 = band.r0Dyn !== undefined ? band.r0Dyn : band.r0;
-    const wideK = BAND_WIDE[bandIndex];
-    let i = 0, attempts = 0;
-    const areaK = (r1 * r1 - r0 * r0);
-    void areaK;
-    while (i < count && attempts < count * 2.2) {
-      attempts++;
-      const a = rng() * Math.PI * 2;
-      const r = Math.sqrt(r0 * r0 + rng() * (r1 * r1 - r0 * r0));
-      // feather the band edges so rings never read as hard circles: this
-      // band ramps up exactly where the denser inner band ramps down
-      const innerKeep = r0 > 0 ? 0.3 + smoothstepJ(r0, r0 * 1.25, r) * 0.7 : 1;
-      const outerDrop = smoothstepJ(r1 * 0.8, r1, r) * 0.85;
-      if (rng() < outerDrop || rng() > innerKeep) continue;
-      const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
-      const y = heightAt(x, z);
-      if (distToRiver(x, z) < 10 && y < riverLevelNear(x, z) + 0.5) continue;
-      let inLake = false;
-      for (const lake of LAKES) {
-        if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
+    const r1 = band.r1;
+    const perCell = band.perCell * band.budget;
+    const cap = mesh.instanceMatrix.count;
+    const salt = 7 * era + BANDS.indexOf(BANDS.find((b) => b.key === band.key)) * 131 + 17;
+    // gather ring cells sorted centre-out so a full buffer drops the rim,
+    // never one side
+    const ix0 = Math.floor((cx - r1) / cell), ix1 = Math.ceil((cx + r1) / cell);
+    const iz0 = Math.floor((cz - r1) / cell), iz1 = Math.ceil((cz + r1) / cell);
+    const cellsArr = [];
+    for (let iz = iz0; iz <= iz1; iz++) for (let ix = ix0; ix <= ix1; ix++) {
+      const ccx = (ix + 0.5) * cell, ccz = (iz + 0.5) * cell;
+      const d2 = (ccx - cx) * (ccx - cx) + (ccz - cz) * (ccz - cz);
+      if (d2 > (r1 + cell) * (r1 + cell)) continue;
+      if (r0 > 0 && d2 < (r0 - cell) * (r0 - cell) * 0.6) continue;
+      cellsArr.push([d2, ix, iz]);
+    }
+    cellsArr.sort((a, b) => a[0] - b[0]);
+    let i = 0;
+    for (const [, ix, iz] of cellsArr) {
+      if (i >= cap) break;
+      const rng = mulberry32(cellSeed(ix, iz, salt));
+      const n = (perCell | 0) + (rng() < perCell % 1 ? 1 : 0);
+      for (let k = 0; k < n && i < cap; k++) {
+        // every draw below comes from the CELL stream — consume in fixed
+        // order so a blade's look never depends on its neighbours' fate
+        const x = (ix + rng()) * cell, z = (iz + rng()) * cell;
+        const rot = rng() * Math.PI * 2;
+        const hJ = rng(), wJ = rng(), gate = rng(), cJ1 = rng(), cJ2 = rng(), cJ3 = rng();
+        const r = Math.hypot(x - cx, z - cz);
+        if (r > r1 || r < r0 * 0.8) continue;
+        // feathered rims: this band ramps up where the denser one ramps down
+        if (r0 > 0 && gate > 0.3 + smoothstepJ(r0 * 0.8, r0 * 1.15, r) * 0.7) continue;
+        if (gate < smoothstepJ(r1 * 0.82, r1, r) * 0.9) continue;
+        const y = heightAt(x, z);
+        // the channel is up to ~12m half-width plus bank overshoot: never
+        // let blades stand in open water
+        const dRiv = distToRiver(x, z);
+        if (dRiv < 13) continue;                 // ribbon reaches ~12.6m half-width
+        if (dRiv < 18 && y < riverLevelNear(x, z) + 0.6) continue;
+        let inLake = false;
+        for (const lake of LAKES) {
+          if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
+        }
+        if (inLake) continue;
+        const fd = forestDensity(era, x, z, y);
+        // the carpet creeps into the forest as a thin moss-grass floor
+        if (fd > 0.62 && (!carpet || cJ1 < 0.5)) continue;
+        if (!carpet && fd > 0.35 && cJ1 < 0.6) continue;
+        if (era >= 2 && distToRoad(era, x, z) < 1.2) continue;
+        let trodden = false;
+        for (const p of PADS) {
+          if (era === 1 && p !== PADS[2]) continue;
+          if (Math.hypot(x - p.x, z - p.z) < p.r * 0.8) { trodden = true; break; }
+        }
+        // yards: tall clumps die, the short carpet merely thins
+        if (trodden && cJ2 < (carpet ? 0.6 : 0.93)) continue;
+        const fa = era >= 2 ? fieldAt(era, x, z) : null;
+        dummy.position.set(x, y - 0.02, z);
+        dummy.rotation.set(0, rot, 0);
+        const tall = carpet
+          ? 0.13 + hJ * 0.14
+          : fa ? 1.0 + hJ * 0.25 : (trodden ? 0.2 : 0.42) + hJ * 0.5;
+        const w = (0.8 + wJ * 0.5) * wide;
+        dummy.scale.set(w, tall * (era === 0 ? 0.5 : 1), w);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+        // era & land-use tinting via instanceColor (multiplies vertex colours)
+        if (era === 0) col.setRGB(1.35, 1.12, 0.8);            // straw tundra sedge
+        else if (fa) {
+          const t = fa.field.type;
+          if (t === 'rye' || t === 'barley') col.setRGB(1.5, 1.35, 0.8);
+          else if (t === 'flax') col.setRGB(1.0, 1.15, 1.5);
+          else col.setRGB(1.0, 1.05, 0.9);
+        } else {
+          const wetK = Math.max(0, 1 - dRiv / 60) * 0.25;
+          col.setRGB(0.84 + cJ3 * 0.26 - wetK * 0.3, 0.95 + cJ2 * 0.28, 0.76 + cJ1 * 0.22);
+        }
+        if (carpet) col.multiplyScalar(0.92);                  // carpet sits darker
+        if (band.key === 'far') col.multiplyScalar(1.24);      // sun-bleached at range
+        if (era === 5) col.multiplyScalar(0.72);               // satellite drape is dark
+        mesh.setColorAt(i, col);
+        i++;
       }
-      if (inLake) continue;
-      const fd = forestDensity(era, x, z, y);
-      if (fd > 0.62) continue;                       // deep forest: moss floor
-      if (fd > 0.35 && rng() < 0.6) continue;        // forest edge thinning
-      if (era >= 2 && distToRoad(era, x, z) < 1.2) continue;
-      // trodden farmyards: bare earth, only stray blades survive
-      let trodden = false;
-      for (const p of PADS) {
-        if (era === 1 && p !== PADS[2]) continue;
-        if (Math.hypot(x - p.x, z - p.z) < p.r * 0.8) { trodden = true; break; }
-      }
-      if (trodden && rng() < 0.93) continue;
-      const fa = era >= 2 ? fieldAt(era, x, z) : null;
-      dummy.position.set(x, y - 0.02, z);
-      dummy.rotation.y = rng() * Math.PI * 2;
-      const tall = fa ? 1.0 + rng() * 0.25 : (trodden ? 0.2 : 0.42) + rng() * 0.5;
-      const wide = (0.8 + rng() * 0.5) * wideK;
-      dummy.scale.set(wide, tall * (era === 0 ? 0.5 : 1), wide);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-      // era & land-use tinting via instanceColor (multiplies vertex colours)
-      if (era === 0) col.setRGB(1.35, 1.12, 0.8);              // straw tundra sedge
-      else if (fa) {
-        const t = fa.field.type;
-        if (t === 'rye' || t === 'barley') col.setRGB(1.5, 1.35, 0.8);
-        else if (t === 'flax') col.setRGB(1.0, 1.15, 1.5);
-        else col.setRGB(1.0, 1.05, 0.9);
-      } else {
-        const wetK = Math.max(0, 1 - distToRiver(x, z) / 60) * 0.25;
-        col.setRGB(0.88 + rng() * 0.3 - wetK * 0.3, 0.95 + rng() * 0.28, 0.8 + rng() * 0.24);
-      }
-      if (era === 5) col.multiplyScalar(0.72); // blend into the darker satellite drape
-      mesh.setColorAt(i, col);
-      i++;
     }
     mesh.count = i;
     mesh.instanceMatrix.needsUpdate = true;
@@ -295,33 +335,35 @@ export function buildGrass(scene) {
   }
 
   function update(focus, era, camPos) {
-    // from high above, blades are subpixel and the dense near band reads as
-    // a dark disc — drop it and let the mid band cover from r=0
+    // from high above blades are subpixel and dense rings read as discs —
+    // drop the close bands and let the mid band cover from r=0
     const camDist = camPos ? Math.hypot(camPos.x - focus.x, camPos.y - focus.y, camPos.z - focus.z) : 0;
     const nearOn = camDist < 220;
     if (nearOn !== bands[0].on) {
-      bands[0].on = nearOn;
-      bands[0].lastEra = -1;
-      bands[1].r0Dyn = nearOn ? bands[1].r0 : 0;
-      bands[1].lastEra = -1;
+      for (const b of bands) {
+        if (b.hiOff) { b.on = nearOn; b.lastEra = -1; }
+      }
+      bands[2].r0Dyn = nearOn ? bands[2].r0 : 0;
+      bands[2].lastEra = -1;
     }
-    bands.forEach((band, bi) => {
+    bands.forEach((band) => {
       const dx = focus.x - band.lastX, dz = focus.z - band.lastZ;
       if (era !== band.lastEra || dx * dx + dz * dz > band.thresh * band.thresh) {
         band.lastX = focus.x; band.lastZ = focus.z; band.lastEra = era;
-        if (bi === 0 && !band.on) {
-          band.mesh.count = 0;
-        } else {
-          regenerate(band, focus.x, focus.z, era, bi);
-        }
-        if (bi === 0) regenFlowers(focus.x, focus.z, era);
+        if (band.hiOff && !band.on) mesh0Off(band);
+        else regenerate(band, focus.x, focus.z, era);
+        if (band.key === 'near') regenFlowers(focus.x, focus.z, era);
       }
     });
   }
-  // budget hook for the FPS governor: k in (0,1] scales instance counts
+  function mesh0Off(band) {
+    band.mesh.count = 0;
+    band.mesh.instanceMatrix.needsUpdate = true;
+  }
+  // budget hook for the FPS governor: k in (0,1] scales per-cell density
   function setBudget(k) {
     for (const band of bands) {
-      band.count = Math.floor(BANDS[bands.indexOf(band)].count * k);
+      band.budget = k;
       band.lastEra = -1; // force regen
     }
   }

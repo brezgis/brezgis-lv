@@ -84,22 +84,46 @@ function utilityPoles(group, modern) {
   arms.frustumCulled = false;
   const dummy = new THREE.Object3D();
   let i = 0;
+  const tops = [];
   const zEnd = modern ? 2400 : 900;
   for (let zz = -700; zz <= zEnd; zz += 46) {
     if (i >= 60) break;
     const x = S.x + 46 + Math.sin(zz * 0.004) * 4;
-    dummy.position.set(x, heightAt(x, zz) + 3.2, zz);
+    const yBase = heightAt(x, zz);
+    dummy.position.set(x, yBase + 3.2, zz);
     dummy.rotation.set(0, 0, 0);
     dummy.updateMatrix();
     mesh.setMatrixAt(i, dummy.matrix);
     dummy.position.y += 2.9;
     dummy.updateMatrix();
     arms.setMatrixAt(i, dummy.matrix);
+    tops.push([x, yBase + 6.1, zz]);
     i++;
   }
   mesh.count = arms.count = i;
   mesh.castShadow = true;
   group.add(mesh, arms);
+  // the wires: two catenaries between crossarm tips, sagging mid-span
+  const wirePos = [];
+  const SAG = 0.6, STEPS = 9;
+  for (let p = 0; p < tops.length - 1; p++) {
+    const [ax, ay, az] = tops[p], [bx, by, bz] = tops[p + 1];
+    for (const off of [-0.45, 0.45]) {
+      for (let s = 0; s < STEPS; s++) {
+        const t0 = s / STEPS, t1 = (s + 1) / STEPS;
+        const y0 = ay + (by - ay) * t0 - SAG * 4 * t0 * (1 - t0);
+        const y1 = ay + (by - ay) * t1 - SAG * 4 * t1 * (1 - t1);
+        wirePos.push(
+          ax + (bx - ax) * t0 + off, y0, az + (bz - az) * t0,
+          ax + (bx - ax) * t1 + off, y1, az + (bz - az) * t1);
+      }
+    }
+  }
+  const wireGeo = new THREE.BufferGeometry();
+  wireGeo.setAttribute('position', new THREE.Float32BufferAttribute(wirePos, 3));
+  const wires = new THREE.LineSegments(wireGeo, new THREE.LineBasicMaterial({ color: 0x15161a }));
+  wires.frustumCulled = false;
+  group.add(wires);
 }
 
 // ---------------------------------------------------------------------------

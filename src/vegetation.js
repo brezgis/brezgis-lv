@@ -175,8 +175,10 @@ function barkMaterial(tex) {
 function cardMaterial(atlas) {
   // alpha-to-coverage rides the composer's 4x MSAA: soft dithered leaf edges
   // instead of the hard alpha-test fizz that reads as grit in the mips
+  // alphaTest 0.24 trims the mushy dither zone that read as half-rendered
+  // leaves up close while A2C still softens the silhouettes
   const m = new THREE.MeshLambertMaterial({
-    map: atlas, vertexColors: true, alphaTest: 0.15, alphaToCoverage: true,
+    map: atlas, vertexColors: true, alphaTest: 0.24, alphaToCoverage: true,
     side: THREE.DoubleSide,
   });
   windifyVeg(m);
@@ -256,9 +258,11 @@ export function buildVegetation(scene, renderer) {
 
   // ---- far-tier impostors ---------------------------------------------------
   const impostor = captureImpostorAtlas(renderer, impostorEntries);
+  // NO alpha-to-coverage here: on distant subpixel quads the 4-sample dither
+  // reads as fragmented, crawling silhouettes — a plain mid alpha test keeps
+  // far crowns solid
   const impostorMat = new THREE.MeshBasicMaterial({
-    map: impostor.texture, alphaTest: 0.15, alphaToCoverage: true,
-    side: THREE.DoubleSide, fog: true,
+    map: impostor.texture, alphaTest: 0.22, side: THREE.DoubleSide, fog: true,
   });
   const farMeshes = {};
   impostorEntries.forEach((e, i) => {
@@ -545,6 +549,7 @@ export function buildVegetation(scene, renderer) {
   }
 
   // ---- static across eras: glacial erratics, reeds -------------------------
+  const boulderColliders = [];
   {
     // boulders: the ice left them; the farmers cleared them from the fields.
     // Excluded from every era's field polygons so they can persist unmoved.
@@ -571,6 +576,7 @@ export function buildVegetation(scene, renderer) {
       dummy.scale.set(s * (0.8 + rng() * 0.5), s * (0.7 + rng() * 0.5), s * (0.8 + rng() * 0.5));
       dummy.updateMatrix();
       boulders[which].setMatrixAt(bi[which]++, dummy.matrix);
+      if (s > 0.55) boulderColliders.push([x, z, s * 0.95]);
     }
     boulders.forEach((b, i) => { b.count = bi[i]; b.instanceMatrix.needsUpdate = true; });
   }
@@ -628,23 +634,47 @@ export function buildVegetation(scene, renderer) {
       }
     }
     for (const p of RIVER_PTS) {
-      if (rng() < 0.55) continue;
+      if (rng() < 0.4) continue;
       for (const side of [-1, 1]) {
-        if (i >= 6000) break;
-        const px = p[0] + side * (12 + rng() * 5), pz = p[1] + (rng() - 0.5) * 20;
-        const y = heightAt(px, pz);
-        if (y > p[2] + 2.5) continue;
-        dummy.position.set(px, y - 0.1, pz);
-        dummy.rotation.y = rng() * 6.3;
-        const s = 0.45 + rng() * 0.6;
-        dummy.scale.set(s, s, s);
-        dummy.updateMatrix();
-        reeds.setMatrixAt(i++, dummy.matrix);
+        for (let rep = 0; rep < 2 && i < 6000; rep++) {
+          // reeds hug the waterline — spread across the floodplain they read
+          // as dark shadowy clumps littering the meadow
+          const px = p[0] + side * (11 + rng() * 4), pz = p[1] + (rng() - 0.5) * 22;
+          const y = heightAt(px, pz);
+          if (y > p[2] + 1.0) continue;
+          dummy.position.set(px, y - 0.1, pz);
+          dummy.rotation.y = rng() * 6.3;
+          const s = 0.45 + rng() * 0.6;
+          dummy.scale.set(s, s, s);
+          dummy.updateMatrix();
+          reeds.setMatrixAt(i++, dummy.matrix);
+        }
       }
     }
     reeds.count = i;
     reeds.instanceMatrix.needsUpdate = true;
     group.add(reeds);
+
+    // cobbled shores (LAAS streambed rule): waterworn pebbles on the bars
+    const pebbles = makeInstanced(buildBoulder(47), boulderMat, 3200, false);
+    let pi = 0;
+    for (const p of RIVER_PTS) {
+      for (let k = 0; k < 5 && pi < 3200; k++) {
+        const side = rng() < 0.5 ? -1 : 1;
+        const px = p[0] + side * (9.5 + rng() * 5.5), pz = p[1] + (rng() - 0.5) * 40;
+        const y = heightAt(px, pz);
+        if (y > p[2] + 1.4) continue;             // pebbles hug the waterline
+        const s = 0.05 + Math.pow(rng(), 1.8) * 0.3;
+        dummy.position.set(px, y - s * 0.35, pz);
+        dummy.rotation.set(rng() * 0.6, rng() * 6.3, rng() * 0.6);
+        dummy.scale.set(s * (0.9 + rng() * 0.5), s * (0.55 + rng() * 0.3), s * (0.9 + rng() * 0.5));
+        dummy.updateMatrix();
+        pebbles.setMatrixAt(pi++, dummy.matrix);
+      }
+    }
+    pebbles.count = pi;
+    pebbles.instanceMatrix.needsUpdate = true;
+    group.add(pebbles);
   }
 
   // day-night tint for the unlit far impostors (sun colour × ambient level)
@@ -655,5 +685,18 @@ export function buildVegetation(scene, renderer) {
       (0.45 + 0.55 * sunColor.b) * ambient);
   }
 
-  return { setEra, group, tick };
+  // trunk circles for the walking player (full-detail tier + big erratics)
+  function getColliders(era) {
+    const lists = placementsFor(era);
+    const out = boulderColliders.slice();
+    for (const key of SP_KEYS) {
+      if (key === 'shrub') continue;
+      for (const e of lists[key].full) {
+        out.push([e[0], e[2], Math.max(0.22, e[3] * 0.022)]);
+      }
+    }
+    return out;
+  }
+
+  return { setEra, group, tick, getColliders };
 }

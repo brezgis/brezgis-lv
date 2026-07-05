@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, BUMPS, fieldAt, distToRoad, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
-import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
+import { makeNoise, clamp, lerp, smoothstep, pointInPoly, sampleSpline } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
 const noise = makeNoise(1907);
@@ -39,8 +39,43 @@ function cellToWorld(gx, gy) {
       if (cand < field[i]) field[i] = cand;
     }
   }
-  for (const p of RIVER_PTS) stamp(p[0], p[1], 38, 14, p[2] - 1.8);
-  for (const s of STREAMS) for (const p of s.pts) stamp(p[0], p[1], 20, 5, p[2] - 0.8);
+  // wider, softer valley profile: gentle grassed banks instead of a trench
+  for (const p of RIVER_PTS) stamp(p[0], p[1], 50, 17, p[2] - 1.8);
+  // …and a tight channel stamped along the RIBBON SPLINE itself: the water
+  // mesh follows the Catmull-Rom curve between the OSM points, which bulges
+  // off the point-stamped corridor on bends and left the river beheaded by
+  // untouched ground in places
+  {
+    const SAMP = Math.min(1700, RIVER_PTS.length * 4);
+    for (let i = 0; i <= SAMP; i++) {
+      const [x, z, y] = sampleSpline(RIVER_PTS, i / SAMP);
+      stamp(x, z, 27, 12, y - 1.7);
+    }
+  }
+  for (const s of STREAMS) {
+    for (const p of s.pts) stamp(p[0], p[1], 24, 6, p[2] - 0.8);
+    const SAMP = s.pts.length * 4;
+    for (let i = 0; i <= SAMP; i++) {
+      const [x, z, y] = sampleSpline(s.pts, i / SAMP);
+      stamp(x, z, 10, 3.5, y - 0.75);
+    }
+  }
+  // the mill-pond basin: a real dished bed at the Gauja bend so the pond
+  // water body meets the mill and dam instead of hovering on the bank
+  {
+    const P = LOC.POND, lvl = LOC.POND_LEVEL;
+    const RX = 56, RZ = 38;
+    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+      const [x, z] = cellToWorld(gx, gy);
+      const nx = (x - (P.x + 4)) / RX, nz = (z - P.z) / RZ;
+      const rr = Math.hypot(nx, nz);
+      if (rr < 1.15) {
+        const i = gy * G + gx;
+        const bed = lvl - 1.2 + smoothstep(0.7, 1.15, rr) * 2.6;
+        field[i] = Math.min(field[i], Math.max(bed, lvl - 1.2));
+      }
+    }
+  }
 
   // pads (farmyards) flatten
   for (const p of PADS) {
@@ -172,6 +207,11 @@ function detailify(material, strength) {
           float d1 = texture2D(uDetail, vWp.xz * 0.09).r;   // tussocks
           float d2 = texture2D(uDetail, vWp.xz * 0.011).r;  // field-scale patchiness
           diffuseColor.rgb *= mix(1.0, (0.84 + 0.3 * d0) * (0.74 + 0.5 * d1) * (0.8 + 0.4 * d2), uDetailK);
+          // sward speckle: on green ground a ~1m turf grain carries the
+          // grass illusion far beyond the instanced blade rings
+          float sward = texture2D(uDetail, vWp.xz * 0.9).r;
+          float greenK = clamp((diffuseColor.g - diffuseColor.r) * 5.0, 0.0, 1.0);
+          diffuseColor.rgb *= mix(1.0, 0.8 + 0.38 * sward, greenK * uDetailK);
           // steep ground bares mineral soil / till between the grass
           float bare = smoothstep(0.16, 0.45, vSlope + (d1 - 0.5) * 0.14);
           diffuseColor.rgb = mix(diffuseColor.rgb,
@@ -263,9 +303,9 @@ export function paintEra(era) {
     const dRiv = distToRiver(x, z);
 
     // base meadow green, dryer on heights, lusher near water
-    let r = 0.30 + n1 * 0.14 + smoothstep(200, 245, y) * 0.10;
-    let g = 0.42 + n1 * 0.12 + smoothstep(60, 12, dRiv) * 0.05;
-    let b = 0.16 + n2 * 0.05;
+    let r = 0.275 + n1 * 0.14 + smoothstep(200, 245, y) * 0.10;
+    let g = 0.44 + n1 * 0.12 + smoothstep(60, 12, dRiv) * 0.05;
+    let b = 0.155 + n2 * 0.05;
 
     // wildflower sparkle on open meadow (midsummer)
     if (n2 > 0.82 && dRiv < 120 && era < 3) { r += 0.16; g += 0.1; b += 0.12; }

@@ -24,14 +24,11 @@ for (const step of script.split(';').filter(Boolean)) {
     const set = new Set(names.split(','));
     window.__scene.traverse((o) => { if (set.has(o.name)) o.visible = false; });
   }, arg);
-  if (cmd === 'cam') await page.evaluate((a) => {
-    const [x, y, z] = a.split(',').map(Number);
-    window.__sim.controls.autoRotate = false;
-    window.__sim.camera.position.set(x, y, z);
-  }, arg);
+  if (cmd === 'cam') await page.evaluate((a) => { window.__dbgCam = a.split(',').map(Number); }, arg);
   if (cmd === 'tgt') await page.evaluate((a) => {
-    const [x, y, z] = a.split(',').map(Number);
-    window.__sim.controls.target.set(x, y, z);
+    const t = a.split(',').map(Number);
+    const c = window.__dbgCam || [t[0] + 50, t[1] + 20, t[2] + 50];
+    window.__sim.setCam(c[0], c[1], c[2], t[0], t[1], t[2]);
   }, arg);
   if (cmd === 'nofog') await page.evaluate(() => { window.__scene.fog.near = 88888; window.__scene.fog.far = 99999; });
   if (cmd === 'probe') console.log(await page.evaluate(() => {

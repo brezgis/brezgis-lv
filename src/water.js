@@ -32,8 +32,8 @@ function waterNormalTex() {
 function makeWaterMaterial(color, opacity) {
   const m = new THREE.MeshPhongMaterial({
     color,
-    shininess: 300,
-    specular: 0xd8e4ee,
+    shininess: 190,
+    specular: 0xb9c6d0,
     transparent: true,
     opacity,
     normalMap: waterNormalTex(),
@@ -54,22 +54,31 @@ function makeWaterMaterial(color, opacity) {
   return m;
 }
 
+// Water ribbon, LAAS-shore rules: high tessellation so bends are CURVES
+// (the old 63m segments read as rectangles), and a shallow-V cross-section —
+// the edge verts sit ~0.7m below the centreline so the surface always tucks
+// UNDER the rising bank instead of floating over hollows in the 30m DEM.
 function ribbon(pts, widthFn, mat, uvScale = 60) {
-  const SEG = Math.min(260, pts.length * 3);
+  const SEG = Math.min(1400, pts.length * 4);
+  const EDGE_DROP = 0.7;
   const positions = [], uvs = [], indices = [];
   for (let i = 0; i <= SEG; i++) {
     const t = i / SEG;
     const [x, z, y] = sampleSpline(pts, t);
-    const [x2, z2] = sampleSpline(pts, Math.min(1, t + 0.004));
+    const [x2, z2] = sampleSpline(pts, Math.min(1, t + 0.002));
     let dx = x2 - x, dz = z2 - z;
     const len = Math.hypot(dx, dz) || 1;
     dx /= len; dz /= len;
-    const w = widthFn(t);
-    positions.push(x - dz * w, y, z + dx * w, x + dz * w, y, z - dx * w);
-    uvs.push(0, t * uvScale, 1, t * uvScale);
+    const w = widthFn(t) + 1.6; // overshoot into the banks
+    positions.push(
+      x - dz * w, y - EDGE_DROP, z + dx * w,
+      x, y, z,
+      x + dz * w, y - EDGE_DROP, z - dx * w);
+    uvs.push(0, t * uvScale, 0.5, t * uvScale, 1, t * uvScale);
     if (i < SEG) {
-      const a = i * 2;
-      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      const a = i * 3;
+      indices.push(a, a + 1, a + 4, a, a + 4, a + 3);
+      indices.push(a + 1, a + 2, a + 5, a + 1, a + 5, a + 4);
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -86,7 +95,7 @@ export function buildWater() {
   const mats = [];
 
   // --- lakes from OSM polygons
-  const lakeMat = makeWaterMaterial(0x38565f, 0.92);
+  const lakeMat = makeWaterMaterial(0x2f4c58, 0.94);
   mats.push(lakeMat);
   for (const lake of LAKES) {
     // store as (x, -z) so that rotateX(-PI/2) lands on (x, z) with the normal up
@@ -103,14 +112,14 @@ export function buildWater() {
   }
 
   // --- the Gauja
-  const riverMat = makeWaterMaterial(0x33525a, 0.9);
+  const riverMat = makeWaterMaterial(0x2c4852, 0.93);
   mats.push(riverMat);
   const river = ribbon(RIVER_PTS, (t) => 10.5 * (0.75 + 0.3 * Math.sin(t * 23 + 1)), riverMat, 70);
   river.name = 'gauja';
   group.add(river);
 
   // --- streams
-  const streamMat = makeWaterMaterial(0x3a5a60, 0.88);
+  const streamMat = makeWaterMaterial(0x314f58, 0.92);
   mats.push(streamMat);
   for (const s of STREAMS) {
     const st = ribbon(s.pts, () => 2.1, streamMat, 90);
@@ -119,7 +128,7 @@ export function buildWater() {
   }
 
   // --- mill pond on the Gauja bend (added/removed by era manager; eras 2-3)
-  const pondMat = makeWaterMaterial(0x35555c, 0.92);
+  const pondMat = makeWaterMaterial(0x2f4e57, 0.94);
   mats.push(pondMat);
   const pondGeo = new THREE.CircleGeometry(1, 28);
   pondGeo.rotateX(-Math.PI / 2);
@@ -148,7 +157,7 @@ export function buildWater() {
     for (const m of mats) {
       m.envMap = tex;
       m.combine = THREE.MixOperation;
-      m.reflectivity = 0.42;
+      m.reflectivity = 0.33; // grazing-bright water vs Lambert land read as glare
       m.needsUpdate = true;
     }
   }

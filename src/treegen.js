@@ -669,7 +669,8 @@ export function buildFern(seed) {
       hue: rng.float() * 2 - 1, age: rng.float() * 0.4,
     });
   }
-  buildFoliageCards(g, anchors, { mode: 'lying', sizeK: 2.4, bend: 1.0 }, rng);
+  // cross mode: single-plane fronds vanish edge-on and read as 2D cutouts
+  buildFoliageCards(g, anchors, { mode: 'cross', sizeK: 2.4, bend: 1.0 }, rng);
   return g.build();
 }
 

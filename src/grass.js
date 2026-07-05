@@ -27,11 +27,11 @@ function cellSeed(ix, iz, salt) {
 // exclusion rules once per cell so walk-regen stays hitch-free; the coarse
 // bands still check roads per blade (an 11m cell straddles a whole lane).
 const BANDS = [
-  { key: 'turf', r0: 0, r1: 26, cell: 1.3, perCell: 16, thresh: 9, wide: 1.15, carpet: true, hiOff: true, cellRules: true },
-  { key: 'carpet', r0: 22, r1: 62, cell: 1.6, perCell: 10, thresh: 18, wide: 1.0, carpet: true, hiOff: true, cellRules: true },
-  { key: 'near', r0: 0, r1: 55, cell: 1.6, perCell: 8, thresh: 15, wide: 1.1, hiOff: true, cellRules: true },
-  { key: 'mid', r0: 45, r1: 130, cell: 2.6, perCell: 7, thresh: 38, wide: 1.8, cellRules: true, roadPerBlade: true },
-  { key: 'far', r0: 115, r1: 900, cell: 9, perCell: 4.2, thresh: 260, wide: 3.2, cellRules: true, roadPerBlade: true },
+  { key: 'turf', r0: 0, r1: 26, cell: 1.3, perCell: 22, thresh: 9, wide: 1.2, carpet: true, hiOff: true, cellRules: true },
+  { key: 'carpet', r0: 22, r1: 62, cell: 1.6, perCell: 14, thresh: 18, wide: 1.1, carpet: true, hiOff: true, cellRules: true },
+  { key: 'near', r0: 0, r1: 55, cell: 1.6, perCell: 11, thresh: 15, wide: 1.15, hiOff: true, cellRules: true },
+  { key: 'mid', r0: 45, r1: 130, cell: 2.6, perCell: 9, thresh: 38, wide: 1.85, cellRules: true, roadPerBlade: true },
+  { key: 'far', r0: 115, r1: 900, cell: 9, perCell: 5.5, thresh: 260, wide: 3.4, cellRules: true, roadPerBlade: true },
 ];
 
 function bladeGeometry(segs) {
@@ -309,7 +309,7 @@ export function buildGrass(scene) {
         const ccx = (ix + 0.5) * cell, ccz = (iz + 0.5) * cell;
         cY = heightAt(ccx, ccz);
         cDRiv = distToRiver(ccx, ccz);
-        if (cDRiv < 15 || (cDRiv < 20 && cY < riverLevelNear(ccx, ccz) + 0.6)) cellOK = false;
+        if (cDRiv < 16.5 || (cDRiv < 21 && cY < riverLevelNear(ccx, ccz) + 0.6)) cellOK = false;
         if (cellOK) {
           for (const lake of LAKES) {
             if (cY < lake.level + 0.5 && pointInPoly(ccx, ccz, lake.poly)) { cellOK = false; break; }
@@ -352,8 +352,8 @@ export function buildGrass(scene) {
         } else {
           y = heightAt(x, z);
           dRiv = distToRiver(x, z);
-          if (dRiv < 15) continue;               // ribbon reaches ~12.6m half-width
-          if (dRiv < 20 && y < riverLevelNear(x, z) + 0.6) continue;
+          if (dRiv < 16.5) continue;             // water + bank skirt zone
+          if (dRiv < 21 && y < riverLevelNear(x, z) + 0.6) continue;
           let inLake = false;
           for (const lake of LAKES) {
             if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }

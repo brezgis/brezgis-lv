@@ -219,9 +219,9 @@ const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'linden', 'apple', '
 // instance capacity per species: [full, far]. Two tiers only — real geometry
 // close to the points of interest, captured impostors beyond.
 const CAPS = {
-  spruce: [1700, 135000], pine: [1150, 95000], birch: [1400, 115000],
-  oak: [560, 32000], alder: [900, 47000], linden: [280, 10000],
-  apple: [90, 1400], shrub: [6000, 42000], snag: [200, 0],
+  spruce: [2100, 175000], pine: [1400, 125000], birch: [1700, 150000],
+  oak: [700, 42000], alder: [1100, 61000], linden: [330, 13000],
+  apple: [110, 1700], shrub: [8000, 55000], snag: [260, 0],
 };
 const FULL_R = 260; // full-detail radius around points of interest
 
@@ -338,6 +338,9 @@ export function buildVegetation(scene, renderer) {
   const boulderMat = windifyVeg(new THREE.MeshLambertMaterial({ vertexColors: true }));
   const boulders = [makeInstanced(buildBoulder(41), boulderMat, 600, true),
                     makeInstanced(buildBoulder(43), boulderMat, 600, true)];
+  // small mossy forest-floor rocks, refreshed per era
+  const rocks = makeInstanced(buildBoulder(53), boulderMat, 6000, false);
+  group.add(rocks);
   boulders.forEach((b) => group.add(b));
 
   const dummy = new THREE.Object3D();
@@ -358,9 +361,9 @@ export function buildVegetation(scene, renderer) {
     const rng = makeNoise(1000 + era * 7).rng;
     const lists = {};
     for (const k of SP_KEYS) lists[k] = { full: [], far: [] };
-    lists.fern = []; lists.log = []; lists.stump = [];
+    lists.fern = []; lists.log = []; lists.stump = []; lists.rock = [];
     const S = LOC.STEAD;
-    const step = 10;   // real hemiboreal forest runs hundreds of stems/ha
+    const step = 9;    // real hemiboreal forest runs hundreds of stems/ha
     const EXT = HM_SPAN - 120;
     const N = Math.floor(EXT / step);
     for (let iz = 0; iz < N; iz++) {
@@ -385,7 +388,7 @@ export function buildVegetation(scene, renderer) {
         const tier = dp < FULL_R ? 'full' : 'far';
         // the denser grid would melt the full-geometry tier — thin it back
         // to roughly the old stem count; the far impostors take the density
-        if (tier === 'full' && rng() < 0.6) continue;
+        if (tier === 'full' && rng() < 0.5) continue;
         if (era === 0) {
           // tundra: knee-high dwarf birch / juniper heath
           lists.shrub[tier].push([x, y, z, 0.8 + rng() * 1.1, rng() * 6.3, 0.9 + rng() * 0.25]);
@@ -406,7 +409,7 @@ export function buildVegetation(scene, renderer) {
         // understory in closed forest, near tiers only: ferns, hazel-like
         // underbrush and bramble tangles — an old-growth floor is BUSY
         if (tier !== 'far' && d > 0.42) {
-          if (era >= 1 && rng() < 0.15) {
+          if (era >= 1 && rng() < 0.28) {
             const ux = x + (rng() - 0.5) * 9, uz = z + (rng() - 0.5) * 9;
             // low dark tangle (bramble) or a taller hazel-ish bush
             const bramble = rng() < 0.45;
@@ -416,14 +419,18 @@ export function buildVegetation(scene, renderer) {
               rng() * 6.3, bramble ? 0.68 + rng() * 0.18 : 0.85 + rng() * 0.25,
             ]);
           }
-          if (rng() < (era <= 2 ? 0.38 : 0.18)) {
+          if (rng() < (era <= 2 ? 0.55 : 0.3)) {
             const fx = x + (rng() - 0.5) * 10, fz = z + (rng() - 0.5) * 10;
             lists.fern.push([fx, heightAt(fx, fz), fz, 0.7 + rng() * 0.9, rng() * 6.3]);
           }
-          if ((era === 1 || era === 2) && rng() < 0.07) {
+          if (rng() < 0.08) {
+            const rx = x + (rng() - 0.5) * 10, rz = z + (rng() - 0.5) * 10;
+            lists.rock.push([rx, heightAt(rx, rz), rz, 0.12 + Math.pow(rng(), 1.7) * 0.55, rng() * 6.3]);
+          }
+          if ((era === 1 || era === 2) && rng() < 0.12) {
             const lx = x + (rng() - 0.5) * 12, lz = z + (rng() - 0.5) * 12;
             lists.log.push([lx, heightAt(lx, lz), lz, rng() * 6.3, 0.8 + rng() * 0.7, (rng() * 3) | 0]);
-          } else if (era >= 3 && rng() < 0.03) {
+          } else if (era >= 3 && rng() < 0.05) {
             const sx = x + (rng() - 0.5) * 9, sz = z + (rng() - 0.5) * 9;
             lists.stump.push([sx, heightAt(sx, sz), sz, rng() * 6.3, 0.8 + rng() * 0.6]);
           }
@@ -533,6 +540,21 @@ export function buildVegetation(scene, renderer) {
         farM.instanceMatrix.needsUpdate = true;
         if (farM.instanceColor) farM.instanceColor.needsUpdate = true;
       }
+    }
+    // forest-floor rocks
+    {
+      const arr = lists.rock;
+      const n = Math.min(arr.length, rocks.instanceMatrix.count);
+      for (let i = 0; i < n; i++) {
+        const [x, y, z, sc, rot] = arr[i];
+        dummy.position.set(x, y - sc * 0.3, z);
+        dummy.rotation.set(0, rot, 0);
+        dummy.scale.set(sc, sc * 0.7, sc);
+        dummy.updateMatrix();
+        rocks.setMatrixAt(i, dummy.matrix);
+      }
+      rocks.count = n;
+      rocks.instanceMatrix.needsUpdate = true;
     }
     // ferns
     {

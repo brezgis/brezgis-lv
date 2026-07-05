@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { RIVER_PTS, STREAMS, LAKES } from './geodata.js';
 import { LOC } from './landuse.js';
 import { sampleSpline, canvasTexture, makeNoise } from './util.js';
+import { heightAt } from './terrain.js';
 
 function waterNormalTex() {
   const n = makeNoise(777);
@@ -58,30 +59,41 @@ function makeWaterMaterial(color, opacity) {
 // (the old 63m segments read as rectangles), and a FLAT surface — the
 // shoreline comes from the carved bank rising through the plane.
 function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 0.85) {
-  const SEG = Math.min(1400, pts.length * 4);
+  // SEG and the tangent window MUST match the bank skirt exactly — the
+  // skirt's inner verts are meant to be vertex-for-vertex identical with
+  // these edges; any tessellation drift opens black slivers into the trench
+  const SEG = Math.min(2000, pts.length * 6);
   // LAAS shore rule: the water surface is FLAT (a sloped surface reads as a
   // convex hump from the bank) — only a slight edge tuck hides the seam.
   // The shoreline itself comes from the bank rising THROUGH the plane, so
   // the spline-following channel carve must clear the full ribbon width.
   const EDGE_DROP = edgeDrop;
+  // 5 verts per row: the surface stays DEAD FLAT out to ~96% width, then a
+  // short near-vertical rim drops under the bank collar. A gradual slope
+  // read as a dark tilted band along every shore at grazing angles.
   const positions = [], uvs = [], indices = [];
   for (let i = 0; i <= SEG; i++) {
     const t = i / SEG;
     const [x, z, y] = sampleSpline(pts, t);
-    const [x2, z2] = sampleSpline(pts, Math.min(1, t + 0.002));
-    let dx = x2 - x, dz = z2 - z;
+    const [xa, za] = sampleSpline(pts, Math.max(0, t - 0.004));
+    const [x2, z2] = sampleSpline(pts, Math.min(1, t + 0.004));
+    let dx = x2 - xa, dz = z2 - za;
     const len = Math.hypot(dx, dz) || 1;
     dx /= len; dz /= len;
     const w = widthFn(t) + 1.6; // overshoot into the banks
+    const wf = w - 0.5;         // flat out to here
     positions.push(
       x - dz * w, y - EDGE_DROP, z + dx * w,
+      x - dz * wf, y, z + dx * wf,
       x, y, z,
+      x + dz * wf, y, z - dx * wf,
       x + dz * w, y - EDGE_DROP, z - dx * w);
-    uvs.push(0, t * uvScale, 0.5, t * uvScale, 1, t * uvScale);
+    uvs.push(0, t * uvScale, 0.04, t * uvScale, 0.5, t * uvScale, 0.96, t * uvScale, 1, t * uvScale);
     if (i < SEG) {
-      const a = i * 3;
-      indices.push(a, a + 1, a + 4, a, a + 4, a + 3);
-      indices.push(a + 1, a + 2, a + 5, a + 1, a + 5, a + 4);
+      const a = i * 5;
+      for (let k = 0; k < 4; k++) {
+        indices.push(a + k, a + k + 1, a + k + 6, a + k, a + k + 6, a + k + 5);
+      }
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -132,9 +144,106 @@ export function buildWater() {
   // --- the Gauja
   const riverMat = makeWaterMaterial(0x2c4852, 0.93);
   mats.push(riverMat);
-  const river = ribbon(RIVER_PTS, (t) => 10.5 * (0.75 + 0.3 * Math.sin(t * 23 + 1)), riverMat, 70);
+  // constant width: the old sinusoidal wobble made the shore seams
+  // unpredictable — every downstream fix has to know where the edge is
+  const river = ribbon(RIVER_PTS, () => 10.2, riverMat, 70, 0.5);
+  river.renderOrder = 1;
   river.name = 'gauja';
   group.add(river);
+
+  // BANK SKIRT: a sandy collar welded to the water's edge. Inner verts share
+  // the ribbon edge exactly (no gap can exist); outer verts drape onto the
+  // terrain when it rises above the water and hold a low berm (+0.3) where
+  // the 17m-cell heightfield dips — the mesh solves what sculpting cannot.
+  {
+    const SEG = Math.min(2000, RIVER_PTS.length * 6);
+    const W_IN = 10.2 + 1.6, W_OUT = 14.5;
+    // pass 1: rows with curvature-clamped collar width (a bend tighter than
+    // the offset would fold the outer edge back over itself)
+    const rows = [];
+    let pdx = 0, pdz = 0;
+    for (let i = 0; i <= SEG; i++) {
+      const t = i / SEG;
+      const [x, z, y] = sampleSpline(RIVER_PTS, t);
+      const [xa, za] = sampleSpline(RIVER_PTS, Math.max(0, t - 0.004));
+      const [x2, z2] = sampleSpline(RIVER_PTS, Math.min(1, t + 0.004));
+      let dx = x2 - xa, dz = z2 - za;
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len; dz /= len;
+      let wOut = W_OUT;
+      if (i > 0) {
+        const dTheta = Math.acos(Math.min(1, Math.max(-1, dx * pdx + dz * pdz)));
+        const radius = dTheta > 1e-4 ? (16581 / SEG) / dTheta : 1e9;
+        wOut = Math.min(W_OUT, Math.max(W_IN + 0.4, radius * 0.85));
+      }
+      pdx = dx; pdz = dz;
+      rows.push([x, z, y, dx, dz, wOut]);
+    }
+    // smooth the clamp: abrupt width changes twist the quads
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 1; i < rows.length - 1; i++) {
+        rows[i][5] = Math.min(rows[i][5], (rows[i - 1][5] + rows[i][5] + rows[i + 1][5]) / 3);
+      }
+    }
+    // resolve the two edge polylines first, then FORBID the outer edge from
+    // reversing against the inner edge's direction of travel (tight apexes
+    // otherwise fold the strip and its backfaces render black)
+    const inner = [[], []], outer = [[], []];
+    for (let i = 0; i < rows.length; i++) {
+      const [x, z, y, dx, dz, wOut] = rows[i];
+      [-1, 1].forEach((side, si) => {
+        const nx = -dz * side, nz = dx * side;
+        inner[si].push([x + nx * W_IN, y, z + nz * W_IN]);
+        outer[si].push([x + nx * wOut, y, z + nz * wOut]);
+      });
+    }
+    for (let si = 0; si < 2; si++) {
+      for (let i = 1; i < rows.length; i++) {
+        const idx2 = (inner[si][i][0] - inner[si][i - 1][0]);
+        const idz2 = (inner[si][i][2] - inner[si][i - 1][2]);
+        const odx = (outer[si][i][0] - outer[si][i - 1][0]);
+        const odz = (outer[si][i][2] - outer[si][i - 1][2]);
+        if (odx * idx2 + odz * idz2 < 0.02) {
+          outer[si][i][0] = outer[si][i - 1][0] + idx2;
+          outer[si][i][2] = outer[si][i - 1][2] + idz2;
+        }
+      }
+    }
+    const positions = [], indices = [];
+    for (let i = 0; i < rows.length; i++) {
+      const y = rows[i][2];
+      for (const si of [0, 1]) {
+        const inn = inner[si][i], out = outer[si][i];
+        // outer edge pinned just above the waterline: the carved shelf keeps
+        // all nearby terrain below it, and rising banks cover it naturally
+        positions.push(
+          inn[0], y - 0.5, inn[2],
+          out[0], y + 0.06, out[2]);
+      }
+      if (i > 0) {
+        const a2 = (i - 1) * 4;
+        indices.push(a2, a2 + 1, a2 + 5, a2, a2 + 5, a2 + 4);       // left strip
+        indices.push(a2 + 3, a2 + 2, a2 + 6, a2 + 3, a2 + 7, a2 + 6); // right strip
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    // the collar is ground: light it as ground. Computed normals flip on
+    // twisted quads and read as a black-and-tan checker.
+    const nrm = new Float32Array(positions.length);
+    for (let i = 0; i < nrm.length; i += 3) { nrm[i + 1] = 1; }
+    geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    const skirt = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+      // FrontSide: any residual fold on a hairpin culls away instead of
+      // flashing its black backface
+      color: 0x7f7154, side: THREE.FrontSide,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    }));
+    skirt.receiveShadow = true;
+    skirt.name = 'bankskirt';
+    group.add(skirt);
+  }
 
   // --- streams
   const streamMat = makeWaterMaterial(0x314f58, 0.92);

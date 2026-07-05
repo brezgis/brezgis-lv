@@ -46,31 +46,16 @@ function cellToWorld(gx, gy) {
   // off the point-stamped corridor on bends and left the river beheaded by
   // untouched ground in places
   {
-    const SAMP = Math.min(1700, RIVER_PTS.length * 4);
+    // stamps every ~5.5m: at the old 11m spacing the r=8 deep zones waisted
+    // between samples and the channel bed rose in ridges (the river read as
+    // disconnected pools)
+    const SAMP = Math.min(3000, RIVER_PTS.length * 8);
     for (let i = 0; i <= SAMP; i++) {
       const [x, z, y] = sampleSpline(RIVER_PTS, i / SAMP);
-      // deep bed only through the middle; the banks must RISE through the
-      // flat water plane before the ribbon edge or you see under the rim
-      stamp(x, z, 26, 8, y - 1.9);
-    }
-    // natural levee lip: low ground in the 11.6-15.6m annulus is raised
-    // just above the waterline so the shore always pierces the surface
-    for (let i = 0; i <= SAMP; i++) {
-      const [px, pz, py] = sampleSpline(RIVER_PTS, i / SAMP);
-      const cr = Math.ceil(16 / CELL) + 1;
-      const cgx = Math.round((((px - OX) / SPAN) + 0.5) * (G - 1));
-      const cgy = Math.round((((pz - OZ) / SPAN) + 0.5) * (G - 1));
-      for (let dy = -cr; dy <= cr; dy++) {
-        for (let dx = -cr; dx <= cr; dx++) {
-          const gx = cgx + dx, gy = cgy + dy;
-          if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
-          const [x, z] = cellToWorld(gx, gy);
-          const d = Math.hypot(x - px, z - pz);
-          if (d < 11.6 || d > 15.6) continue;
-          const i2 = gy * G + gx;
-          field[i2] = Math.max(field[i2], py + 0.3);
-        }
-      }
+      stamp(x, z, 26, 9, y - 1.9);
+      // shallow SHELF to 16m: guarantees no 17m-cell terrain triangle can
+      // bulge up through the bank apron mid-collar (the black-wedge bug)
+      stamp(x, z, 30, 16, y - 0.55);
     }
   }
   for (const s of STREAMS) {
@@ -169,7 +154,7 @@ function baseHeight(x, z) {
 function microDamp(x, z) {
   let damp = 1;
   for (const p of PADS) damp = Math.min(damp, smoothstep(p.r * 0.6, p.r + 10, Math.hypot(x - p.x, z - p.z)));
-  damp = Math.min(damp, smoothstep(6, 18, distToRiver(x, z)));
+  damp = Math.min(damp, smoothstep(14, 26, distToRiver(x, z))); // micro noise must not breach the shore
   return damp;
 }
 export function heightAt(x, z) {

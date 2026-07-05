@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { canvasTexture, makeNoise, lerp, smoothstep, clamp } from './util.js';
 
-const DAY_SECONDS = 240;
+const DAY_SECONDS = 900; // slow sun = smooth shadows; Rit still flows
 
 // ---- sun transmittance (drives the directional light colour) ---------------
 const Rp = 6371e3, Ra = 6451e3, Hr = 8500, Hm = 1400;
@@ -128,12 +128,12 @@ export function buildSky(scene, renderer) {
   // sky-reflecting water (grazing-bright rivers vs near-black meadow read
   // as glare, not evening)
   const stops = [
-    { t: 0.0, zen: 0x2e4a72, fog: 0xdec3a8, hemiI: 0.56 },
+    { t: 0.0, zen: 0x2e4a72, fog: 0xb99a84, hemiI: 0.56 },
     { t: 0.12, zen: 0x3c6ba4, fog: 0xd5e0da, hemiI: 0.72 },
     { t: 0.35, zen: 0x3f6fa8, fog: 0xcfe0e8, hemiI: 0.85 },
     { t: 0.62, zen: 0x3f6fa8, fog: 0xd3e2e6, hemiI: 0.8 },
     { t: 0.82, zen: 0x35577f, fog: 0xe6cba6, hemiI: 0.66 },
-    { t: 1.0, zen: 0x27395c, fog: 0xcfa084, hemiI: 0.52 },
+    { t: 1.0, zen: 0x27395c, fog: 0x9a7660, hemiI: 0.52 },
   ];
   const cA = new THREE.Color(), cB = new THREE.Color();
   function stopLerp(t, key, target) {
@@ -343,7 +343,7 @@ export function buildSky(scene, renderer) {
     scene.fog.color.lerp(fogSun, state.sunLow * 0.35);
     // fog is scattered SUNLIGHT: after the sun goes it must darken with the
     // sky or the horizon glows all night
-    scene.fog.color.multiplyScalar(0.22 + 0.78 * clamp(sd.y * 5 + 0.6, 0.1, 1));
+    scene.fog.color.multiplyScalar(0.09 + 0.91 * clamp(sd.y * 5 + 0.42, 0.05, 1));
 
     sky.position.copy(focus);
     horizon.position.set(focus.x, 0, focus.z);

@@ -447,12 +447,12 @@ async function boot() {
   // FPS governor: shed pixel ratio, shadow rate/size, then grass density —
   // never the trees. Kicks in early (below ~34fps) so it never feels laggy
   // for long.
-  const gov = { acc: 0, frames: 0, level: 0, shadowEvery: 3, shadowTick: 0 };
+  const gov = { acc: 0, frames: 0, level: 0, shadowEvery: 2, shadowTick: 0 };
   const GOV_STEPS = [
-    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 3, shadowMap: 4096 },
-    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 4, shadowMap: 4096 },
-    { pr: 1.25, grass: 0.65, shadowEvery: 5, shadowMap: 2048 },
-    { pr: 1.0, grass: 0.45, shadowEvery: 6, shadowMap: 2048 },
+    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096 },
+    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 3, shadowMap: 4096 },
+    { pr: 1.25, grass: 0.65, shadowEvery: 4, shadowMap: 2048 },
+    { pr: 1.0, grass: 0.45, shadowEvery: 5, shadowMap: 2048 },
   ];
   function applyGov(s) {
     renderer.setPixelRatio(s.pr);

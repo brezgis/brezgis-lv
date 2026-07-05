@@ -57,7 +57,7 @@ function makeWaterMaterial(color, opacity) {
 // Water ribbon, LAAS-shore rules: high tessellation so bends are CURVES
 // (the old 63m segments read as rectangles), and a FLAT surface — the
 // shoreline comes from the carved bank rising through the plane.
-function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 0.35) {
+function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 0.85) {
   const SEG = Math.min(1400, pts.length * 4);
   // LAAS shore rule: the water surface is FLAT (a sloped surface reads as a
   // convex hump from the bank) — only a slight edge tuck hides the seam.
@@ -100,9 +100,24 @@ export function buildWater() {
   // --- lakes from OSM polygons
   const lakeMat = makeWaterMaterial(0x2f4c58, 0.94);
   mats.push(lakeMat);
+  // OSM lake outlines are sparse polygons — Chaikin-smooth the shoreline
+  // or the basins read as blocky cut gems
+  const chaikin = (poly, iters = 2) => {
+    let pp = poly;
+    for (let it = 0; it < iters; it++) {
+      const q = [];
+      for (let i = 0; i < pp.length; i++) {
+        const a2 = pp[i], b2 = pp[(i + 1) % pp.length];
+        q.push([a2[0] * 0.75 + b2[0] * 0.25, a2[1] * 0.75 + b2[1] * 0.25]);
+        q.push([a2[0] * 0.25 + b2[0] * 0.75, a2[1] * 0.25 + b2[1] * 0.75]);
+      }
+      pp = q;
+    }
+    return pp;
+  };
   for (const lake of LAKES) {
     // store as (x, -z) so that rotateX(-PI/2) lands on (x, z) with the normal up
-    const shape = new THREE.Shape(lake.poly.map(([x, z]) => new THREE.Vector2(x, -z)));
+    const shape = new THREE.Shape(chaikin(lake.poly).map(([x, z]) => new THREE.Vector2(x, -z)));
     const geo = new THREE.ShapeGeometry(shape, 4);
     geo.rotateX(-Math.PI / 2);
     const mesh = new THREE.Mesh(geo, lakeMat);
@@ -125,7 +140,7 @@ export function buildWater() {
   const streamMat = makeWaterMaterial(0x314f58, 0.92);
   mats.push(streamMat);
   for (const s of STREAMS) {
-    const st = ribbon(s.pts, () => 2.1, streamMat, 90, 0.3);
+    const st = ribbon(s.pts, () => 2.1, streamMat, 90, 0.5);
     st.name = s.name || 'stream';
     group.add(st);
   }

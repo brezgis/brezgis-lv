@@ -219,9 +219,9 @@ const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'linden', 'apple', '
 // instance capacity per species: [full, far]. Two tiers only — real geometry
 // close to the points of interest, captured impostors beyond.
 const CAPS = {
-  spruce: [1700, 92000], pine: [1150, 64000], birch: [1400, 78000],
-  oak: [560, 22000], alder: [900, 32000], linden: [280, 7000],
-  apple: [90, 1400], shrub: [6000, 30000], snag: [200, 0],
+  spruce: [1700, 135000], pine: [1150, 95000], birch: [1400, 115000],
+  oak: [560, 32000], alder: [900, 47000], linden: [280, 10000],
+  apple: [90, 1400], shrub: [6000, 42000], snag: [200, 0],
 };
 const FULL_R = 260; // full-detail radius around points of interest
 
@@ -323,15 +323,15 @@ export function buildVegetation(scene, renderer) {
   }, 777);
   const fernMat = cardMaterial(fernAtlas);
   const fernGeo = buildFern(801);
-  const ferns = makeInstanced(fernGeo, fernMat, 9000, false);
+  const ferns = makeInstanced(fernGeo, fernMat, 14000, false);
   ferns.customDepthMaterial = cardDepthMaterial(fernAtlas);
   group.add(ferns);
 
   const logMat = windifyVeg(new THREE.MeshLambertMaterial({ map: barkTexes.spruce, vertexColors: true }));
   const logGeos = [buildLog(311, 'mossy'), buildLog(313, 'rotten'), buildLog(317, 'fresh')];
-  const logs = logGeos.map((l) => makeInstanced(l.geometry, logMat, 900, true));
+  const logs = logGeos.map((l) => makeInstanced(l.geometry, logMat, 1400, true));
   const stumpGeo = buildStump(331);
-  const stumps = makeInstanced(stumpGeo.geometry, logMat, 500, true);
+  const stumps = makeInstanced(stumpGeo.geometry, logMat, 800, true);
   logs.forEach((l) => group.add(l));
   group.add(stumps);
 
@@ -360,7 +360,7 @@ export function buildVegetation(scene, renderer) {
     for (const k of SP_KEYS) lists[k] = { full: [], far: [] };
     lists.fern = []; lists.log = []; lists.stump = [];
     const S = LOC.STEAD;
-    const step = 12;   // real hemiboreal forest runs hundreds of stems/ha
+    const step = 10;   // real hemiboreal forest runs hundreds of stems/ha
     const EXT = HM_SPAN - 120;
     const N = Math.floor(EXT / step);
     for (let iz = 0; iz < N; iz++) {
@@ -385,7 +385,7 @@ export function buildVegetation(scene, renderer) {
         const tier = dp < FULL_R ? 'full' : 'far';
         // the denser grid would melt the full-geometry tier — thin it back
         // to roughly the old stem count; the far impostors take the density
-        if (tier === 'full' && rng() < 0.44) continue;
+        if (tier === 'full' && rng() < 0.6) continue;
         if (era === 0) {
           // tundra: knee-high dwarf birch / juniper heath
           lists.shrub[tier].push([x, y, z, 0.8 + rng() * 1.1, rng() * 6.3, 0.9 + rng() * 0.25]);
@@ -403,13 +403,24 @@ export function buildVegetation(scene, renderer) {
         const h = { spruce: 17, pine: 19, birch: 13, oak: 13, alder: 8, snag: 10 }[kind] * (0.75 + rng() * 0.55);
         lists[kind][tier].push([x, y, z, h, rng() * 6.3, 0.86 + rng() * 0.28]);
 
-        // understory in closed forest, near tiers only
+        // understory in closed forest, near tiers only: ferns, hazel-like
+        // underbrush and bramble tangles — an old-growth floor is BUSY
         if (tier !== 'far' && d > 0.42) {
-          if (rng() < (era <= 2 ? 0.3 : 0.15)) {
+          if (era >= 1 && rng() < 0.15) {
+            const ux = x + (rng() - 0.5) * 9, uz = z + (rng() - 0.5) * 9;
+            // low dark tangle (bramble) or a taller hazel-ish bush
+            const bramble = rng() < 0.45;
+            lists.shrub.full.push([
+              ux, heightAt(ux, uz), uz,
+              bramble ? 0.9 + rng() * 0.7 : 1.6 + rng() * 1.2,
+              rng() * 6.3, bramble ? 0.68 + rng() * 0.18 : 0.85 + rng() * 0.25,
+            ]);
+          }
+          if (rng() < (era <= 2 ? 0.38 : 0.18)) {
             const fx = x + (rng() - 0.5) * 10, fz = z + (rng() - 0.5) * 10;
             lists.fern.push([fx, heightAt(fx, fz), fz, 0.7 + rng() * 0.9, rng() * 6.3]);
           }
-          if ((era === 1 || era === 2) && rng() < 0.05) {
+          if ((era === 1 || era === 2) && rng() < 0.07) {
             const lx = x + (rng() - 0.5) * 12, lz = z + (rng() - 0.5) * 12;
             lists.log.push([lx, heightAt(lx, lz), lz, rng() * 6.3, 0.8 + rng() * 0.7, (rng() * 3) | 0]);
           } else if (era >= 3 && rng() < 0.03) {
@@ -512,7 +523,7 @@ export function buildVegetation(scene, renderer) {
           const [x, y, z, h, , tint] = arr[i];
           dummy.position.set(x, y - 0.4, z);
           dummy.rotation.set(0, (i * 2.399) % 6.283, 0);
-          dummy.scale.set(h, h, h); // unit-height impostor quads
+          dummy.scale.set(h * 1.12, h, h * 1.12); // crowns overlap -> closed canopy
           dummy.updateMatrix();
           farM.setMatrixAt(i, dummy.matrix);
           col.setScalar(0.82 + 0.28 * tint * 0.5);
@@ -680,9 +691,9 @@ export function buildVegetation(scene, renderer) {
     const pebbles = makeInstanced(buildBoulder(47), boulderMat, 5600, false);
     let pi = 0;
     for (const p of RIVER_PTS) {
-      for (let k = 0; k < 5 && pi < 5600; k++) {
+      for (let k = 0; k < 8 && pi < 5600; k++) {
         const side = rng() < 0.5 ? -1 : 1;
-        const px = p[0] + side * (9.5 + rng() * 5.5), pz = p[1] + (rng() - 0.5) * 40;
+        const px = p[0] + side * (8 + rng() * 7.5), pz = p[1] + (rng() - 0.5) * 40;
         const y = heightAt(px, pz);
         if (y > p[2] + 1.4) continue;             // pebbles hug the waterline
         const s = 0.05 + Math.pow(rng(), 1.8) * 0.3;

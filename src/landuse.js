@@ -398,25 +398,25 @@ export function forestDensity(era, x, z, y) {
   const dCamp = Math.hypot(x - LOC.CAMP.x, z - LOC.CAMP.z);
   let d;
   if (era === 1) {
-    d = 0.55 + n * 0.5;                                     // primeval forest
+    d = 0.68 + n * 0.4;                                     // primeval forest
     d *= smoothstep(35, 120, dRiver) * 0.92 + 0.08;         // open floodplain meadows
     d *= smoothstep(55, 135, dStead) * 0.94 + 0.06;         // the terrace opening where the aurochs graze
     d *= smoothstep(12, 40, dCamp);                         // small camp clearing
   } else if (era === 2) {
-    d = 0.45 + n * 0.5;
+    d = 0.56 + n * 0.46;
     d *= smoothstep(15, 70, dRiver) * 0.9 + 0.1;
     d *= smoothstep(42, 145, dStead);                       // farmstead clearing
     d *= smoothstep(25, 80, Math.hypot(x - LOC.BARROWS.x, z - LOC.BARROWS.z));
   } else if (era === 5) {
     // today: the real forest pattern from Sentinel-2
-    d = forestMaskAt(x, z) ? 0.72 + n * 0.28 : 0;
+    d = forestMaskAt(x, z) ? 0.85 + n * 0.15 : 0;
     d *= smoothstep(55, 140, dStead) * 0.94 + 0.06;
     d *= smoothstep(60, 150, dManor) * 0.94 + 0.06;
   } else {
     // agrarian mosaic: forest survives on high/steep hills and in patches
     const high = smoothstep(208, 224, y);
     const patch = smoothstep(0.56, 0.7, n);
-    d = Math.max(high * (0.35 + n * 0.6), patch * 0.85);
+    d = Math.max(high * (0.5 + n * 0.55), patch * 0.95);
     d *= smoothstep(70, 200, dStead) * 0.92 + 0.08;
     d *= smoothstep(80, 220, dManor) * 0.92 + 0.08;
     if (era === 4) d *= 0.9;

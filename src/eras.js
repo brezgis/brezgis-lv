@@ -17,7 +17,7 @@ import { MAT } from './textures.js';
 import { heightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept } from './landuse.js';
 import { LAKES } from './geodata.js';
-import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
+import { BUILDINGS_OSM, DWELLINGS_OSM, ROADS_OSM } from './geodata-osm.js';
 import { mulberry32 } from './util.js';
 import { HM_OFF_X, HM_OFF_Z, HM_SPAN } from './heightmap.js';
 
@@ -126,6 +126,57 @@ function utilityPoles(group, modern) {
   const wires = new THREE.LineSegments(wireGeo, new THREE.LineBasicMaterial({ color: 0x15161a }));
   wires.frustumCulled = false;
   group.add(wires);
+}
+
+// ---------------------------------------------------------------------------
+// The main roads as real draped ribbons: paint alone lands on 17m-spaced
+// terrain vertices, so a 5m carriageway all but vanished. The P30 is a
+// paved regional highway today; gravel before the war.
+function roadRibbons(group, era) {
+  const mat = new THREE.MeshLambertMaterial({
+    color: era === 5 ? 0x43464a : 0x8d7c5f,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  const positions = [], indices = [];
+  for (const r of ROADS_OSM) {
+    if (r.c > 1) continue;
+    const half = r.c === 0 ? 3.2 : 2.4;
+    const pts = [];
+    for (let i = 0; i < r.pts.length - 1; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1];
+      const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 9));
+      for (let k = 0; k < n; k++) pts.push([ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n]);
+    }
+    pts.push(r.pts[r.pts.length - 1]);
+    if (pts.length < 2) continue;
+    const base = positions.length / 3;
+    for (let i = 0; i < pts.length; i++) {
+      const [x, z] = pts[i];
+      const j = Math.min(i + 1, pts.length - 1);
+      let dx = pts[j][0] - pts[Math.max(0, i - 1)][0];
+      let dz = pts[j][1] - pts[Math.max(0, i - 1)][1];
+      const l = Math.hypot(dx, dz) || 1;
+      dx /= l; dz /= l;
+      const y = heightAt(x, z);
+      // cambered profile, edges tucked into the verge
+      positions.push(
+        x - dz * half, heightAt(x - dz * half, z + dx * half) - 0.42, z + dx * half,
+        x, y + 0.12, z,
+        x + dz * half, heightAt(x + dz * half, z - dx * half) - 0.42, z - dx * half);
+      if (i > 0) {
+        const a2 = base + (i - 1) * 3;
+        indices.push(a2, a2 + 1, a2 + 4, a2, a2 + 4, a2 + 3);
+        indices.push(a2 + 1, a2 + 2, a2 + 5, a2 + 1, a2 + 5, a2 + 4);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  group.add(mesh);
 }
 
 // ---------------------------------------------------------------------------
@@ -484,6 +535,7 @@ export function buildEra(era, ctx) {
       utilityPoles(g, false);
     }
     bgSettlement(g, modern ? 4 : 3, smokes);
+    roadRibbons(g, modern ? 4 : 3);
 
     spawns.push(['cattleFarm', modern ? 6 : 5, { x: S.x - 115, z: S.z + 35, r: 60 }]);
     spawns.push(['sheepWhite', modern ? 4 : 6, { x: S.x - 55, z: S.z - 35, r: 35 }]);
@@ -523,6 +575,7 @@ export function buildEra(era, ctx) {
     // Brežģa kalns: the 2017 observation tower, the summit oak, the Jāņi pyre
     add(observationTower(), B.x, B.z, 0.2);
     bgSettlement(g, 5, smokes);
+    roadRibbons(g, 5);
     add(pyre(), B.x + 22, B.z + 10, 0.4);
     fires.push([B.x + 22, heightAt(B.x + 22, B.z + 10) + 0.9, B.z + 10, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
 

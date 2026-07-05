@@ -317,7 +317,13 @@ export function buildSky(scene, renderer) {
     // map through a fresh light matrix made every shadow jitter and snap
     // while walking. Snapped to 0.5m so the frustum crawls in steady steps.
     if (shadowNow) {
-      _snapFocus.set(Math.round(focus.x * 2) / 2, Math.round(focus.y * 2) / 2, Math.round(focus.z * 2) / 2);
+      // snap to SHADOW TEXELS (not half-metres): coarse snapping made the
+      // whole shadow field step visibly as you walked
+      const texel = (SC * 2) / sun.shadow.mapSize.x;
+      _snapFocus.set(
+        Math.round(focus.x / texel) * texel,
+        Math.round(focus.y / texel) * texel,
+        Math.round(focus.z / texel) * texel);
       sun.position.copy(sd).multiplyScalar(1600).add(_snapFocus);
       sun.target.position.copy(_snapFocus);
     }

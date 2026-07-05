@@ -21,15 +21,17 @@ function cellSeed(ix, iz, salt) {
 }
 
 // bands: cell size (m), expected instances per cell, regen threshold, widen
-// VERY dense: ~110 blades/m² in the walking circle (carpet + tall clumps
-// overlaid), and the dense rings reach ~50m so growth never materialises
-// right in front of the walker. cellRules bands evaluate the exclusion
-// rules once per cell so the walk-regen stays hitch-free.
+// FULL ground carpet: an ultra ring of wide-bladed turf right at the eye,
+// a carpet ring behind it, tall clumps over both, and tufts all the way to
+// the 900m horizon so nothing visibly spawns. cellRules bands evaluate the
+// exclusion rules once per cell so walk-regen stays hitch-free; the coarse
+// bands still check roads per blade (an 11m cell straddles a whole lane).
 const BANDS = [
-  { key: 'carpet', r0: 0, r1: 55, cell: 1.3, perCell: 14, thresh: 16, wide: 0.8, carpet: true, hiOff: true, cellRules: true },
-  { key: 'near', r0: 0, r1: 48, cell: 1.3, perCell: 11.5, thresh: 14, wide: 1.05, hiOff: true, cellRules: true },
-  { key: 'mid', r0: 40, r1: 110, cell: 2.6, perCell: 11.5, thresh: 36, wide: 1.75 },
-  { key: 'far', r0: 100, r1: 430, cell: 8, perCell: 8, thresh: 120, wide: 2.7 },
+  { key: 'turf', r0: 0, r1: 26, cell: 1.3, perCell: 16, thresh: 9, wide: 1.15, carpet: true, hiOff: true, cellRules: true },
+  { key: 'carpet', r0: 22, r1: 62, cell: 1.6, perCell: 10, thresh: 18, wide: 1.0, carpet: true, hiOff: true, cellRules: true },
+  { key: 'near', r0: 0, r1: 55, cell: 1.6, perCell: 8, thresh: 15, wide: 1.1, hiOff: true, cellRules: true },
+  { key: 'mid', r0: 45, r1: 130, cell: 2.6, perCell: 7, thresh: 38, wide: 1.8, cellRules: true, roadPerBlade: true },
+  { key: 'far', r0: 115, r1: 900, cell: 9, perCell: 4.2, thresh: 260, wide: 3.2, cellRules: true, roadPerBlade: true },
 ];
 
 function bladeGeometry(segs) {
@@ -64,7 +66,7 @@ function bladeGeometry(segs) {
 }
 
 // N-blade clump merged into one instance
-function bladeClump(blades, segs) {
+function bladeClump(blades, segs, widthK = 1, spread = 0.22) {
   let s = 1234567 + blades * 77 + segs * 13;
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
   const pos = [], nrm = [], col = [], idx = [];
@@ -74,13 +76,13 @@ function bladeClump(blades, segs) {
   for (let b = 0; b < blades; b++) {
     const yaw = rnd() * Math.PI * 2;
     const c = Math.cos(yaw), sn = Math.sin(yaw);
-    const ox = (rnd() - 0.5) * 0.22, oz = (rnd() - 0.5) * 0.22;
+    const ox = (rnd() - 0.5) * spread * 2, oz = (rnd() - 0.5) * spread * 2;
     const hk = 0.62 + rnd() * 0.65;
     const lean = (rnd() - 0.5) * 0.42;
     const vJ = 0.85 + rnd() * 0.3;
     const v0 = pos.length / 3;
     for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i) * 1.25, y = p.getY(i) * hk, z = p.getZ(i);
+      const x = p.getX(i) * 1.25 * widthK, y = p.getY(i) * hk, z = p.getZ(i);
       pos.push(x * c + z * sn + ox + lean * y * c, y, z * c - x * sn + oz + lean * y * sn);
       nrm.push(nA.getX(i) * c + nA.getZ(i) * sn, nA.getY(i), nA.getZ(i) * c - nA.getX(i) * sn);
       col.push(cA.getX(i) * vJ, cA.getY(i) * vJ, cA.getZ(i) * vJ);
@@ -216,7 +218,7 @@ function flowerGeometry(kind) {
 }
 
 export function buildGrass(scene) {
-  const geos = [bladeClump(6, 2), bladeClump(8, 3), bladeClump(4, 2), tuftGeometry()];
+  const geos = [bladeClump(10, 2, 1.55, 0.5), bladeClump(6, 2, 1.3, 0.35), bladeClump(8, 3), bladeClump(4, 2), tuftGeometry()];
   const mat = grassMaterial();
   const bands = BANDS.map((b, i) => {
     const cells = Math.PI * b.r1 * b.r1 / (b.cell * b.cell);
@@ -316,7 +318,7 @@ export function buildGrass(scene) {
         let cFd = 0;
         if (cellOK) {
           cFd = forestDensity(era, ccx, ccz, cY);
-          if (era >= 2 && distToRoad(era, ccx, ccz) < 1.2) cellOK = false;
+          if (!band.roadPerBlade && era >= 2 && distToRoad(era, ccx, ccz) < 1.2) cellOK = false;
         }
         if (cellOK) {
           for (const p of PADS) {
@@ -346,6 +348,7 @@ export function buildGrass(scene) {
           fd = band._cFd;
           trodden = cTrodden;
           fa = cFa;
+          if (band.roadPerBlade && era >= 2 && distToRoad(era, x, z) < 1.4) continue;
         } else {
           y = heightAt(x, z);
           dRiv = distToRiver(x, z);
@@ -411,8 +414,9 @@ export function buildGrass(scene) {
       for (const b of bands) {
         if (b.hiOff) { b.on = nearOn; b.lastEra = -1; }
       }
-      bands[2].r0Dyn = nearOn ? bands[2].r0 : 0;
-      bands[2].lastEra = -1;
+      const mid = bands.find((b) => b.key === 'mid');
+      mid.r0Dyn = nearOn ? mid.r0 : 0;
+      mid.lastEra = -1;
     }
     bands.forEach((band) => {
       const dx = focus.x - band.lastX, dz = focus.z - band.lastZ;

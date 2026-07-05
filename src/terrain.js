@@ -49,9 +49,28 @@ function cellToWorld(gx, gy) {
     const SAMP = Math.min(1700, RIVER_PTS.length * 4);
     for (let i = 0; i <= SAMP; i++) {
       const [x, z, y] = sampleSpline(RIVER_PTS, i / SAMP);
-      // bed fully below the surface out to 13.5m — past the ribbon's
-      // widest reach — so the flat water plane always meets rising ground
-      stamp(x, z, 30, 13.5, y - 2.0);
+      // deep bed only through the middle; the banks must RISE through the
+      // flat water plane before the ribbon edge or you see under the rim
+      stamp(x, z, 26, 8, y - 1.9);
+    }
+    // natural levee lip: low ground in the 11.6-15.6m annulus is raised
+    // just above the waterline so the shore always pierces the surface
+    for (let i = 0; i <= SAMP; i++) {
+      const [px, pz, py] = sampleSpline(RIVER_PTS, i / SAMP);
+      const cr = Math.ceil(16 / CELL) + 1;
+      const cgx = Math.round((((px - OX) / SPAN) + 0.5) * (G - 1));
+      const cgy = Math.round((((pz - OZ) / SPAN) + 0.5) * (G - 1));
+      for (let dy = -cr; dy <= cr; dy++) {
+        for (let dx = -cr; dx <= cr; dx++) {
+          const gx = cgx + dx, gy = cgy + dy;
+          if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
+          const [x, z] = cellToWorld(gx, gy);
+          const d = Math.hypot(x - px, z - pz);
+          if (d < 11.6 || d > 15.6) continue;
+          const i2 = gy * G + gx;
+          field[i2] = Math.max(field[i2], py + 0.3);
+        }
+      }
     }
   }
   for (const s of STREAMS) {
@@ -360,10 +379,17 @@ export function paintEra(era) {
       }
     }
 
-    // water margins, outside-in: moist lush band -> dark mud -> gravel bar
-    if (dRiv < 26) {
-      const moist = smoothstep(26, 10, dRiv);
+    // water margins, outside-in: moist grass -> sandy bank -> gravel -> mud
+    if (dRiv < 30) {
+      const moist = smoothstep(30, 15, dRiv);
       g += moist * 0.05; r -= moist * 0.03;                     // damp grass greens up
+    }
+    if (dRiv < 16 && dRiv > 5.5) {
+      // the bank itself: bare sandy earth, distinct from the meadow
+      const bank = smoothstep(16, 11, dRiv);
+      r = lerp(r, 0.42 + n2 * 0.08, bank);
+      g = lerp(g, 0.36 + n2 * 0.05, bank);
+      b = lerp(b, 0.25, bank);
     }
     let wet = dRiv < 9 ? smoothstep(9, 3.5, dRiv) : 0;
     const dStr = distToStreams(x, z);

@@ -158,6 +158,7 @@ export function buildWater() {
   {
     const SEG = Math.min(2000, RIVER_PTS.length * 6);
     const W_IN = 10.2 + 1.6, W_OUT = 14.5;
+    const bankNoise = makeNoise(881);
     // pass 1: rows with curvature-clamped collar width (a bend tighter than
     // the offset would fold the outer edge back over itself)
     const rows = [];
@@ -170,11 +171,12 @@ export function buildWater() {
       let dx = x2 - xa, dz = z2 - za;
       const len = Math.hypot(dx, dz) || 1;
       dx /= len; dz /= len;
-      let wOut = W_OUT;
+      // organic shoreline: the sand band waxes and wanes (~45m wavelength)
+      let wOut = W_OUT - 1.6 + bankNoise.fbm(t * 380, 3.7, 3) * 4.4;
       if (i > 0) {
         const dTheta = Math.acos(Math.min(1, Math.max(-1, dx * pdx + dz * pdz)));
         const radius = dTheta > 1e-4 ? (16581 / SEG) / dTheta : 1e9;
-        wOut = Math.min(W_OUT, Math.max(W_IN + 0.4, radius * 0.85));
+        wOut = Math.min(wOut, Math.max(W_IN + 0.4, radius * 0.85));
       }
       pdx = dx; pdz = dz;
       rows.push([x, z, y, dx, dz, wOut]);
@@ -209,35 +211,72 @@ export function buildWater() {
         }
       }
     }
-    const positions = [], indices = [];
+    // SANDY SHORE: three bands per side — wet sand at the rim, dry sand,
+    // then a grass-toned fringe — with vertex-colour gradients and a wavy
+    // outer edge, so the collar reads as beach, not as tan polygons
+    const positions = [], indices = [], colors = [], uvsA = [];
+    const bandC = [
+      [0.36, 0.31, 0.23],   // wet sand at the waterline
+      [0.55, 0.48, 0.35],   // dry sand
+      [0.44, 0.5, 0.29],    // fringe blending to meadow
+    ];
     for (let i = 0; i < rows.length; i++) {
       const y = rows[i][2];
       for (const si of [0, 1]) {
         const inn = inner[si][i], out = outer[si][i];
-        // outer edge pinned just above the waterline: the carved shelf keeps
-        // all nearby terrain below it, and rising banks cover it naturally
+        const mx = inn[0] + (out[0] - inn[0]) * 0.45;
+        const mz = inn[2] + (out[2] - inn[2]) * 0.45;
         positions.push(
           inn[0], y - 0.5, inn[2],
-          out[0], y + 0.06, out[2]);
+          mx, y + 0.04, mz,
+          out[0], y + 0.07, out[2]);
+        for (let bI = 0; bI < 3; bI++) {
+          colors.push(bandC[bI][0], bandC[bI][1], bandC[bI][2]);
+        }
+        uvsA.push(inn[0] * 0.18, inn[2] * 0.18, mx * 0.18, mz * 0.18, out[0] * 0.18, out[2] * 0.18);
       }
       if (i > 0) {
-        const a2 = (i - 1) * 4;
-        indices.push(a2, a2 + 1, a2 + 5, a2, a2 + 5, a2 + 4);       // left strip
-        indices.push(a2 + 3, a2 + 2, a2 + 6, a2 + 3, a2 + 7, a2 + 6); // right strip
+        const a2 = (i - 1) * 6;
+        for (const [o0, o1] of [[0, 1], [1, 2]]) {         // left: rim->wet, wet->dry
+          indices.push(a2 + o0, a2 + o1, a2 + o1 + 6, a2 + o0, a2 + o1 + 6, a2 + o0 + 6);
+        }
+        for (const [o0, o1] of [[4, 3], [5, 4]]) {         // right strips
+          indices.push(a2 + o0, a2 + o1, a2 + o1 + 6, a2 + o0, a2 + o1 + 6, a2 + o0 + 6);
+        }
       }
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvsA, 2));
     geo.setIndex(indices);
     // the collar is ground: light it as ground. Computed normals flip on
     // twisted quads and read as a black-and-tan checker.
     const nrm = new Float32Array(positions.length);
     for (let i = 0; i < nrm.length; i += 3) { nrm[i + 1] = 1; }
     geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    // grainy wet-sand texture, world-space UVs
+    const sandTex = canvasTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#a4977c';
+      ctx.fillRect(0, 0, w, h);
+      const sr = makeNoise(883).rng;
+      for (let i = 0; i < 2600; i++) {
+        const g = 120 + sr() * 100;
+        ctx.fillStyle = `rgba(${g},${(g * 0.92) | 0},${(g * 0.74) | 0},0.5)`;
+        ctx.fillRect(sr() * w, sr() * h, 1 + sr(), 1 + sr());
+      }
+      for (let i = 0; i < 60; i++) {                        // scattered grit
+        const g = 90 + sr() * 90;
+        ctx.fillStyle = `rgb(${g},${g},${(g * 0.9) | 0})`;
+        ctx.beginPath();
+        ctx.arc(sr() * w, sr() * h, 0.8 + sr() * 1.6, 0, 7);
+        ctx.fill();
+      }
+    });
     const skirt = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
       // FrontSide: any residual fold on a hairpin culls away instead of
       // flashing its black backface
-      color: 0x7f7154, side: THREE.FrontSide,
+      map: sandTex, vertexColors: true, side: THREE.FrontSide,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
     }));
     skirt.receiveShadow = true;

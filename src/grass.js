@@ -8,7 +8,7 @@
 // reshuffles the sward — new growth only fades in at the feathered rim.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, distToRoad, fieldAt, riverLevelNear, PADS } from './landuse.js';
+import { forestDensity, distToRiver, distToRoad, fieldAt, riverLevelNear, PADS, ERA2_FARMS } from './landuse.js';
 import { LAKES } from './geodata.js';
 import { mulberry32, makeNoise, pointInPoly, smoothstep as smoothstepJ } from './util.js';
 import { WIND } from './vegetation.js';
@@ -324,6 +324,11 @@ export function buildGrass(scene) {
           for (const p of PADS) {
             if (era === 1 && p !== PADS[2]) continue;
             if (Math.hypot(ccx - p.x, ccz - p.z) < p.r * 0.8) { cTrodden = true; break; }
+          }
+          if (era === 2 && !cTrodden) {
+            for (const f of ERA2_FARMS) {
+              if (Math.hypot(ccx - f.x, ccz - f.z) < 11) { cTrodden = true; break; }
+            }
           }
           cFa = era >= 2 ? fieldAt(era, ccx, ccz) : null;
         }

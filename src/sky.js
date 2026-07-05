@@ -347,6 +347,8 @@ export function buildSky(scene, renderer) {
 
     sky.position.copy(focus);
     horizon.position.set(focus.x, 0, focus.z);
+    // from altitude the ring's flat top reads as a grey plateau — fade out
+    horizon.visible = focus.y < 330;
     sunWorld.copy(sd).multiplyScalar(8800).add(focus);
     sunGlow.position.copy(sunWorld);
     sunGlow.material.opacity = clamp((sd.y + 0.06) * 6, 0, 1) * 0.9;

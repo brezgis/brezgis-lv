@@ -155,6 +155,10 @@ function microDamp(x, z) {
   let damp = 1;
   for (const p of PADS) damp = Math.min(damp, smoothstep(p.r * 0.6, p.r + 10, Math.hypot(x - p.x, z - p.z)));
   damp = Math.min(damp, smoothstep(14, 26, distToRiver(x, z))); // micro noise must not breach the shore
+  // main-road corridors ride a draped ribbon: micro bumps bigger than its
+  // crown swallowed the carriageway in stretches
+  const ri = distToRoadEx(5, x, z);
+  if (ri.c <= 1 && ri.d < 14) damp = Math.min(damp, smoothstep(4, 14, ri.d));
   return damp;
 }
 export function heightAt(x, z) {
@@ -228,6 +232,25 @@ function detailify(material, strength) {
   return material;
 }
 
+// exact height of the RENDERED terrain surface (the mesh's own triangles).
+// heightAt() is the smooth field; between the 17m mesh vertices the two can
+// differ by up to ~1m, which swallowed draped geometry like the roads.
+let meshH = null;
+export function meshHeightAt(x, z) {
+  if (!meshH) return heightAt(x, z);
+  const { arr, x0, z0, sx, sz, n } = meshH;
+  // signed steps: after rotateX(-PI/2) the vertex rows run in DECREASING z
+  const fx = clamp((x - x0) / sx, 0, n - 1.001);
+  const fz = clamp((z - z0) / sz, 0, n - 1.001);
+  const c = Math.floor(fx), r = Math.floor(fz);
+  const u = fx - c, v = fz - r;
+  const hA = arr[r * n + c], hB = arr[r * n + c + 1];
+  const hC = arr[(r + 1) * n + c], hD = arr[(r + 1) * n + c + 1];
+  // PlaneGeometry splits each cell A-B / C-D along the B-C diagonal
+  if (u + v <= 1) return hA + (hB - hA) * u + (hC - hA) * v;
+  return hD + (hC - hD) * (1 - u) + (hB - hD) * (1 - v);
+}
+
 export function buildTerrain() {
   const geo = new THREE.PlaneGeometry(SPAN, SPAN, RES - 1, RES - 1);
   geo.rotateX(-Math.PI / 2);
@@ -235,6 +258,18 @@ export function buildTerrain() {
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+  }
+  // record the rendered grid for meshHeightAt
+  {
+    const n = RES;
+    const arr = new Float32Array(n * n);
+    for (let i = 0; i < pos.count; i++) arr[i] = pos.getY(i);
+    meshH = {
+      arr, n,
+      x0: pos.getX(0), z0: pos.getZ(0),
+      sx: pos.getX(1) - pos.getX(0),
+      sz: pos.getZ(n) - pos.getZ(0),
+    };
   }
   geo.computeVertexNormals();
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));

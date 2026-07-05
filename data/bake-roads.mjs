@@ -9,8 +9,16 @@ import { readFileSync, writeFileSync } from 'fs';
 const LAT = 57.15944, LON = 25.66472;
 const MLAT = 111360, MLON = 111320 * Math.cos((LAT * Math.PI) / 180);
 const toScene = (lat, lon) => [(lon - LON) * MLON, -(lat - LAT) * MLAT];
-const R = 4340; // keep a margin inside the 8.8km tile
-const inRect = ([x, z]) => Math.abs(x) < R && Math.abs(z) < R;
+// clip to the REAL heightmap tile — it is offset (OX 500, OZ 1700) to
+// include Brežģa kalns; an origin-centred rect silently dropped the whole
+// southern strip with the Brežģi family farm cluster
+const hm = readFileSync(new URL('../src/heightmap.js', import.meta.url), 'utf8');
+const hnum = (k) => +hm.match(new RegExp(`${k} = (-?\\d+)`))[1];
+const OX = hnum('HM_OFF_X'), OZ = hnum('HM_OFF_Z'), HSPAN = hnum('HM_SPAN');
+const M = 60;
+const inRect = ([x, z]) =>
+  x > OX - HSPAN / 2 + M && x < OX + HSPAN / 2 - M &&
+  z > OZ - HSPAN / 2 + M && z < OZ + HSPAN / 2 - M;
 
 const osm = JSON.parse(readFileSync(new URL('./osm-roads.json', import.meta.url), 'utf8'));
 const els = osm.elements || [];

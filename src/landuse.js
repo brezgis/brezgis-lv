@@ -144,6 +144,16 @@ export const LOC = {
 };
 
 // Terrain pads to flatten (union across eras — the ground itself is continuous)
+// Late Iron Age dispersal: Latgalian settlement was scattered single
+// farmsteads loosely gathered on a hillfort district, not lone outposts —
+// four more homesteads within an hour's walk of Brezgi (era 2 only)
+export const ERA2_FARMS = [
+  { x: LOC.STEAD.x + 420, z: LOC.STEAD.z + 460 },
+  { x: LOC.STEAD.x + 640, z: LOC.STEAD.z - 180 },
+  { x: LOC.STEAD.x + 130, z: LOC.STEAD.z + 890 },
+  { x: LOC.STEAD.x + 520, z: LOC.STEAD.z - 420 },
+];
+
 export const PADS = [
   { x: LOC.STEAD.x, z: LOC.STEAD.z, r: 55 },
   { x: LOC.MANOR.x, z: LOC.MANOR.z, r: 62 },
@@ -259,11 +269,18 @@ export function fieldsForEra(era) {
 
 function rawFieldsForEra(era) {
   if (era <= 1 || era === 5) return [];
-  if (era === 2) return [
-    { cx: S.x + 95, cz: S.z - 55, rx: 55, rz: 38, rot: 0.4, type: 'barley' },
-    { cx: S.x + 40, cz: S.z + 115, rx: 45, rz: 30, rot: -0.3, type: 'rye' },
-    { cx: S.x + 135, cz: S.z + 40, rx: 32, rz: 24, rot: 0.9, type: 'fallow' },
-  ];
+  if (era === 2) {
+    const out = [
+      { cx: S.x + 95, cz: S.z - 55, rx: 55, rz: 38, rot: 0.4, type: 'barley' },
+      { cx: S.x + 40, cz: S.z + 115, rx: 45, rz: 30, rot: -0.3, type: 'rye' },
+      { cx: S.x + 135, cz: S.z + 40, rx: 32, rz: 24, rot: 0.9, type: 'fallow' },
+    ];
+    const T2 = ['barley', 'rye', 'flax', 'barley'];
+    ERA2_FARMS.forEach((f, i) => {
+      out.push({ cx: f.x + 45, cz: f.z + 25 - i * 12, rx: 30 + i * 3, rz: 22, rot: i * 0.8, type: T2[i] });
+    });
+    return out;
+  }
   if (era === 3) return [
     { cx: S.x + 130, cz: S.z - 80, rx: 95, rz: 60, rot: 0.35, type: 'rye' },
     { cx: S.x + 60, cz: S.z + 150, rx: 75, rz: 48, rot: -0.2, type: 'barley' },
@@ -407,6 +424,7 @@ export function forestDensity(era, x, z, y) {
     d *= smoothstep(15, 70, dRiver) * 0.9 + 0.1;
     d *= smoothstep(42, 145, dStead);                       // farmstead clearing
     d *= smoothstep(25, 80, Math.hypot(x - LOC.BARROWS.x, z - LOC.BARROWS.z));
+    for (const f of ERA2_FARMS) d *= smoothstep(18, 60, Math.hypot(x - f.x, z - f.z));
   } else if (era === 5) {
     // today: the real forest pattern from Sentinel-2
     d = forestMaskAt(x, z) ? 0.85 + n * 0.15 : 0;

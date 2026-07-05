@@ -14,8 +14,8 @@ import {
   krogs, observationTower, modernHouse, car, erratics, deadIce, placeOnGround,
 } from './buildings.js';
 import { MAT } from './textures.js';
-import { heightAt } from './terrain.js';
-import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept } from './landuse.js';
+import { heightAt, meshHeightAt } from './terrain.js';
+import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS } from './landuse.js';
 import { LAKES } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM, ROADS_OSM } from './geodata-osm.js';
 import { mulberry32 } from './util.js';
@@ -134,10 +134,11 @@ function utilityPoles(group, modern) {
 // paved regional highway today; gravel before the war.
 function roadRibbons(group, era) {
   const mat = new THREE.MeshLambertMaterial({
-    color: era === 5 ? 0x43464a : 0x8d7c5f,
+    color: era === 5 ? 0x393c40 : 0x8d7c5f,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   const positions = [], indices = [];
+  const dashPos = [], dashIdx = [];   // painted centreline on today's P30
   for (const r of ROADS_OSM) {
     if (r.c > 1) continue;
     const half = r.c === 0 ? 3.2 : 2.4;
@@ -157,18 +158,39 @@ function roadRibbons(group, era) {
       let dz = pts[j][1] - pts[Math.max(0, i - 1)][1];
       const l = Math.hypot(dx, dz) || 1;
       dx /= l; dz /= l;
-      const y = heightAt(x, z);
-      // cambered profile, edges tucked into the verge
+      const y = meshHeightAt(x, z);
+      // cambered profile on the RENDERED surface, edges tucked
       positions.push(
-        x - dz * half, heightAt(x - dz * half, z + dx * half) - 0.42, z + dx * half,
-        x, y + 0.12, z,
-        x + dz * half, heightAt(x + dz * half, z - dx * half) - 0.42, z - dx * half);
+        x - dz * half, meshHeightAt(x - dz * half, z + dx * half) - 0.35, z + dx * half,
+        x, y + 0.14, z,
+        x + dz * half, meshHeightAt(x + dz * half, z - dx * half) - 0.35, z - dx * half);
       if (i > 0) {
         const a2 = base + (i - 1) * 3;
-        indices.push(a2, a2 + 1, a2 + 4, a2, a2 + 4, a2 + 3);
-        indices.push(a2 + 1, a2 + 2, a2 + 5, a2 + 1, a2 + 5, a2 + 4);
+        // wind CCW seen from +y or the whole ribbon back-face culls from above
+        indices.push(a2, a2 + 4, a2 + 1, a2, a2 + 3, a2 + 4);
+        indices.push(a2 + 1, a2 + 5, a2 + 2, a2 + 1, a2 + 4, a2 + 5);
+        // dashed centreline: every other 9m span on the paved P30
+        if (era === 5 && r.c === 0 && i % 2 === 0) {
+          const b2 = dashPos.length / 3;
+          const px = pts[i - 1][0], pz = pts[i - 1][1];
+          const py = meshHeightAt(px, pz) + 0.17, cy = y + 0.17;
+          dashPos.push(
+            px - dz * 0.09, py, pz + dx * 0.09, px + dz * 0.09, py, pz - dx * 0.09,
+            x + dz * 0.09, cy, z - dx * 0.09, x - dz * 0.09, cy, z + dx * 0.09);
+          dashIdx.push(b2, b2 + 2, b2 + 1, b2, b2 + 3, b2 + 2);
+        }
       }
     }
+  }
+  if (dashPos.length) {
+    const dg = new THREE.BufferGeometry();
+    dg.setAttribute('position', new THREE.Float32BufferAttribute(dashPos, 3));
+    dg.setIndex(dashIdx);
+    dg.computeVertexNormals();
+    const dashes = new THREE.Mesh(dg, new THREE.MeshLambertMaterial({
+      color: 0xc9cdd1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+    }));
+    group.add(dashes);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -463,6 +485,23 @@ export function buildEra(era, ctx) {
     logBridge.position.y = riverLevelAt(BRIDGE.z) + 0.35;
     add(offeringPile(), LOC.OAK.x + 2.5, LOC.OAK.z + 1.5);
     addRaw(barrowStones(BUMPS));
+    // the neighbours: dispersed Latgalian viensētas on the same terrace,
+    // each a smoke-dwelling + granary or byre in a small stake-fenced yard
+    ERA2_FARMS.forEach((f, i) => {
+      const fr = mulberry32(900 + i * 97);
+      const rot = fr() * 3.1;
+      add(logCabin({
+        w: 4.2 + fr() * 1.2, d: 5 + fr() * 1.4, wallH: 1.8, roofH: 2.0,
+        roof: fr() < 0.5 ? 'barkGable' : 'thatchGableOld', doorEnd: true, old: true,
+      }), f.x, f.z, rot);
+      smokes.push([f.x, heightAt(f.x, f.z) + 3.8, f.z, { rate: 0.45, gray: 0.76 }]);
+      if (fr() < 0.7) add(postGranary(), f.x + 9 + fr() * 4, f.z + 6, rot + 1.4);
+      else add(logCabin({ w: 3.6, d: 4.6, wallH: 1.6, roofH: 1.8, roof: 'barkGable', old: true }), f.x + 10, f.z + 7, rot + 1.6);
+      add(haystack(2.2 + fr()), f.x - 9, f.z + 8);
+      addRaw(wattleFence([
+        [f.x - 13, f.z - 10], [f.x + 12, f.z - 11], [f.x + 14, f.z + 12],
+      ]));
+    });
     spawns.push(['cattleIron', 4, { x: S.x - 115, z: S.z + 35, r: 55 }]);
     spawns.push(['sheepDark', 5, { x: S.x - 60, z: S.z - 30, r: 35 }]);
     spawns.push(['horseTarpan', 2, { x: S.x - 115, z: S.z + 90, r: 45 }]);

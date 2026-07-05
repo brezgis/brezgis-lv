@@ -31,9 +31,11 @@ a clay stove at the centre, bark-sheet roofs weighted with poles, a granary rais
 posts [11][12]. Barley, rye and flax grow in small fields; small cattle, dark sheep, pigs
 and pony-sized horses graze the clearing; a few chickens scratch in the yard [14]. Across
 the river on its hill stands the palisaded refuge fort — Lejstupu pilskalns, still marked
-on the monument register today [10]. Smoke seeps through the gable; under the old oak,
+on the monument register today [10]. Four more homesteads smoke within an hour's walk —
+Latgalian settlement was dispersed single farmsteads loosely gathered on a hillfort
+district, not lone outposts [13]. Smoke seeps through the gable; under the old oak,
 offerings; low fresh barrows by the field, men buried facing east, women west [13].`,
-    facts: ['Modelled on Āraiši (dendro-dated AD 835)', 'Lejstupu pilskalns — real hillfort on this spot', 'Chimneyless smoke-dwellings'],
+    facts: ['Modelled on Āraiši (dendro-dated AD 835)', 'Lejstupu pilskalns — real hillfort on this spot', 'Dispersed viensētas round a hillfort district', 'Chimneyless smoke-dwellings'],
   },
   {
     year: 1860, label: '1860', title: 'Brezgi under Nēķens manor',

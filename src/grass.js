@@ -134,13 +134,16 @@ function grassMaterial() {
           vec2 wp = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
           float hash = fract(sin(dot(wp, vec2(12.9898, 78.233))) * 43758.5453);
           float tN = clamp(position.y, 0.0, 1.5);
-          float gust = 0.5 + 0.5 * sin(dot(wp, uWindD) * 0.045 - uWindT * 2.1 + hash * 2.4);
-          float amp = uWindS * (0.3 + 0.9 * gust);
-          float bend = amp * (0.6 + uWindS * 0.55) * tN * tN * 0.42;
-          float flut = sin(uWindT * 5.2 + hash * 6.2832 + (wp.x + wp.y) * 0.9) * tN * amp * 0.05;
+          // gentle meadow breeze: shallow gust contrast, slow tempo, and the
+          // tip ARCS DOWN as it deflects (constant blade length) — the old
+          // curve stretched blades diagonally so gusts read as leaping flames
+          float gust = 0.68 + 0.32 * sin(dot(wp, uWindD) * 0.035 - uWindT * 1.5 + hash * 2.4);
+          float amp = uWindS * gust;
+          float bend = amp * (0.5 + uWindS * 0.4) * tN * tN * 0.24;
+          float flut = sin(uWindT * 3.8 + hash * 6.2832 + (wp.x + wp.y) * 0.9) * tN * amp * 0.03;
           transformed.x += uWindD.x * bend - uWindD.y * flut;
           transformed.z += uWindD.y * bend + uWindD.x * flut;
-          transformed.y -= bend * tN * 0.4;
+          transformed.y -= bend * bend * (0.5 / max(tN, 0.05));
         }
         #endif
         `);

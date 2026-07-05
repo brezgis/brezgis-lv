@@ -218,9 +218,9 @@ const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'linden', 'apple', '
 // instance capacity per species: [full, far]. Two tiers only — real geometry
 // close to the points of interest, captured impostors beyond.
 const CAPS = {
-  spruce: [1500, 30000], pine: [1000, 22000], birch: [1200, 26000],
-  oak: [500, 8000], alder: [800, 11000], linden: [260, 2600],
-  apple: [80, 160], shrub: [5500, 14000], snag: [180, 0],
+  spruce: [1500, 44000], pine: [1000, 32000], birch: [1200, 38000],
+  oak: [500, 11000], alder: [800, 16000], linden: [260, 3600],
+  apple: [80, 220], shrub: [5500, 18000], snag: [180, 0],
 };
 const FULL_R = 260; // full-detail radius around points of interest
 
@@ -374,10 +374,11 @@ export function buildVegetation(scene, renderer) {
         const d = forestDensity(era, x, z, y);
         if (d <= 0.02) continue;
         const dp = dPOI(x, z);
-        // impostors are cheap — keep the deep landscape forested (the old
-        // cone-tree falloff starved the horizon)
-        const falloff = clamp(560 / Math.max(dp, 1), era <= 2 ? 0.6 : 0.42, 1);
-        if (rng() > d * 0.82 * falloff) continue;
+        // impostors are cheap — keep the deep landscape forested: primeval
+        // eras are near-closed canopy, and even the agrarian mosaic reads
+        // starved if the falloff bites too hard
+        const falloff = clamp(560 / Math.max(dp, 1), era <= 2 ? 0.82 : 0.6, 1);
+        if (rng() > d * 0.88 * falloff) continue;
         const tier = dp < FULL_R ? 'full' : 'far';
         if (era === 0) {
           // tundra: knee-high dwarf birch / juniper heath

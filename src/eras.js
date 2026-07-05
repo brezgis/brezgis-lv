@@ -17,6 +17,8 @@ import { MAT } from './textures.js';
 import { heightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt } from './landuse.js';
 import { LAKES } from './geodata.js';
+import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
+import { mulberry32 } from './util.js';
 import { HM_OFF_X, HM_OFF_Z, HM_SPAN } from './heightmap.js';
 
 const S = LOC.STEAD, C = LOC.CAMP, Mn = LOC.MANOR, P = LOC.POND, B = LOC.BREZGA, K = LOC.KROGS;
@@ -124,6 +126,123 @@ function utilityPoles(group, modern) {
   const wires = new THREE.LineSegments(wireGeo, new THREE.LineBasicMaterial({ color: 0x15161a }));
   wires.frustumCulled = false;
   group.add(wires);
+}
+
+// ---------------------------------------------------------------------------
+// Background settlement — the real pattern, not one lonely diorama:
+//   2025: every OSM building footprint (768 of them, © OSM contributors)
+//   1935: the OSM viensēta sites — Latvian farm names persist for centuries,
+//         and the parish then held ~1,300 people on these same farms
+//   1860: ~60% of the sites (the 1920 agrarian reform later carved 72 new
+//         farms out of Nēķene manor land alone)
+let bgGeos = null;
+function bgAssets() {
+  if (bgGeos) return bgGeos;
+  const wall = new THREE.BoxGeometry(1, 1, 1);
+  wall.translate(0, 0.5, 0);
+  // unit gable roof: 1×1 base, ridge along x at y=1
+  const A = [-0.5, 0, -0.5], Bc = [0.5, 0, -0.5], Cc = [0.5, 0, 0.5], D = [-0.5, 0, 0.5];
+  const R1 = [-0.5, 1, 0], R2 = [0.5, 1, 0];
+  const tris = [
+    A, R2, Bc, A, R1, R2,      // slope z<0
+    Cc, R1, D, Cc, R2, R1,     // slope z>0
+    A, D, R1,                  // west gable
+    Bc, R2, Cc,                // east gable
+  ];
+  const roof = new THREE.BufferGeometry();
+  roof.setAttribute('position', new THREE.Float32BufferAttribute(tris.flat(), 3));
+  roof.computeVertexNormals();
+  bgGeos = { wall, roof };
+  return bgGeos;
+}
+
+function bgSettlement(group, era) {
+  const rng = mulberry32(4300 + era * 17);
+  const { wall, roof } = bgAssets();
+  const nearP = (x, z, p, r) => Math.hypot(x - p.x, z - p.z) < r;
+  const skip = (x, z) =>
+    nearP(x, z, S, 100) || nearP(x, z, Mn, 140) || nearP(x, z, K, 70) ||
+    nearP(x, z, B, 70) || nearP(x, z, P, 80) || nearP(x, z, C, 60);
+  const items = [];
+  if (era === 5) {
+    for (const [x, z, w, d, rot] of BUILDINGS_OSM) {
+      if (skip(x, z)) continue;
+      items.push({ x, z, w, d, rot, big: w * d > 220, kind: 'new' });
+    }
+  } else {
+    const keep = era === 4 ? 0.96 : 0.6;
+    for (const [x, z] of DWELLINGS_OSM) {
+      const h = rng();
+      if (skip(x, z) || h > keep) continue;
+      const rot = rng() * Math.PI;
+      const ca = Math.cos(rot), sa = Math.sin(rot);
+      items.push({ x, z, w: 8 + rng() * 5, d: 5.5 + rng() * 2, rot, kind: 'dwell' });
+      const yd = 15 + rng() * 8;
+      items.push({
+        x: x + ca * yd, z: z + sa * yd,
+        w: 10 + rng() * 7, d: 6 + rng() * 3,
+        rot: rot + (rng() - 0.5) * 0.5, kind: 'barn',
+      });
+      if (rng() < 0.65) {
+        const yd2 = 12 + rng() * 6;
+        items.push({
+          x: x - sa * yd2, z: z + ca * yd2,
+          w: 5 + rng() * 2, d: 4 + rng(), rot: rot + 1.57, kind: 'klets',
+        });
+      }
+    }
+  }
+  const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff }), items.length);
+  const roofs = new THREE.InstancedMesh(roof, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), items.length);
+  walls.castShadow = roofs.castShadow = true;
+  const dummy = new THREE.Object3D();
+  const col = new THREE.Color();
+  items.forEach((it, i) => {
+    const y = heightAt(it.x, it.z) - 0.15;
+    const wallH = it.big ? 4.6 + rng() * 1.4 : Math.min(3.4, Math.max(2.3, Math.min(it.w, it.d) * 0.5));
+    const roofH = Math.min(it.w, it.d) * (era === 3 ? 0.52 : 0.42);
+    dummy.position.set(it.x, y, it.z);
+    dummy.rotation.set(0, -it.rot, 0);
+    dummy.scale.set(it.w, wallH, it.d);
+    dummy.updateMatrix();
+    walls.setMatrixAt(i, dummy.matrix);
+    // walls: aged log browns before the war, mixed render/wood today
+    if (era === 5) {
+      const pick = rng();
+      if (pick < 0.35) col.setRGB(0.82, 0.78, 0.68);        // render/plaster
+      else if (pick < 0.6) col.setRGB(0.62, 0.55, 0.44);    // timber
+      else if (pick < 0.8) col.setRGB(0.72, 0.68, 0.62);    // silicate/grey
+      else col.setRGB(0.5, 0.42, 0.34);                     // dark wood
+      if (it.big) col.setRGB(0.66, 0.68, 0.7);              // steel-clad barn
+    } else {
+      col.setRGB(0.42 + rng() * 0.12, 0.34 + rng() * 0.08, 0.24 + rng() * 0.06);
+    }
+    walls.setColorAt(i, col);
+    // roof: ridge along the longer footprint axis
+    const along = it.w >= it.d;
+    dummy.position.set(it.x, y + wallH - 0.05, it.z);
+    dummy.rotation.set(0, along ? -it.rot : -it.rot - Math.PI / 2, 0);
+    dummy.scale.set((along ? it.w : it.d) + 0.7, roofH, (along ? it.d : it.w) + 0.8);
+    dummy.updateMatrix();
+    roofs.setMatrixAt(i, dummy.matrix);
+    if (era === 5) {
+      const pick = rng();
+      if (it.big) col.setRGB(0.45, 0.47, 0.5);
+      else if (pick < 0.4) col.setRGB(0.48, 0.2, 0.14);     // red metal/tile
+      else if (pick < 0.7) col.setRGB(0.36, 0.38, 0.4);     // grey metal
+      else col.setRGB(0.3, 0.28, 0.26);                     // dark bitumen
+    } else if (era === 4) {
+      const pick = rng();
+      if (pick < 0.55) col.setRGB(0.42, 0.36, 0.28);        // shingle
+      else if (pick < 0.75) col.setRGB(0.5, 0.24, 0.16);    // tile
+      else col.setRGB(0.5, 0.42, 0.26);                     // surviving thatch
+    } else {
+      col.setRGB(0.5 + rng() * 0.08, 0.42 + rng() * 0.06, 0.25);  // thatch
+    }
+    roofs.setColorAt(i, col);
+  });
+  walls.instanceMatrix.needsUpdate = roofs.instanceMatrix.needsUpdate = true;
+  group.add(walls, roofs);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +391,7 @@ export function buildEra(era, ctx) {
       add(poemStone(), LOC.STONE.x, LOC.STONE.z, -0.5);
       utilityPoles(g, false);
     }
+    bgSettlement(g, modern ? 4 : 3);
 
     spawns.push(['cattleFarm', modern ? 6 : 5, { x: S.x - 115, z: S.z + 35, r: 60 }]);
     spawns.push(['sheepWhite', modern ? 4 : 6, { x: S.x - 55, z: S.z - 35, r: 35 }]);
@@ -310,6 +430,7 @@ export function buildEra(era, ctx) {
 
     // Brežģa kalns: the 2017 observation tower, the summit oak, the Jāņi pyre
     add(observationTower(), B.x, B.z, 0.2);
+    bgSettlement(g, 5);
     add(pyre(), B.x + 22, B.z + 10, 0.4);
     fires.push([B.x + 22, heightAt(B.x + 22, B.z + 10) + 0.9, B.z + 10, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
 

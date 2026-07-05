@@ -9,6 +9,7 @@
 //       4 = 1935     (Taurene, independent Latvia)
 //       5 = 2025     (today — terrain draped in Sentinel-2 imagery)
 import { RIVER_PTS, STREAMS, BREZGA } from './geodata.js';
+import { ROADS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
 import { makeNoise, clamp, smoothstep, distToPolyline } from './util.js';
@@ -216,18 +217,81 @@ export function fieldAt(era, x, z) {
   return null;
 }
 
-export function distToRoad(era, x, z) {
-  let bd = Infinity;
-  for (const r of roadsForEra(era)) {
+// ---- the REAL road network (OSM) joins the hand-laid diorama roads --------
+// class 0 = the P30 highway (its alignment follows the old Cēsis–Vecpiebalga
+// road), 1 = V-roads, 2 = local lanes, 3 = farm/forest tracks. Farm lanes
+// multiply after the 1920 agrarian reform, so 1860 carries only the main
+// roads and the old tracks.
+const OSM_W = [5.2, 3.8, 2.9, 1.9];
+function osmRoadsFor(era) {
+  if (era < 3) return [];
+  const out = [];
+  for (const r of ROADS_OSM) {
+    if (era === 3 && r.c === 2) continue;
+    out.push({ pts: r.pts, w: OSM_W[r.c] - (era === 5 ? 0 : 0.6), c: r.c });
+  }
+  return out;
+}
+
+// spatial grid over road segments — distToRoad runs in the hot placement
+// loops and the real network is ~1400 segments
+const ROAD_CELL = 48;
+const roadGrids = new Map();
+function roadGridFor(era) {
+  let g = roadGrids.get(era);
+  if (g) return g;
+  const segs = [];
+  const map = new Map();
+  const all = roadsForEra(era).map((r) => ({ pts: r.pts, w: r.w, c: r.c === undefined ? 2 : r.c }))
+    .concat(osmRoadsFor(era));
+  for (const r of all) {
     for (let i = 0; i < r.pts.length - 1; i++) {
       const [ax, az] = r.pts[i], [bx2, bz] = r.pts[i + 1];
-      const vx = bx2 - ax, vz = bz - az;
-      const t = clamp(((x - ax) * vx + (z - az) * vz) / (vx * vx + vz * vz), 0, 1);
-      const d = Math.hypot(x - (ax + vx * t), z - (az + vz * t)) - r.w;
-      if (d < bd) bd = d;
+      const idx = segs.length;
+      segs.push([ax, az, bx2, bz, r.w, r.c]);
+      const pad = r.w + 10;
+      const x0 = Math.floor((Math.min(ax, bx2) - pad) / ROAD_CELL), x1 = Math.floor((Math.max(ax, bx2) + pad) / ROAD_CELL);
+      const z0 = Math.floor((Math.min(az, bz) - pad) / ROAD_CELL), z1 = Math.floor((Math.max(az, bz) + pad) / ROAD_CELL);
+      for (let ix = x0; ix <= x1; ix++) {
+        for (let iz = z0; iz <= z1; iz++) {
+          const k = ix + ':' + iz;
+          let a = map.get(k);
+          if (!a) map.set(k, a = []);
+          a.push(idx);
+        }
+      }
     }
   }
-  return bd;
+  g = { segs, map };
+  roadGrids.set(era, g);
+  return g;
+}
+
+// distance (minus road half-width) and road class of the nearest road.
+// Only exact within ~ROAD_CELL — every caller thresholds far below that.
+export function distToRoadEx(era, x, z) {
+  if (era <= 1) return { d: Infinity, c: 2 };
+  const { segs, map } = roadGridFor(era);
+  const cix = Math.floor(x / ROAD_CELL), ciz = Math.floor(z / ROAD_CELL);
+  let bd = Infinity, bc = 2;
+  for (let ix = cix - 1; ix <= cix + 1; ix++) {
+    for (let iz = ciz - 1; iz <= ciz + 1; iz++) {
+      const arr = map.get(ix + ':' + iz);
+      if (!arr) continue;
+      for (const si of arr) {
+        const s = segs[si];
+        const vx = s[2] - s[0], vz = s[3] - s[1];
+        const L = vx * vx + vz * vz;
+        const t = L ? clamp(((x - s[0]) * vx + (z - s[1]) * vz) / L, 0, 1) : 0;
+        const d = Math.hypot(x - (s[0] + vx * t), z - (s[1] + vz * t)) - s[4];
+        if (d < bd) { bd = d; bc = s[5]; }
+      }
+    }
+  }
+  return { d: bd, c: bc };
+}
+export function distToRoad(era, x, z) {
+  return distToRoadEx(era, x, z).d;
 }
 
 // --- Forest density 0..1 at a point, per era. y = ground elevation (m ASL).

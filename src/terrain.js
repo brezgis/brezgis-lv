@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
-import { PADS, BUMPS, fieldAt, distToRoad, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
+import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
 import { makeNoise, clamp, lerp, smoothstep, pointInPoly, sampleSpline } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
@@ -330,12 +330,20 @@ export function paintEra(era) {
       r = lerp(r, fr + s, t); g = lerp(g, fg + s, t); b = lerp(b, fb + s * 0.6, t);
     }
 
-    // roads & yard earth
+    // roads & yard earth — the real network: asphalt on today's P30 and
+    // V-roads, gravel elsewhere, bare dirt on the farm tracks
     if (era >= 2) {
-      const dr = distToRoad(era, x, z);
-      if (dr < 2.5) {
-        const t = smoothstep(2.5, -1, dr);
-        r = lerp(r, 0.44, t); g = lerp(g, 0.36, t); b = lerp(b, 0.26, t);
+      const ri = distToRoadEx(era, x, z);
+      if (ri.d < 2.5) {
+        const t = smoothstep(2.5, -1, ri.d);
+        if (era === 5 && ri.c <= 1) {
+          const lane = 0.30 + n2 * 0.03;
+          r = lerp(r, lane, t); g = lerp(g, lane + 0.008, t); b = lerp(b, lane + 0.02, t);
+        } else if (ri.c === 3) {
+          r = lerp(r, 0.42, t); g = lerp(g, 0.35, t); b = lerp(b, 0.25, t);
+        } else {
+          r = lerp(r, 0.44, t); g = lerp(g, 0.36, t); b = lerp(b, 0.26, t);
+        }
       }
     }
     for (const p of PADS) {

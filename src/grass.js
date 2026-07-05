@@ -166,16 +166,42 @@ function flowerGeometry(kind) {
   pos.push(-0.012, 0, 0, 0.012, 0, 0, 0.008, H, 0.05, -0.008, H, 0.05);
   for (let k = 0; k < 4; k++) { nrm.push(0, 0, 1); col.push(0.2, 0.34, 0.12); }
   idx.push(b0, b0 + 1, b0 + 2, b0, b0 + 2, b0 + 3);
+  // a tilted petal: quad rising outward from (cx,cy,cz) at azimuth a
+  const petal = (cx, cy, cz, a, len, wid, tilt, cr, cg, cb) => {
+    const b = pos.length / 3;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const ux = -sa * wid, uz = ca * wid;             // width axis
+    const ox = ca * len * Math.cos(tilt), oz = sa * len * Math.cos(tilt);
+    const oy = len * Math.sin(tilt);
+    pos.push(
+      cx - ux, cy, cz - uz, cx + ux, cy, cz + uz,
+      cx + ox + ux * 0.4, cy + oy, cz + oz + uz * 0.4,
+      cx + ox - ux * 0.4, cy + oy, cz + oz - uz * 0.4);
+    const nx = -ca * Math.sin(tilt), ny = Math.cos(tilt), nz = -sa * Math.sin(tilt);
+    for (let k = 0; k < 4; k++) { nrm.push(nx, ny, nz); col.push(cr, cg, cb); }
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  };
   if (kind === 0) {
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      quad(Math.cos(a) * 0.07, H + 0.02 + Math.sin(i * 2.4) * 0.015, 0.05 + Math.sin(a) * 0.07, 0.055, 0.95, 0.95, 0.88);
+    // meadowsweet: frothy cream dome — petals all over a hemisphere
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + 0.4;
+      const up = i % 2 === 0 ? 0.85 : 0.35;
+      petal(Math.cos(a) * 0.03, H + 0.02 + (i % 2) * 0.025, 0.05 + Math.sin(a) * 0.03,
+        a, 0.075, 0.045, up, 0.93, 0.92, 0.84);
     }
+    quad(0, H + 0.075, 0.05, 0.03, 0.96, 0.94, 0.86); // crown
   } else if (kind === 1) {
-    quad(0, H + 0.02, 0.05, 0.05, 0.95, 0.95, 0.9);
-    quad(0, H + 0.028, 0.05, 0.018, 0.95, 0.8, 0.2);
+    // ox-eye daisy: 8 white petals radiating nearly flat + gold heart
+    for (let i = 0; i < 8; i++) {
+      petal(0, H + 0.02, 0.05, (i / 8) * Math.PI * 2, 0.062, 0.02, 0.22, 0.95, 0.95, 0.9);
+    }
+    quad(0, H + 0.034, 0.05, 0.018, 0.95, 0.78, 0.16);
   } else {
-    quad(0, H + 0.02, 0.05, 0.03, 0.95, 0.78, 0.12);
+    // buttercup: 5 glossy cupped petals
+    for (let i = 0; i < 5; i++) {
+      petal(0, H + 0.02, 0.05, (i / 5) * Math.PI * 2, 0.034, 0.017, 0.65, 0.96, 0.78, 0.1);
+    }
+    quad(0, H + 0.028, 0.05, 0.01, 0.85, 0.62, 0.1);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

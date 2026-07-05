@@ -39,61 +39,74 @@ function quadruped({
   }
   const legs = [];
   for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(legR, legR * 0.8, legH + bodyH * 0.3, 5), bodyMat);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(legR, legR * 0.75, legH + bodyH * 0.3, 6), bodyMat);
     leg.geometry.translate(0, -(legH + bodyH * 0.3) / 2, 0);
-    leg.position.set(sx * (width / 2 - legR), legH + bodyH * 0.3, sz * (length / 2 - legR * 2.2));
+    // legs sit UNDER the barrel, not at its corners — corner legs are the
+    // single biggest "creepy toy" tell
+    leg.position.set(sx * width * 0.3, legH + bodyH * 0.3, sz * length * 0.33);
     g.add(leg);
     legs.push(leg);
   }
   // neck + head pivot
   const neck = new THREE.Group();
-  neck.position.set(0, legH + bodyH * 0.75, length / 2 - 0.05);
-  const neckL = neckLen + headSize;
-  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.42, headSize * 0.62, neckL, 8), bodyMat);
-  neckMesh.position.set(0, headSize * 0.3 + neckL * 0.17, neckL * 0.5 - 0.06);
-  neckMesh.rotation.x = Math.PI / 2 - 0.42;
+  neck.position.set(0, legH + bodyH * 0.6, length / 2 - 0.12);
+  const neckL = neckLen + headSize * 0.8;
+  // short thick neck rising ~40° and blending into the chest
+  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.5, headSize * 0.78, neckL, 8), bodyMat);
+  neckMesh.position.set(0, neckL * 0.3, neckL * 0.32);
+  neckMesh.rotation.x = Math.PI / 2 - 0.72;
   neck.add(neckMesh);
   const headMat = M(headColor || color);
   const head = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), headMat);
-  head.scale.set(headSize * 0.48, headSize * 0.45, headSize * 0.56);
-  head.position.set(0, headSize * 0.55, neckLen + headSize * 0.4);
+  head.scale.set(headSize * 0.42, headSize * 0.5, headSize * 0.55);
+  head.position.set(0, neckL * 0.62, neckL * 0.58);
   neck.add(head);
-  const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.2, headSize * 0.3, headSize * 0.8, 8), headMat);
-  muzzle.rotation.x = Math.PI / 2 + 0.12;
-  muzzle.position.set(0, headSize * 0.44, neckLen + headSize * 0.85);
+  // muzzle drops slightly from the brow — a level muzzle reads reptilian
+  const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.24, headSize * 0.33, headSize * 0.62, 8), headMat);
+  muzzle.rotation.x = Math.PI / 2 + 0.4;
+  muzzle.position.set(0, neckL * 0.62 - headSize * 0.18, neckL * 0.58 + headSize * 0.48);
   neck.add(muzzle);
+  const headTop = neckL * 0.62, headZ = neckL * 0.58;
   if (ears) {
     for (const s of [-1, 1]) {
-      const ear = new THREE.Mesh(new THREE.ConeGeometry(headSize * 0.16, headSize * 0.42, 4), bodyMat);
-      ear.position.set(s * headSize * 0.42, headSize * 1.05, neckLen + headSize * 0.28);
-      ear.rotation.z = s * -0.5;
+      // ears stick out SIDEWAYS from the poll, slightly drooped
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(headSize * 0.14, headSize * 0.4, 5), bodyMat);
+      ear.position.set(s * headSize * 0.5, headTop + headSize * 0.32, headZ - headSize * 0.08);
+      ear.rotation.z = s * -1.25;
       neck.add(ear);
     }
   }
   if (horns) {
     for (const s of [-1, 1]) {
-      const h1 = new THREE.Mesh(new THREE.CylinderGeometry(horns.r, horns.r * 1.6, horns.len * 0.62, 5), M(0xd8cfb8));
-      h1.position.set(s * headSize * 0.5, headSize * 0.95, neckLen + headSize * 0.42);
+      // aurochs sweep: out-and-up base, tips hooking forward-inward
+      const h1 = new THREE.Mesh(new THREE.CylinderGeometry(horns.r * 0.8, horns.r * 1.4, horns.len * 0.6, 6), M(0xd8cfb8));
+      h1.position.set(s * headSize * 0.42, headTop + headSize * 0.42, headZ);
       h1.rotation.z = s * -horns.spread;
       neck.add(h1);
-      const h2 = new THREE.Mesh(new THREE.CylinderGeometry(horns.r * 0.45, horns.r, horns.len * 0.5, 5), M(0xe6dcc4));
-      h2.position.set(s * (headSize * 0.5 + Math.sin(horns.spread) * horns.len * 0.42), headSize * 0.95 + Math.cos(horns.spread) * horns.len * 0.36, neckLen + headSize * 0.42 + horns.fwd);
-      h2.rotation.set(-horns.fwd * 2.2, 0, s * -horns.spread * 0.3);
+      const h2 = new THREE.Mesh(new THREE.CylinderGeometry(horns.r * 0.3, horns.r * 0.75, horns.len * 0.52, 6), M(0xe6dcc4));
+      h2.position.set(
+        s * (headSize * 0.42 + Math.sin(horns.spread) * horns.len * 0.5),
+        headTop + headSize * 0.42 + Math.cos(horns.spread) * horns.len * 0.42,
+        headZ + horns.fwd * horns.len * 0.5);
+      h2.rotation.set(-horns.fwd * 1.6, 0, s * -horns.spread * 0.25);
       neck.add(h2);
     }
   }
   if (maneColor) {
-    const mane = new THREE.Mesh(new THREE.BoxGeometry(width * 0.16, headSize * 0.9, neckLen + headSize * 0.9), M(maneColor));
-    mane.position.set(0, headSize * 0.85, (neckLen + headSize) / 2);
-    mane.rotation.x = -0.35;
+    const mane = new THREE.Mesh(new THREE.BoxGeometry(width * 0.14, headSize * 0.55, neckL * 0.9), M(maneColor));
+    mane.position.set(0, neckL * 0.42 + headSize * 0.3, neckL * 0.3);
+    mane.rotation.x = -0.72;
     neck.add(mane);
   }
   g.add(neck);
   if (tail > 0) {
-    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.045, tail, 4), bodyMat);
-    t.position.set(0, legH + bodyH * 0.7, -length / 2 - 0.03);
-    t.rotation.x = 0.5;
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.04, tail, 5), bodyMat);
+    t.position.set(0, legH + bodyH * 0.62, -length / 2 - 0.02);
+    t.rotation.x = 0.42;
     g.add(t);
+    const tassel = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 5), M(0x2a2018));
+    tassel.position.set(0, legH + bodyH * 0.62 - tail * 0.46, -length / 2 - 0.02 - tail * 0.2);
+    g.add(tassel);
   }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
   return { group: g, legs, neck, shoulder };
@@ -101,10 +114,17 @@ function quadruped({
 
 function fowl({ size = 0.22, color = 0xd8d3c4, comb = false, neckLen = 0 }) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(size, 7, 6), M(color));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 7), M(color));
   body.scale.set(0.85, 0.9, 1.25);
   body.position.y = size * 1.25;
+  body.rotation.x = -0.22;               // breast down, tail up
   g.add(body);
+  // tail fan
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(size * 0.55, size * 0.9, 6), M(color));
+  tail.scale.z = 0.28;
+  tail.rotation.x = -0.9;
+  tail.position.set(0, size * 1.75, -size * 1.05);
+  g.add(tail);
   const neck = new THREE.Group();
   neck.position.set(0, size * 1.6, size * 0.9);
   const head = new THREE.Mesh(new THREE.SphereGeometry(size * 0.42, 6, 5), M(color));

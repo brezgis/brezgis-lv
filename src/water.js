@@ -58,9 +58,11 @@ function makeWaterMaterial(color, opacity) {
 // (the old 63m segments read as rectangles), and a shallow-V cross-section —
 // the edge verts sit ~0.7m below the centreline so the surface always tucks
 // UNDER the rising bank instead of floating over hollows in the 30m DEM.
-function ribbon(pts, widthFn, mat, uvScale = 60) {
+function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 2.0) {
   const SEG = Math.min(1400, pts.length * 4);
-  const EDGE_DROP = 0.7;
+  // edge verts must sink BELOW the carved bed (1.7m) or the surface still
+  // hovers over hollows near steep banks
+  const EDGE_DROP = edgeDrop;
   const positions = [], uvs = [], indices = [];
   for (let i = 0; i <= SEG; i++) {
     const t = i / SEG;
@@ -122,7 +124,7 @@ export function buildWater() {
   const streamMat = makeWaterMaterial(0x314f58, 0.92);
   mats.push(streamMat);
   for (const s of STREAMS) {
-    const st = ribbon(s.pts, () => 2.1, streamMat, 90);
+    const st = ribbon(s.pts, () => 2.1, streamMat, 90, 1.2);
     st.name = s.name || 'stream';
     group.add(st);
   }

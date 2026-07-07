@@ -31,9 +31,9 @@ a clay stove at the centre, bark-sheet roofs weighted with poles, a granary rais
 posts [11][12]. Barley, rye and flax grow in small fields; small cattle, dark sheep, pigs
 and pony-sized horses graze the clearing; a few chickens scratch in the yard [14]. Across
 the river on its hill stands the palisaded refuge fort — Lejstupu pilskalns, still marked
-on the monument register today [10]. Four more homesteads smoke within an hour's walk —
+on the monument register today [10]. Seven more homesteads smoke within an hour's walk —
 Latgalian settlement was dispersed single farmsteads loosely gathered on a hillfort
-district, not lone outposts [13]. Smoke seeps through the gable; under the old oak,
+district, not lone outposts, eight to fifteen to a district like this one [13][27]. Smoke seeps through the gable; under the old oak,
 offerings; low fresh barrows by the field, men buried facing east, women west [13].`,
     facts: ['Modelled on Āraiši (dendro-dated AD 835)', 'Lejstupu pilskalns — real hillfort on this spot', 'Dispersed viensētas round a hillfort district', 'Chimneyless smoke-dwellings'],
   },
@@ -109,4 +109,6 @@ export const SOURCES = [
   { n: 23, t: 'Sentinel-2 cloudless (2020) by EOX IT Services GmbH, CC-BY 4.0 — contains modified Copernicus Sentinel data', u: 'https://s2maps.eu' },
   { n: 24, t: 'Brežģa kalns observation tower (2017) — EnterGauja / Visit Cēsis', u: 'https://www.entergauja.com/lv/ko-darit/enter-daba/brezga-kalns' },
   { n: 25, t: 'Camera feel, wind model and realism standards adapted from LAAS (MIT) — a fully procedural WebGPU world', u: 'https://github.com/Braffolk/fable5-world-demo' },
+  { n: 26, t: 'Latvian Army 1:75,000 topographic map, 1920–1940 (Nēķina mž. sheet — 1935 farms, roads and forests verified against it), via vesture.dodies.lv', u: 'https://vesture.dodies.lv/' },
+  { n: 27, t: 'Iron Age settlement density of NE Vidzeme — research/iron-age-settlement.md (Stivriņš et al. 2015 pollen record; Radiņš; Vasks; Āraiši hinterland estimates)', u: 'https://en.wikipedia.org/wiki/%C4%80rai%C5%A1i_lake_fortress' },
 ];

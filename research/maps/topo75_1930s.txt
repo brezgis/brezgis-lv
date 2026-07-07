@@ -1,0 +1,3 @@
+LVARM_40_75k z13 stitched: NW 57.18390,25.57617 SE 57.08852,25.75195
+sim tile bounds: N 57.18369 S 57.10466 W 25.60012 E 25.74589
+source: vesture.dodies.lv / home.dodies.lv tile rips of Latvian Army maps

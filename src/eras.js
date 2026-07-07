@@ -244,7 +244,13 @@ function bgSettlement(group, era, smokes) {
       items.push({ x, z, w, d, rot, big: w * d > 220, kind: 'new' });
     }
   } else {
-    DWELLINGS_OSM.forEach(([x, z], si) => {
+    DWELLINGS_OSM.forEach(([x, z, name], si) => {
+      // Brežģu Pienotava — the family dairy co-op point: a white plastered
+      // creamery by the krogs road in 1935; no such site before the co-op era
+      if (/pienotava/i.test(name || '')) {
+        if (era === 4) items.push({ x, z, w: 11, d: 7, rot: 0.98, kind: 'dairy', white: true });
+        return;
+      }
       if (skip(x, z) || !farmSiteKept(si, era)) return;
       const sr = mulberry32(si * 613 + era * 37);
       const rot = sr() * Math.PI;
@@ -302,6 +308,8 @@ function bgSettlement(group, era, smokes) {
       else if (pick < 0.8) col.setRGB(0.72, 0.68, 0.62);    // silicate/grey
       else col.setRGB(0.5, 0.42, 0.34);                     // dark wood
       if (it.big) col.setRGB(0.66, 0.68, 0.7);              // steel-clad barn
+    } else if (it.white) {
+      col.setRGB(0.88, 0.85, 0.78);                         // plastered creamery
     } else {
       col.setRGB(0.42 + rng() * 0.12, 0.34 + rng() * 0.08, 0.24 + rng() * 0.06);
     }

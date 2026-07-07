@@ -145,13 +145,18 @@ export const LOC = {
 
 // Terrain pads to flatten (union across eras — the ground itself is continuous)
 // Late Iron Age dispersal: Latgalian settlement was scattered single
-// farmsteads loosely gathered on a hillfort district, not lone outposts —
-// four more homesteads within an hour's walk of Brezgi (era 2 only)
+// farmsteads loosely gathered on a hillfort district, not lone outposts.
+// 7 outliers + the main stead = 8 settlement units on the 77 km² tile —
+// mid-range of the 8-15 that cemetery-density and population estimates give
+// for 10th-c NE Vidzeme (research/iron-age-settlement.md)
 export const ERA2_FARMS = [
   { x: LOC.STEAD.x + 420, z: LOC.STEAD.z + 460 },
   { x: LOC.STEAD.x + 640, z: LOC.STEAD.z - 180 },
   { x: LOC.STEAD.x + 130, z: LOC.STEAD.z + 890 },
   { x: LOC.STEAD.x + 520, z: LOC.STEAD.z - 420 },
+  { x: LOC.STEAD.x - 60,  z: LOC.STEAD.z - 700 },
+  { x: LOC.STEAD.x + 980, z: LOC.STEAD.z + 240 },
+  { x: LOC.STEAD.x + 420, z: LOC.STEAD.z + 1240 },
 ];
 
 export const PADS = [
@@ -275,7 +280,7 @@ function rawFieldsForEra(era) {
       { cx: S.x + 40, cz: S.z + 115, rx: 45, rz: 30, rot: -0.3, type: 'rye' },
       { cx: S.x + 135, cz: S.z + 40, rx: 32, rz: 24, rot: 0.9, type: 'fallow' },
     ];
-    const T2 = ['barley', 'rye', 'flax', 'barley'];
+    const T2 = ['barley', 'rye', 'flax', 'barley', 'rye', 'fallow', 'barley'];
     ERA2_FARMS.forEach((f, i) => {
       out.push({ cx: f.x + 45, cz: f.z + 25 - i * 12, rx: 30 + i * 3, rz: 22, rot: i * 0.8, type: T2[i] });
     });

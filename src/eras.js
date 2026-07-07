@@ -470,6 +470,9 @@ export function buildEra(era, ctx) {
     add(logCabin({ w: 4.5, d: 7, wallH: 1.6, roofH: 2.0, roof: 'thatchGableOld', old: true }), S.x - 14, S.z + 7, 1.55);
     addRaw(palisadeRing(LOC.HILLFORT.x, LOC.HILLFORT.z, 17));
     add(logCabin({ w: 3.6, d: 4.4, wallH: 1.7, roofH: 1.8, roof: 'barkGable', old: true }), LOC.HILLFORT.x + 4, LOC.HILLFORT.z - 3, 0.7);
+    // refuge forts held more than one roof: a second dwelling + raised store
+    add(logCabin({ w: 3.2, d: 4.0, wallH: 1.6, roofH: 1.7, roof: 'barkGable', old: true }), LOC.HILLFORT.x - 6, LOC.HILLFORT.z + 4, -0.9);
+    add(postGranary(), LOC.HILLFORT.x - 9, LOC.HILLFORT.z - 7, 1.9);
     add(campfire(), S.x + 1.5, S.z - 1);
     fires.push([S.x + 1.5, heightAt(S.x + 1.5, S.z - 1) + 0.15, S.z - 1]);
     smokes.push([S.x + 1.5, heightAt(S.x + 1.5, S.z - 1) + 0.9, S.z - 1, { rate: 1.0, gray: 0.8 }]);

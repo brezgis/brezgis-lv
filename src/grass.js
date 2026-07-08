@@ -10,7 +10,9 @@ import * as THREE from 'three';
 import { heightAt } from './terrain.js';
 import { forestDensity, distToRiver, distToRoad, fieldAt, riverLevelNear, PADS, ERA2_FARMS, LOC } from './landuse.js';
 import { LAKES } from './geodata.js';
-import { mulberry32, makeNoise, pointInPoly, smoothstep as smoothstepJ } from './util.js';
+import { mulberry32, makeNoise, pointInPoly, chaikinPoly, smoothstep as smoothstepJ } from './util.js';
+// exclusion shoreline = the RENDERED (smoothed) shoreline, not the raw poly
+const LAKE_SHORES = LAKES.map((l) => ({ level: l.level, poly: chaikinPoly(l.poly) }));
 import { WIND } from './vegetation.js';
 
 // world-cell hash → deterministic rng stream per cell
@@ -317,7 +319,7 @@ export function buildGrass(scene) {
         if (cellOK && (era === 3 || era === 4) && cY < LOC.POND_LEVEL + 0.25 &&
             Math.hypot((ccx - (LOC.POND.x + 4)) / 54, (ccz - LOC.POND.z) / 36) < 1.05) cellOK = false;
         if (cellOK) {
-          for (const lake of LAKES) {
+          for (const lake of LAKE_SHORES) {
             if (cY < lake.level + 0.5 && pointInPoly(ccx, ccz, lake.poly)) { cellOK = false; break; }
           }
         }
@@ -368,7 +370,7 @@ export function buildGrass(scene) {
           if ((era === 3 || era === 4) && y < LOC.POND_LEVEL + 0.25 &&
               Math.hypot((x - (LOC.POND.x + 4)) / 54, (z - LOC.POND.z) / 36) < 1.05) continue;
           let inLake = false;
-          for (const lake of LAKES) {
+          for (const lake of LAKE_SHORES) {
             if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
           }
           if (inLake) continue;

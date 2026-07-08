@@ -114,3 +114,21 @@ export function splineLength(pts, samples = 200) {
   }
   return len;
 }
+
+// Chaikin corner-cutting — THE lake shoreline. The water mesh, the bed carve
+// and the shore clamp must all use the same smoothed outline: carving with
+// the raw OSM polygon left a sunken bare strip between the smoothed water
+// mesh and the coarse poly edge (the "pan" at the Gauja mouth).
+export function chaikinPoly(poly, iters = 2) {
+  let pp = poly;
+  for (let it = 0; it < iters; it++) {
+    const q = [];
+    for (let i = 0; i < pp.length; i++) {
+      const a = pp[i], b = pp[(i + 1) % pp.length];
+      q.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+      q.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+    }
+    pp = q;
+  }
+  return pp;
+}

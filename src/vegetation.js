@@ -9,9 +9,11 @@ import * as THREE from 'three';
 import { heightAt } from './terrain.js';
 import { forestDensity, distToRiver, riverLevelNear, fieldAt, farmSiteKept, nearStagePOI, LOC } from './landuse.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
+// exclusion shoreline = the RENDERED (smoothed) shoreline, not the raw poly
+const LAKE_SHORES = LAKES.map((l) => ({ level: l.level, poly: chaikinPoly(l.poly) }));
 import { DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
-import { makeNoise, clamp, pointInPoly, canvasTexture } from './util.js';
+import { makeNoise, clamp, pointInPoly, chaikinPoly, canvasTexture } from './util.js';
 import { SPECIES, buildTree, buildFern, buildLog, buildStump, buildBoulder } from './treegen.js';
 import { captureTwigAtlas, captureImpostorAtlas } from './capture.js';
 
@@ -406,7 +408,7 @@ export function buildVegetation(scene, renderer) {
         const z = (iz / (N - 1) - 0.5) * EXT + HM_OFF_Z + (rng() - 0.5) * step * 1.4;
         const y = heightAt(x, z);
         let inLake = false;
-        for (const lake of LAKES) {
+        for (const lake of LAKE_SHORES) {
           if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
         }
         if (inLake) continue;
@@ -691,7 +693,7 @@ export function buildVegetation(scene, renderer) {
       if (dPOI(x, z) > 700) continue;
       const y = heightAt(x, z);
       let bad = false;
-      for (const lake of LAKES) if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { bad = true; break; }
+      for (const lake of LAKE_SHORES) if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { bad = true; break; }
       if (bad) continue;
       for (const e of [2, 3, 4]) if (fieldAt(e, x, z)) { bad = true; break; }
       if (bad) continue;
@@ -744,8 +746,8 @@ export function buildVegetation(scene, renderer) {
     const reeds = makeInstanced(reedG, reedMat, 6000, false);
     const rng = makeNoise(2211).rng;
     let i = 0;
-    for (const lake of LAKES) {
-      const poly = lake.poly;
+    for (const lake of LAKE_SHORES) {
+      const poly = lake.poly;   // smoothed — reeds hug the RENDERED waterline
       for (let e = 0; e < poly.length; e++) {
         const [ax, az] = poly[e], [bx, bz] = poly[(e + 1) % poly.length];
         const len = Math.hypot(bx - ax, bz - az);

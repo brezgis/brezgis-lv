@@ -561,8 +561,10 @@ export function buildTwigTile(g, sp, rng, cx, cy) {
         rng.float() * 2 - 1, 0.72 + rng.float() * 0.28);
     }
   } else {
-    const n = 14 + rng.int(7);
-    const leafScale = (2 * half) / (fol.leaf.len * 2.1);
+    // denser, smaller leaves: 14 leaves at ~44% tile span projected onto
+    // 1-2m cards read as low-poly shards at eye level
+    const n = 26 + rng.int(9);
+    const leafScale = (2 * half) / (fol.leaf.len * 3.2);
     for (let i = 0; i < n; i++) {
       const t = i / (n - 1);
       const spread = 0.5 + t * 0.6;
@@ -672,8 +674,11 @@ export function buildFern(seed) {
       hue: rng.float() * 2 - 1, age: rng.float() * 0.4,
     });
   }
-  // cross mode: single-plane fronds vanish edge-on and read as 2D cutouts
-  buildFoliageCards(g, anchors, { mode: 'cross', sizeK: 2.4, bend: 1.0 }, rng);
+  // mostly FLAT arching fronds (a real frond is planar — full crosses made
+  // the rosette read as a solid teepee); every third is crossed so the
+  // silhouette stays full edge-on
+  buildFoliageCards(g, anchors.filter((_, i) => i % 3 === 0), { mode: 'cross', sizeK: 2.4, bend: 1.0 }, rng);
+  buildFoliageCards(g, anchors.filter((_, i) => i % 3 !== 0), { mode: 'flat', sizeK: 2.4, bend: 1.1 }, rng);
   return g.build();
 }
 

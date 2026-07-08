@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { RIVER_PTS, STREAMS, LAKES } from './geodata.js';
 import { LOC } from './landuse.js';
-import { sampleSpline, canvasTexture, makeNoise } from './util.js';
+import { sampleSpline, canvasTexture, makeNoise, chaikinPoly } from './util.js';
 import { heightAt, meshHeightAt } from './terrain.js';
 
 function waterNormalTex() {
@@ -114,19 +114,7 @@ export function buildWater() {
   mats.push(lakeMat);
   // OSM lake outlines are sparse polygons — Chaikin-smooth the shoreline
   // or the basins read as blocky cut gems
-  const chaikin = (poly, iters = 2) => {
-    let pp = poly;
-    for (let it = 0; it < iters; it++) {
-      const q = [];
-      for (let i = 0; i < pp.length; i++) {
-        const a2 = pp[i], b2 = pp[(i + 1) % pp.length];
-        q.push([a2[0] * 0.75 + b2[0] * 0.25, a2[1] * 0.75 + b2[1] * 0.25]);
-        q.push([a2[0] * 0.25 + b2[0] * 0.75, a2[1] * 0.25 + b2[1] * 0.75]);
-      }
-      pp = q;
-    }
-    return pp;
-  };
+  const chaikin = (poly) => chaikinPoly(poly);
   for (const lake of LAKES) {
     // store as (x, -z) so that rotateX(-PI/2) lands on (x, z) with the normal up
     const shape = new THREE.Shape(chaikin(lake.poly).map(([x, z]) => new THREE.Vector2(x, -z)));
@@ -146,7 +134,9 @@ export function buildWater() {
   mats.push(riverMat);
   // constant width: the old sinusoidal wobble made the shore seams
   // unpredictable — every downstream fix has to know where the edge is
-  const river = ribbon(RIVER_PTS, () => 10.2, riverMat, 70, 0.5);
+  // rim 0.35: the 0.5m dark wall showed through the transparent surface
+  // from the far bank as a black outline around every reach
+  const river = ribbon(RIVER_PTS, () => 10.2, riverMat, 70, 0.35);
   river.renderOrder = 1;
   river.name = 'gauja';
   group.add(river);
@@ -215,24 +205,26 @@ export function buildWater() {
     // then a grass-toned fringe — with vertex-colour gradients and a wavy
     // outer edge, so the collar reads as beach, not as tan polygons
     const positions = [], indices = [], colors = [], uvsA = [];
+    // bright enough to survive the sand-texture multiply — the old values
+    // went near-black and every shore read as a dark outline around the water
     const bandC = [
-      [0.36, 0.31, 0.23],   // wet sand at the waterline
-      [0.55, 0.48, 0.35],   // dry sand
-      [0.44, 0.5, 0.29],    // fringe blending to meadow
+      [0.62, 0.55, 0.42],   // wet sand at the waterline
+      [0.78, 0.70, 0.53],   // dry sand
+      [0.60, 0.65, 0.42],   // fringe blending to meadow
     ];
     for (let i = 0; i < rows.length; i++) {
       const y = rows[i][2];
       for (const si of [0, 1]) {
         const inn = inner[si][i], out = outer[si][i];
-        const mx = inn[0] + (out[0] - inn[0]) * 0.45;
-        const mz = inn[2] + (out[2] - inn[2]) * 0.45;
+        const mx = inn[0] + (out[0] - inn[0]) * 0.3;
+        const mz = inn[2] + (out[2] - inn[2]) * 0.3;
         // outer edge DRAPES onto the rendered terrain (clamped so it neither
         // dives into a carved dip nor flies up a bank) — a fixed +0.07 rim
         // floated a tan wall over the shore shelf and read as a dyke
-        const gOut = Math.min(Math.max(meshHeightAt(out[0], out[2]) + 0.03, y - 0.48), y + 0.5);
+        const gOut = Math.min(Math.max(meshHeightAt(out[0], out[2]) + 0.03, y - 0.33), y + 0.5);
         const gMid = Math.min(Math.max(meshHeightAt(mx, mz) + 0.03, y + 0.03), y + 0.3);
         positions.push(
-          inn[0], y - 0.5, inn[2],
+          inn[0], y - 0.35, inn[2],   // MUST equal the ribbon edgeDrop
           mx, gMid, mz,
           out[0], gOut, out[2]);
         for (let bI = 0; bI < 3; bI++) {
@@ -248,6 +240,18 @@ export function buildWater() {
         for (const [o0, o1] of [[4, 3], [5, 4]]) {         // right strips
           indices.push(a2 + o0, a2 + o1, a2 + o1 + 6, a2 + o0, a2 + o1 + 6, a2 + o0 + 6);
         }
+      }
+    }
+    // FORCE every face to wind CCW-seen-from-above. With DoubleSide the
+    // renderer flips the hand-written +y normals on back-facing triangles
+    // (gl_FrontFacing), so downward-wound quads light from BELOW — the
+    // entire apron rendered pitch black despite correct colours.
+    for (let i = 0; i < indices.length; i += 3) {
+      const a = indices[i] * 3, b = indices[i + 1] * 3, c = indices[i + 2] * 3;
+      const abx = positions[b] - positions[a], abz = positions[b + 2] - positions[a + 2];
+      const acx = positions[c] - positions[a], acz = positions[c + 2] - positions[a + 2];
+      if (abz * acx - abx * acz < 0) {
+        const t = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = t;
       }
     }
     const geo = new THREE.BufferGeometry();

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
-import { makeNoise, clamp, lerp, smoothstep, pointInPoly, sampleSpline, sampleSplineEven } from './util.js';
+import { makeNoise, clamp, lerp, smoothstep, pointInPoly, sampleSpline, sampleSplineEven, chaikinPoly } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
 const noise = makeNoise(1907);
@@ -78,8 +78,11 @@ function cellToWorld(gx, gy) {
       buckets.get(k).push(s);
     }
     const R = 84;
+    // the clamp must respect the SMOOTHED shoreline (same as the water mesh
+    // and bed carve) so the strip outside it gets raised like any other bank
+    const shores = LAKES.map((lake) => chaikinPoly(lake.poly));
     const inAnyLake = (x, z) => {
-      for (const lake of LAKES) { if (pointInPoly(x, z, lake.poly)) return true; }
+      for (const shore of shores) { if (pointInPoly(x, z, shore)) return true; }
       return false;
     };
     const P = LOC.POND;
@@ -142,17 +145,21 @@ function cellToWorld(gx, gy) {
       }
     }
   }
-  // lake beds: make sure they dip below their waterlines
+  // lake beds: carve inside the SAME Chaikin-smoothed shoreline the water
+  // mesh renders — carving the raw OSM polygon left a sunken bare strip
+  // between the smoothed water edge and the coarse poly (the "pan" where
+  // the Gauja meets Taurenes ezers)
   for (const lake of LAKES) {
+    const shore = chaikinPoly(lake.poly);
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const [x, z] of lake.poly) {
+    for (const [x, z] of shore) {
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
     }
     for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
       const [x, z] = cellToWorld(gx, gy);
       if (x < minX - CELL || x > maxX + CELL || z < minZ - CELL || z > maxZ + CELL) continue;
-      if (pointInPoly(x, z, lake.poly)) {
+      if (pointInPoly(x, z, shore)) {
         const i = gy * G + gx;
         field[i] = Math.min(field[i], lake.level - 1.3);
       }

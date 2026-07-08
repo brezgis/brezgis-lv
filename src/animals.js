@@ -706,7 +706,12 @@ export class AnimalManager {
   tickAir(a, t, dt) {
     const g = a.group;
     if (a.fly === 'flutter') {
-      // erratic wander around the home meadow, low over the flowers
+      // erratic wander around the home meadow, low over the flowers —
+      // with a guaranteed drift (pure zero-mean noise left them hovering)
+      if (Math.hypot(a.vx, a.vz) < 0.45) {
+        const th = a.phase + t * 0.13;
+        a.vx += Math.cos(th) * 0.5; a.vz += Math.sin(th) * 0.5;
+      }
       a.vx += (rng() - 0.5) * 8 * dt; a.vz += (rng() - 0.5) * 8 * dt;
       const hx = a.home.x - g.position.x, hz = a.home.z - g.position.z;
       const hd = Math.hypot(hx, hz);
@@ -769,8 +774,17 @@ export class AnimalManager {
     }
   }
 
-  tick(t, dt) {
+  tick(t, dt, camPos) {
     for (const a of this.animals) {
+      // distance cull: ground fauna beyond 650m is invisible anyway but
+      // still costs its draw calls; sky fliers stay (silhouettes carry far).
+      // Visibility ONLY — the simulation keeps running (a culled fish that
+      // stops swimming is a frozen fish when you arrive).
+      if (camPos && a.medium !== 'air') {
+        const dx = a.group.position.x - camPos.x, dz = a.group.position.z - camPos.z;
+        const vis = dx * dx + dz * dz < 650 * 650;
+        if (a.group.visible !== vis) a.group.visible = vis;
+      }
       if (a.static) {
         // nest stork: occasional preen
         a.neck.rotation.x = Math.sin(t * 0.3 + a.phase) > 0.92 ? 0.8 : Math.sin(t * 0.5 + a.phase) * 0.06;

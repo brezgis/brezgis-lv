@@ -397,7 +397,7 @@ export function buildVegetation(scene, renderer) {
   const shroomsC = makeInstanced(shroomCGeo, plainM(0xd89828), 1400, false);
   const shroomBGeo = new THREE.SphereGeometry(0.06, 7, 5);
   shroomBGeo.scale(1, 0.62, 1);
-  shroomBGeo.translate(0, 0.05, 0);
+  shroomBGeo.translate(0, 0.028, 0);   // cap bottom meets the soil (it hovered 1.3cm)
   const shroomsB = makeInstanced(shroomBGeo, plainM(0x6a4526), 900, false);
   const coneGeo = new THREE.SphereGeometry(0.04, 6, 5);
   coneGeo.scale(1, 1.7, 1);
@@ -418,7 +418,15 @@ export function buildVegetation(scene, renderer) {
     ['shroomB', shroomsB, (d, e) => { d.position.set(e[0], e[1], e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
     ['cone', conesM, (d, e) => { d.position.set(e[0], e[1] + 0.03, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0.4, e[4], 0); }],
     ['twig', twigs, (d, e) => { d.position.set(e[0], e[1] + 0.03, e[2]); d.scale.set(e[3], 1, 1); d.rotation.set((e[4] % 0.2) - 0.1, e[4], 0); }],
-    ['litter', litter, (d, e) => { d.position.set(e[0], e[1] + 0.04, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['litter', litter, (d, e) => {
+      // tilt to the local slope and stay small — flat metre discs sliced
+      // into sloped ground on one side while hovering on the other
+      const gx = (heightAt(e[0] + 0.8, e[2]) - heightAt(e[0] - 0.8, e[2])) / 1.6;
+      const gz = (heightAt(e[0], e[2] + 0.8) - heightAt(e[0], e[2] - 0.8)) / 1.6;
+      d.position.set(e[0], e[1] + 0.05, e[2]);
+      d.scale.setScalar(e[3] * 0.65);
+      d.rotation.set(Math.atan(gz), e[4], -Math.atan(gx));
+    }],
   ];
   microProps.forEach(([, m]) => group.add(m));
 
@@ -443,6 +451,15 @@ export function buildVegetation(scene, renderer) {
     lists.fern = []; lists.log = []; lists.stump = []; lists.rock = [];
     lists.anthill = []; lists.molehill = []; lists.shroomC = []; lists.shroomB = [];
     lists.cone = []; lists.twig = []; lists.litter = [];
+    // final-position gate for micro props: parent-sample gating alone let
+    // 5-10m offsets stray into fields, banks and open meadow
+    const okMicro = (px, pz) => {
+      const py = heightAt(px, pz);
+      if (forestDensity(era, px, pz, py) < 0.35) return false;
+      if (era >= 2 && fieldAt(era, px, pz)) return false;
+      if (distToRiver(px, pz) < 18 || py < riverLevelNear(px, pz) + 0.45) return false;
+      return true;
+    };
     const S = LOC.STEAD;
     const step = 9;    // real hemiboreal forest runs hundreds of stems/ha
     const EXT = HM_SPAN - 120;
@@ -526,31 +543,31 @@ export function buildVegetation(scene, renderer) {
           const conifer = kind === 'spruce' || kind === 'pine';
           if (conifer && rng() < 0.014) {
             const ax = x + (rng() - 0.5) * 8, az = z + (rng() - 0.5) * 8;
-            lists.anthill.push([ax, heightAt(ax, az), az, 0.55 + rng() * 0.75, rng() * 6.3]);
+            if (okMicro(ax, az)) lists.anthill.push([ax, heightAt(ax, az), az, 0.55 + rng() * 0.75, rng() * 6.3]);
           }
           if (rng() < 0.05) {
             const mx = x + (rng() - 0.5) * 9, mz = z + (rng() - 0.5) * 9;
             const n2 = 3 + (rng() * 5) | 0;
             for (let k = 0; k < n2; k++) {
               const ox = mx + (rng() - 0.5) * 1.2, oz = mz + (rng() - 0.5) * 1.2;
-              lists.shroomC.push([ox, heightAt(ox, oz), oz, 0.75 + rng() * 0.6, rng() * 6.3]);
+              if (okMicro(ox, oz)) lists.shroomC.push([ox, heightAt(ox, oz), oz, 0.75 + rng() * 0.6, rng() * 6.3]);
             }
           }
           if (rng() < 0.035) {
             const bx2 = x + (rng() - 0.5) * 9, bz2 = z + (rng() - 0.5) * 9;
-            lists.shroomB.push([bx2, heightAt(bx2, bz2), bz2, 0.8 + rng() * 0.7, rng() * 6.3]);
+            if (okMicro(bx2, bz2)) lists.shroomB.push([bx2, heightAt(bx2, bz2), bz2, 0.8 + rng() * 0.7, rng() * 6.3]);
           }
           if (conifer && rng() < 0.3) {
             const cx2 = x + (rng() - 0.5) * 5, cz2 = z + (rng() - 0.5) * 5;
-            lists.cone.push([cx2, heightAt(cx2, cz2), cz2, 0.8 + rng() * 0.5, rng() * 6.3]);
+            if (okMicro(cx2, cz2)) lists.cone.push([cx2, heightAt(cx2, cz2), cz2, 0.8 + rng() * 0.5, rng() * 6.3]);
           }
           if (rng() < 0.2) {
             const tx2 = x + (rng() - 0.5) * 10, tz2 = z + (rng() - 0.5) * 10;
-            lists.twig.push([tx2, heightAt(tx2, tz2), tz2, 0.5 + rng() * 0.9, rng() * 6.3]);
+            if (okMicro(tx2, tz2)) lists.twig.push([tx2, heightAt(tx2, tz2), tz2, 0.5 + rng() * 0.9, rng() * 6.3]);
           }
           if (!conifer && kind !== 'snag' && rng() < 0.12) {
             const lx2 = x + (rng() - 0.5) * 7, lz2 = z + (rng() - 0.5) * 7;
-            lists.litter.push([lx2, heightAt(lx2, lz2), lz2, 0.6 + rng() * 1.0, rng() * 6.3]);
+            if (okMicro(lx2, lz2)) lists.litter.push([lx2, heightAt(lx2, lz2), lz2, 0.6 + rng() * 1.0, rng() * 6.3]);
           }
         }
       }
@@ -569,7 +586,16 @@ export function buildVegetation(scene, renderer) {
         const n2 = 2 + (rng() * 4) | 0;
         for (let k = 0; k < n2; k++) {
           const ox = x + (rng() - 0.5) * 6, oz = z + (rng() - 0.5) * 6;
-          lists.molehill.push([ox, heightAt(ox, oz), oz, 0.7 + rng() * 0.6, rng() * 6.3]);
+          const oy = heightAt(ox, oz);
+          // each child mound revalidates — a 3m offset crossed into fields,
+          // lake shores and the river bank from a valid seed
+          if (forestDensity(era, ox, oz, oy) > 0.12) continue;
+          if (distToRiver(ox, oz) < 22 || oy < riverLevelNear(ox, oz) + 0.5) continue;
+          if (era >= 2 && fieldAt(era, ox, oz)) continue;
+          let inL = false;
+          for (const lake of LAKE_SHORES) { if (oy < lake.level + 0.5 && pointInPoly(ox, oz, lake.poly)) { inL = true; break; } }
+          if (inL) continue;
+          lists.molehill.push([ox, oy, oz, 0.7 + rng() * 0.6, rng() * 6.3]);
         }
       }
     }

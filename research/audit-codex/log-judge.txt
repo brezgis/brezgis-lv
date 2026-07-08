@@ -1,0 +1,21 @@
+warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.
+Reading additional input from stdin...
+OpenAI Codex v0.139.0
+--------
+workdir: /home/anna/projects/village
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019f40fe-1108-7802-9f12-f2914e65f152
+--------
+user
+You are the final JUDGE for the fauna+detail validation loop in this repo. Fixes were applied for all findings in research/audit-codex/findings-fauna.json and findings-detail.json. Round-2 evidence: research/audit-codex/fauna/r2_*.png (VIEW them — pond ducks, lake swans, butterfly meadow, river motion, molehill lake/field spots, forest props, bolete macro, litter slope). Movement is validated by 'node data/faunatest.mjs' (RUN it yourself — ticks the AnimalManager 40 sim-seconds; screenshot probes cannot observe motion because headless Chrome throttles rAF). Also verify with node that the code fixes landed: src/animals.js distance cull no longer skips simulation (no 'continue' after visibility set), flutter has guaranteed drift; src/vegetation.js has okMicro final-position gate + per-child molehill validation. Write research/audit-codex/verdicts-round2.json: [{"finding":"<title>","verdict":"FIXED|NOT-FIXED|PARTIAL","reason":"..."}] covering all 6 findings from both files, plus a "new_issues" array for anything you see in the r2 shots that is broken (empty if clean). Print DONE.
+codex
+I’ll validate this from the actual repo state: first I’m reading the finding titles and round-2 evidence inventory, then I’ll inspect the screenshots, run the motion test, and verify the code invariants before writing the verdict JSON.
+  → Load finding files and evidence list
+  • Inspect round-2 screenshots
+  • Run motion and code-fix verification
+  • Write final verdict JSON

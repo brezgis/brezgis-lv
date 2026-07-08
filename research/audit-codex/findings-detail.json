@@ -1,0 +1,59 @@
+{
+  "findings": [
+    {
+      "title": "Molehill placement skips lake/pond water and only validates the cluster seed",
+      "area": "src/vegetation.js:558-573",
+      "severity": "med",
+      "evidence": "The moles_e4.png reference is open meadow, but the molehill loop only checks forestDensity, distToRiver/riverLevelNear, and fieldAt at the cluster seed (lines 565-568), then offsets child mounds up to 3 m and pushes them with heightAt only (lines 571-572). It never checks LAKE_SHORES or the era 3/4 pond, and it never re-checks fieldAt after the child offset. A Node mirror of placementsFor plus the microProps stride-cap fill found visible bad molehills after caps: era 3 had 4 and era 4 had 7. Examples: era 3 molehill at x=-2627.714,z=2613.594,y=186.824 is inside Ilzes ezers water (lake level 186.5); era 3 molehill at x=1022.004,z=-151.793 has fieldAt=true even though the parent seed at x=1024.717,z=-153.803 passed the field check.",
+      "fix_hint": "Run the same lake/pond/river-bank and fieldAt checks on each final ox/oz before pushing the mound, or make the cluster seed itself expand by the child offset radius when rejecting water and fields."
+    },
+    {
+      "title": "Forest still-life offsets cross out of forest and into fields/banks",
+      "area": "src/vegetation.js:498-554; src/vegetation.js:737-748",
+      "severity": "med",
+      "evidence": "The floor_e5.png reference is a dense forest floor, but the code gates still-life props only on the parent tree sample (tier !== 'far' && d > 0.42). Final prop offsets of 5-10 m are anchored with heightAt but not revalidated for forestDensity, fieldAt, river/lake/pond water, or roads before microProps renders them. The Node mirror found 120 visible non-molehill violations after stride caps, including 52 anthill/mushroom violations of the forest/water/field predicates. Examples: era 3 anthill at x=2348.960,z=5417.016 has fieldAt=true while its parent pine had d=0.490; era 3 cone at x=2335.895,z=5090.342 has fieldAt=true; era 3 litter at x=2472.559,z=5451.933 has fieldAt=true; era 3 shroomB at x=1852.991,z=4837.040 has forestDensity=0.",
+      "fix_hint": "Add a final helper such as okForestMicro(era, px, pz) that recomputes y, rejects lake/pond/river-bank/field/road/pad exclusions, and requires forestDensity(era, px, pz, y) > 0.4 before pushing anthills, mushrooms, cones, twigs, or litter. Keep the parent kind test for conifer/broadleaf flavor, but do not rely on it for the final footprint."
+    },
+    {
+      "title": "Boletus caps hover above their heightAt anchors",
+      "area": "src/vegetation.js:398-400; src/vegetation.js:418",
+      "severity": "low",
+      "evidence": "shroomBGeo is a scaled sphere translated upward by 0.05, giving a local bounding box of minY=0.0128,maxY=0.0872 in a Node THREE probe. The placer sets position to exactly [x,heightAt(x,z),z] with no sink (line 418), and the anchor audit found zero y mismatches, so every visible bolete cap bottom floats about 1.0-1.9 cm above ground for the generated scale range 0.8-1.5. There is no stem geometry to explain the gap.",
+      "fix_hint": "Either add a short stem and keep the cap above it, or place shroomB at y - minY * scale / translate the geometry down so the cap or stem contacts the terrain."
+    },
+    {
+      "title": "Leaf litter is a flat raised disc that slices sloped terrain",
+      "area": "src/vegetation.js:408-413; src/vegetation.js:421",
+      "severity": "low",
+      "evidence": "litterGeo is a horizontal CircleGeometry at local y=0, rendered at heightAt+0.04 with scale 0.6-1.6 and polygonOffset. A Node probe sampled the rendered litter subset after the same cap/stride logic: 295 of 511 visible litter discs had at least one edge sample where terrain was more than 1 cm above the litter plane. Worst sampled case was era 1 at x=-299.986,z=188.298,scale=1.288, with max edge penetration 0.161 m and opposite-edge float 0.246 m. That produces clipping/hovering and can still shimmer at near-coplanar edges despite polygonOffset.",
+      "fix_hint": "Drape litter vertices to heightAt(x,z)+epsilon, or replace the large flat circles with smaller irregular patches/triangles whose vertices are terrain-sampled and slightly lifted."
+    }
+  ],
+  "wanted_shots": [
+    {
+      "name": "molehill_lake_e3",
+      "args": "era=3;time=0.4;cam=-2635,190,2592;tgt=-2628,186.8,2614;wait=1200",
+      "looking_for": "Dark molehill mound rendered inside Ilzes ezers / wet shoreline instead of open meadow."
+    },
+    {
+      "name": "molehill_field_e3",
+      "args": "era=3;time=0.4;cam=1016,193,-160;tgt=1022,190,-152;wait=1200",
+      "looking_for": "Molehill child offset crossing into a cultivated field."
+    },
+    {
+      "name": "forest_props_field_e3",
+      "args": "era=3;time=0.4;cam=2330,231,5080;tgt=2336,226,5090;wait=1200",
+      "looking_for": "Forest-only cones/anthill-style props sitting in field-painted ground near the Brezga/Krogs area."
+    },
+    {
+      "name": "bolete_hover_e3",
+      "args": "era=3;time=0.4;cam=1852.3,246.9,4835.8;tgt=1853,246.42,4837;wait=1200",
+      "looking_for": "Brown bolete cap has no stem and floats just above the terrain anchor."
+    },
+    {
+      "name": "litter_slope_contact_e1",
+      "args": "era=1;time=0.4;cam=-301,198.6,186.5;tgt=-300,197.7,188.3;wait=1200",
+      "looking_for": "Leaf-litter disc cuts into one side of the sloped forest floor while the opposite edge floats."
+    }
+  ]
+}

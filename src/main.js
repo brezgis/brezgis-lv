@@ -561,7 +561,7 @@ async function boot() {
       envAge = 0;
       cubeCam.update(renderer, scene);
     }
-    animals.tick(t, dt);
+    animals.tick(t, dt, camera.position);
     effects.tick(t, dt, wind, sky.state.sunLow);
     for (const fn of eraTicks) fn(t, dt);
     for (let i = 0; i < birds.children.length; i++) {

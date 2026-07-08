@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "title": "Water fauna do not translate between probe dumps",
+      "area": "src/animals.js:633-667; src/animals.js:772-788",
+      "severity": "high",
+      "evidence": "Diffing the two [fauna] dumps in each probe shows every fish and surface-water animal kept identical x/z while airborne controls moved. e1_probe.txt: fishPerch 12/12, fishPike 2/2, duckM 6/6, duckF 3/3, beaver 2/2 and swanWhooper 2/2 all had dxz=0.000; the same diff had dragonflies dxz=0.860-0.906, cranes dxz=1.030-1.140 and buzzard dxz=0.707. e2_probe.txt repeats the same zero movement for all fish/ducks/beavers/swans. e4_probe.txt has fishPerch 12/12, fishPike 2/2, duckM 8/8 and duckF 3/3 all at dxz=0.000. e5_probe.txt has fishPerch 12/12, fishPike 2/2, duckM 6/6, duckF 3/3, beaver 1/1 and swanMute 3/3 all at dxz=0.000. A Node placement audit using distToRiver, riverLevelNear, heightAt, LAKES and LOC.POND_LEVEL found these animals are in the correct water and near the correct y level, so the concrete defect is movement. Code also explains the failure mode: tick() distance-culls every non-air animal and continues before tickWater(), so water behavior state does not advance when outside the 650 m camera radius.",
+      "fix_hint": "Do not skip simulation for water fauna when render-distance culling hides them. Keep tickWater/timers advancing before the visibility continue, or limit the early continue to land grazers. After that, validate that water animals enter swim state and that x/z changes over a multi-second probe."
+    },
+    {
+      "title": "Flutter butterflies often remain fixed at probe precision",
+      "area": "src/animals.js:706-723",
+      "severity": "low",
+      "evidence": "The air movement controls move in the same probe interval, but flutter butterflies frequently do not move more than 0.05 m in x/z. e1_probe.txt: butterflyW 6/6 and butterflyO 4/4 were unchanged, and butterflyY had 3/4 unchanged with max dxz=0.100. e5_probe.txt: butterflyW 6/6 unchanged, butterflyO 2/4 unchanged, butterflyY 3/4 unchanged. e2/e4 show the same pattern with most butterflies at dxz 0.000-0.141 while dragonflies, swallows, cranes and buzzards translate about 0.7-1.1 m. This is not a height issue: the Node audit found low air fauna y values between ground and ground+20.",
+      "fix_hint": "Seed flutter insects with nonzero vx/vz and/or add a phase-driven drift around the meadow so they visibly translate at probe precision. Keep the existing altitude clamp, but make horizontal motion deterministic enough that a short validation interval shows movement."
+    }
+  ],
+  "wanted_shots": [
+    {
+      "name": "river_waterfauna_motion_e1",
+      "args": "era=1;time=0.4;cam=-330,188,-86;tgt=-350,185,-122;wait=1200",
+      "looking_for": "Perch and nearby river ducks should visibly translate through the water, not only bob in place; ducks should sit on the water surface."
+    },
+    {
+      "name": "pond_ducks_e4",
+      "args": "era=4;time=0.4;cam=-96,190,-284;tgt=-125,186.3,-324;wait=1200",
+      "looking_for": "Pond ducks at the mill pond should be on the pond sheet and paddling, with no shoreline standing or sinking."
+    },
+    {
+      "name": "lake_swans_unoccluded_e5",
+      "args": "era=5;time=0.4;cam=1770,184,-185;tgt=1810,178.7,-310;wait=1200",
+      "looking_for": "Mute swans on Taurenes ezers without tree occlusion; verify water contact, scale and colour."
+    },
+    {
+      "name": "butterfly_meadow_motion_e1",
+      "args": "era=1;time=0.4;cam=-210,207,150;tgt=-245,203,105;wait=1200",
+      "looking_for": "White/yellow/orange butterflies should drift horizontally over the meadow instead of hovering at fixed x/z."
+    }
+  ]
+}

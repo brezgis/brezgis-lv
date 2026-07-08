@@ -400,12 +400,14 @@ export function paintEra(era) {
     // wildflower sparkle on open meadow (midsummer)
     if (n2 > 0.82 && dRiv < 120 && era < 3) { r += 0.16; g += 0.1; b += 0.12; }
 
-    // forest floor — matched to where trees actually stand (vegetation thins
-    // with distance from the stage, so the floor tint must too)
+    // forest floor — matched to where trees actually stand. The old 0.22
+    // falloff floor mirrored a vegetation thinning that no longer exists;
+    // it left bright meadow paint between far impostors, so from the air
+    // the deep forest read as green speckle instead of closed canopy.
     const fd = forestDensity(era, x, z, y);
     if (fd > 0.4) {
       const dStage = Math.hypot(x - LOC.STEAD.x, z - LOC.STEAD.z);
-      const falloff = clamp(420 / Math.max(dStage, 1), 0.22, 1);
+      const falloff = clamp(560 / Math.max(dStage, 1), 0.85, 1);
       const t = smoothstep(0.4, 0.75, fd) * (0.35 + 0.65 * falloff);
       r = lerp(r, 0.16, t); g = lerp(g, 0.2, t); b = lerp(b, 0.09, t);
     }
@@ -464,12 +466,15 @@ export function paintEra(era) {
     const dStr = distToStreams(x, z);
     if (dStr < 5) wet = Math.max(wet, smoothstep(5, 1.5, dStr));
     for (const lake of LAKES) {
-      if (y < lake.level + 0.5 && Math.abs(x - lake.cx) < lake.hx && Math.abs(z - lake.cz) < lake.hz) {
-        wet = Math.max(wet, smoothstep(lake.level + 0.5, lake.level - 0.6, y));
+      if (y < lake.level + 0.22 && Math.abs(x - lake.cx) < lake.hx && Math.abs(z - lake.cz) < lake.hz) {
+        // NARROW marshy waterline band — the old +0.5m onset painted a wide
+        // tan beach around the whole lake
+        wet = Math.max(wet, smoothstep(lake.level + 0.22, lake.level - 0.45, y) * 0.8);
       }
     }
     if (wet > 0) {
-      r = lerp(r, 0.25, wet); g = lerp(g, 0.22, wet); b = lerp(b, 0.14, wet);
+      // wet ground reads marsh-green-brown, not bare mud
+      r = lerp(r, 0.24, wet); g = lerp(g, 0.26, wet); b = lerp(b, 0.13, wet);
       // sand & pebble bars right at the waterline (speckled by n2)
       const bar = dRiv < 6.5 ? smoothstep(6.5, 1.5, dRiv) : 0;
       if (bar > 0) {

@@ -290,7 +290,12 @@ export function buildVegetation(scene, renderer) {
       const b = pos.length / 3;
       const yl = 0.66;
       pos.push(-w, yl, -w, w, yl, -w, w, yl, w, -w, yl, w);
-      uv.push(tile.u0, 0.5, tile.u1, 0.5, tile.u1, 1, tile.u0, 1);
+      // sample the CROWN CORE of the tile, not the whole crown half: the
+      // wispy crown edges are mostly alpha and the lid discarded to specks —
+      // the dense core reads as closed canopy from the air
+      const uw = tile.u1 - tile.u0;
+      uv.push(tile.u0 + uw * 0.24, 0.56, tile.u1 - uw * 0.24, 0.56,
+              tile.u1 - uw * 0.24, 0.92, tile.u0 + uw * 0.24, 0.92);
       for (let k = 0; k < 4; k++) nrm.push(0, 1, 0);
       idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
     }
@@ -595,7 +600,9 @@ export function buildVegetation(scene, renderer) {
         // whole north incl. Brežģa kalns) and widen crowns to conserve the
         // canopy coverage the dropped stems carried
         const stride = n > 0 ? arr.length / n : 1;
-        const widen = Math.min(1.3, Math.sqrt(stride));
+        // primeval eras are near-closed canopy: crowns overlap harder so the
+        // aerial read is a green roof, not scattered specks
+        const widen = Math.min(1.3, Math.sqrt(stride)) * (era <= 2 ? 1.18 : 1);
         const fp = { entries: new Array(n), byCell: new Map(), widen };
         for (let i = 0; i < n; i++) {
           const [x, y, z, h, , tint] = arr[(i * stride) | 0];
@@ -604,7 +611,10 @@ export function buildVegetation(scene, renderer) {
           dummy.scale.set(h * 1.12 * widen, h, h * 1.12 * widen); // crowns overlap -> closed canopy
           dummy.updateMatrix();
           farM.setMatrixAt(i, dummy.matrix);
-          col.setScalar(0.82 + 0.28 * tint * 0.5);
+          // darker, slightly green-biased: the atlas is captured under a
+          // bright rig and the field read pale against the full-detail discs
+          const fv = 0.7 + 0.14 * tint;
+          col.setRGB(fv * 0.94, fv, fv * 0.9);
           farM.setColorAt(i, col);
           fp.entries[i] = [x, y, z, h, tint];
           const ck = Math.floor(x / PROM_CELL) + ':' + Math.floor(z / PROM_CELL);

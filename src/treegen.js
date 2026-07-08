@@ -208,9 +208,14 @@ function growBranch(ctx, spec) {
   if (fol && spec.level === fol.anchorLevel && !branch.broken) {
     const from = Math.max(0, fol.tStart);
     const n = Math.max(1, Math.round((effLen * (1 - from)) / fol.spacing));
+    // when the anchor level has NO rendered tube (conifers: tubeMaxLevel 1,
+    // anchors on invisible level-2 twigs), crowd the anchors toward the twig
+    // BASE so the sprays attach to the visible branch instead of floating
+    // beside it — the cards span outward and still fill the old crown
+    const hug = fol.anchorLevel > (sp.tubeMaxLevel ?? 1);
     const q = new THREE.Quaternion(), qTwist = new THREE.Quaternion(), qTilt = new THREE.Quaternion();
     for (let i = 0; i <= n; i++) {
-      const t = Math.min(1, from + (1 - from) * (i / n));
+      const t = Math.min(1, from + (1 - from) * (i / n) * (hug ? 0.5 : 1));
       const idxF = t * segs;
       const i0 = Math.min(segs - 1, Math.floor(idxF));
       const f = idxF - i0;
@@ -237,7 +242,7 @@ function growBranch(ctx, spec) {
       qTilt.setFromAxisAngle(sideAxis, (rng.float() - 0.5) * 0.24 + 0.08);
       q.premultiply(qTilt);
       const sc = (fol.scale[0] + rng.float() * (fol.scale[1] - fol.scale[0])) *
-        (terminal ? 0.85 : 0.72 + t * 0.42);
+        (terminal ? 0.85 : 0.72 + t * 0.42) * (hug ? 1.2 : 1);
       ctx.anchors.push({
         pos: aPos.clone().addScaledVector(out, sc * 0.06),
         quat: q.clone(), scale: sc,
@@ -790,7 +795,7 @@ LV.spruce = { // egle — Picea abies
   },
   flare: { amp: 0.5, height: 1.0, lobes: 5 },
   bark: 'spruce', barkRepeats: 5,
-  foliageColor: { r: 0.09, g: 0.22, b: 0.10, hueVar: 0.24 },
+  foliageColor: { r: 0.115, g: 0.27, b: 0.125, hueVar: 0.24 },  // brightened: read near-black at noon
   brokenTop: 0, stubChance: 0.02, tubeMaxLevel: 1, lodK: 0.62,
 };
 
@@ -810,7 +815,7 @@ LV.pine = { // priede — Pinus sylvestris: bare salmon trunk, high loose crown
   },
   flare: { amp: 0.42, height: 0.8, lobes: 4 },
   bark: 'pine', barkRepeats: 4,
-  foliageColor: { r: 0.10, g: 0.24, b: 0.11, hueVar: 0.22 },
+  foliageColor: { r: 0.125, g: 0.29, b: 0.13, hueVar: 0.22 },   // brightened: read near-black at noon
   brokenTop: 0, stubChance: 0.05, tubeMaxLevel: 1, lodK: 0.62,
 };
 

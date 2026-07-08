@@ -384,6 +384,44 @@ export function buildVegetation(scene, renderer) {
   group.add(rocks);
   boulders.forEach((b) => group.add(b));
 
+  // ---- forest-floor still life: era-refreshed micro props --------------------
+  const plainM = (c) => new THREE.MeshLambertMaterial({ color: c });
+  const anthillGeo = new THREE.SphereGeometry(1, 9, 6);
+  anthillGeo.scale(0.75, 0.6, 0.75);
+  const anthills = makeInstanced(anthillGeo, plainM(0x4a3826), 600, false);
+  const molehillGeo = new THREE.SphereGeometry(1, 7, 5);
+  molehillGeo.scale(0.24, 0.13, 0.24);
+  const molehills = makeInstanced(molehillGeo, plainM(0x41321f), 1400, false);
+  const shroomCGeo = new THREE.ConeGeometry(0.05, 0.055, 6);
+  shroomCGeo.translate(0, 0.025, 0);
+  const shroomsC = makeInstanced(shroomCGeo, plainM(0xd89828), 1400, false);
+  const shroomBGeo = new THREE.SphereGeometry(0.06, 7, 5);
+  shroomBGeo.scale(1, 0.62, 1);
+  shroomBGeo.translate(0, 0.05, 0);
+  const shroomsB = makeInstanced(shroomBGeo, plainM(0x6a4526), 900, false);
+  const coneGeo = new THREE.SphereGeometry(0.04, 6, 5);
+  coneGeo.scale(1, 1.7, 1);
+  const conesM = makeInstanced(coneGeo, plainM(0x54402c), 2200, false);
+  const twigGeo = new THREE.CylinderGeometry(0.014, 0.02, 1, 4);
+  twigGeo.rotateZ(Math.PI / 2);
+  const twigs = makeInstanced(twigGeo, plainM(0x594836), 2000, false);
+  const litterGeo = new THREE.CircleGeometry(1, 7);
+  litterGeo.rotateX(-Math.PI / 2);
+  const litterMat = new THREE.MeshLambertMaterial({
+    color: 0x6a5638, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const litter = makeInstanced(litterGeo, litterMat, 1000, false);
+  const microProps = [
+    ['anthill', anthills, (d, e) => { d.position.set(e[0], e[1] + e[3] * 0.12, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['molehill', molehills, (d, e) => { d.position.set(e[0], e[1] + 0.02, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['shroomC', shroomsC, (d, e) => { d.position.set(e[0], e[1], e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['shroomB', shroomsB, (d, e) => { d.position.set(e[0], e[1], e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['cone', conesM, (d, e) => { d.position.set(e[0], e[1] + 0.03, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0.4, e[4], 0); }],
+    ['twig', twigs, (d, e) => { d.position.set(e[0], e[1] + 0.03, e[2]); d.scale.set(e[3], 1, 1); d.rotation.set((e[4] % 0.2) - 0.1, e[4], 0); }],
+    ['litter', litter, (d, e) => { d.position.set(e[0], e[1] + 0.04, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+  ];
+  microProps.forEach(([, m]) => group.add(m));
+
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
   const eraCache = new Map();
@@ -403,6 +441,8 @@ export function buildVegetation(scene, renderer) {
     const lists = {};
     for (const k of SP_KEYS) lists[k] = { full: [], far: [] };
     lists.fern = []; lists.log = []; lists.stump = []; lists.rock = [];
+    lists.anthill = []; lists.molehill = []; lists.shroomC = []; lists.shroomB = [];
+    lists.cone = []; lists.twig = []; lists.litter = [];
     const S = LOC.STEAD;
     const step = 9;    // real hemiboreal forest runs hundreds of stems/ha
     const EXT = HM_SPAN - 120;
@@ -481,6 +521,55 @@ export function buildVegetation(scene, renderer) {
             const sx = x + (rng() - 0.5) * 9, sz = z + (rng() - 0.5) * 9;
             lists.stump.push([sx, heightAt(sx, sz), sz, rng() * 6.3, 0.8 + rng() * 0.6]);
           }
+          // the forest-floor still life: ant mounds under conifers, mushroom
+          // troops, cone fall, wind-thrown twigs, leaf drifts under broadleaves
+          const conifer = kind === 'spruce' || kind === 'pine';
+          if (conifer && rng() < 0.014) {
+            const ax = x + (rng() - 0.5) * 8, az = z + (rng() - 0.5) * 8;
+            lists.anthill.push([ax, heightAt(ax, az), az, 0.55 + rng() * 0.75, rng() * 6.3]);
+          }
+          if (rng() < 0.05) {
+            const mx = x + (rng() - 0.5) * 9, mz = z + (rng() - 0.5) * 9;
+            const n2 = 3 + (rng() * 5) | 0;
+            for (let k = 0; k < n2; k++) {
+              const ox = mx + (rng() - 0.5) * 1.2, oz = mz + (rng() - 0.5) * 1.2;
+              lists.shroomC.push([ox, heightAt(ox, oz), oz, 0.75 + rng() * 0.6, rng() * 6.3]);
+            }
+          }
+          if (rng() < 0.035) {
+            const bx2 = x + (rng() - 0.5) * 9, bz2 = z + (rng() - 0.5) * 9;
+            lists.shroomB.push([bx2, heightAt(bx2, bz2), bz2, 0.8 + rng() * 0.7, rng() * 6.3]);
+          }
+          if (conifer && rng() < 0.3) {
+            const cx2 = x + (rng() - 0.5) * 5, cz2 = z + (rng() - 0.5) * 5;
+            lists.cone.push([cx2, heightAt(cx2, cz2), cz2, 0.8 + rng() * 0.5, rng() * 6.3]);
+          }
+          if (rng() < 0.2) {
+            const tx2 = x + (rng() - 0.5) * 10, tz2 = z + (rng() - 0.5) * 10;
+            lists.twig.push([tx2, heightAt(tx2, tz2), tz2, 0.5 + rng() * 0.9, rng() * 6.3]);
+          }
+          if (!conifer && kind !== 'snag' && rng() < 0.12) {
+            const lx2 = x + (rng() - 0.5) * 7, lz2 = z + (rng() - 0.5) * 7;
+            lists.litter.push([lx2, heightAt(lx2, lz2), lz2, 0.6 + rng() * 1.0, rng() * 6.3]);
+          }
+        }
+      }
+    }
+    // molehills: fresh dark casts on open meadow (any era with soil life)
+    if (era >= 1) {
+      const stepM = 34, NM = Math.floor(EXT / stepM);
+      for (let iz = 0; iz < NM; iz++) for (let ix = 0; ix < NM; ix++) {
+        if (rng() > 0.045) continue;
+        const x = (ix / (NM - 1) - 0.5) * EXT + HM_OFF_X + (rng() - 0.5) * stepM;
+        const z = (iz / (NM - 1) - 0.5) * EXT + HM_OFF_Z + (rng() - 0.5) * stepM;
+        const y = heightAt(x, z);
+        if (forestDensity(era, x, z, y) > 0.12) continue;      // meadow only
+        if (distToRiver(x, z) < 22 || y < riverLevelNear(x, z) + 0.5) continue;
+        if (era >= 2 && fieldAt(era, x, z)) continue;          // ploughing destroys them
+        const n2 = 2 + (rng() * 4) | 0;
+        for (let k = 0; k < n2; k++) {
+          const ox = x + (rng() - 0.5) * 6, oz = z + (rng() - 0.5) * 6;
+          lists.molehill.push([ox, heightAt(ox, oz), oz, 0.7 + rng() * 0.6, rng() * 6.3]);
         }
       }
     }
@@ -644,6 +733,19 @@ export function buildVegetation(scene, renderer) {
       }
       rocks.count = n;
       rocks.instanceMatrix.needsUpdate = true;
+    }
+    // forest-floor still life
+    for (const [key, mesh, place] of microProps) {
+      const arr = lists[key];
+      const n = Math.min(arr.length, mesh.instanceMatrix.count);
+      const stride = n > 0 ? arr.length / n : 1;
+      for (let i = 0; i < n; i++) {
+        place(dummy, arr[(i * stride) | 0]);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.count = n;
+      mesh.instanceMatrix.needsUpdate = true;
     }
     // ferns
     {

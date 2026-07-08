@@ -16,9 +16,9 @@ import {
 import { MAT } from './textures.js';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI } from './landuse.js';
-import { LAKES } from './geodata.js';
+import { LAKES, RIVER_PTS } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM, ROADS_OSM } from './geodata-osm.js';
-import { mulberry32 } from './util.js';
+import { mulberry32, pointInPoly, chaikinPoly } from './util.js';
 import { HM_OFF_X, HM_OFF_Z, HM_SPAN } from './heightmap.js';
 
 const S = LOC.STEAD, C = LOC.CAMP, Mn = LOC.MANOR, P = LOC.POND, B = LOC.BREZGA, K = LOC.KROGS;
@@ -481,6 +481,110 @@ function bgSettlement(group, era, smokes) {
 }
 
 // ---------------------------------------------------------------------------
+// Wild fauna, era-appropriate. Water anchors come from the real geometry:
+// the biggest lake (Taurenes ezers) and quiet reaches of the Gauja.
+const LAKE_MAIN = (() => {
+  // the chronicle lake: whichever polygon lies at the LAKE_VIEW overlook
+  // ("biggest lake" grabbed a bog pool on the far map edge)
+  let best = null, bestD = 1e18;
+  for (const lake of LAKES) {
+    let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+    for (const [x, z] of lake.poly) {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+    }
+    const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+    const d = Math.hypot(cx - LOC.LAKE_VIEW.x, cz - LOC.LAKE_VIEW.z);
+    if (d < bestD) {
+      bestD = d;
+      best = { cx, cz, level: lake.level, shore: chaikinPoly(lake.poly) };
+    }
+  }
+  return best;
+})();
+const inMainLake = (x, z) => pointInPoly(x, z, LAKE_MAIN.shore);
+const inRiver = (x, z) => distToRiver(x, z) < 7.2;
+const RIVER_REACH = (t) => {
+  const i = Math.min(RIVER_PTS.length - 1, Math.round(RIVER_PTS.length * t));
+  const p = RIVER_PTS[i];
+  return { x: p[0], z: p[1], r: 30, level: p[2] };
+};
+const HOP_HARE = { hop: true, hopLen: 1.7, hopH: 0.3, hopDur: 0.32, restT: [3, 8], chainT: 0.05 };
+const HOP_FROG = { hop: true, hopLen: 0.32, hopH: 0.14, hopDur: 0.3, restT: [4, 9], chainT: 0.5 };
+
+function wildSpawns(era, spawns) {
+  const S2 = LOC.STEAD;
+  const lakeHome = { x: LAKE_MAIN.cx, z: LAKE_MAIN.cz, r: 120 };
+  const rUp = RIVER_REACH(0.28), rMid = RIVER_REACH(0.5), rDown = RIVER_REACH(0.66);
+  const meadow = { x: S2.x - 60, z: S2.z + 80, r: 90 };
+  const wideMeadow = { x: S2.x + 150, z: S2.z + 500, r: 160 };
+  const forestN = { x: S2.x + 150, z: S2.z - 800, r: 140 };
+  const forestS = { x: S2.x + 300, z: S2.z + 1100, r: 160 };
+
+  if (era === 0) {
+    // Younger Dryas tundra: reindeer spawn with the era — these are the
+    // small companions of the ice edge
+    spawns.push(['arcticHare', 3, { x: S2.x - 200, z: S2.z + 250, r: 120 }, { ...HOP_HARE, hopLen: 1.5 }]);
+    spawns.push(['arcticFox', 1, { x: S2.x + 100, z: S2.z - 300, r: 160 }, { speed: 1.1, grazeBias: 0.45 }]);
+    spawns.push(['ptarmigan', 6, { x: S2.x - 320, z: S2.z + 60, r: 60 }]);
+    return;
+  }
+  // the river never emptied: fish, ducks, swans, frogs, dragonflies always
+  spawns.push(['fishPerch', 7, rMid, { medium: 'water', level: rMid.level - 0.28, inWater: inRiver, speed: 0.7 }]);
+  spawns.push(['fishPerch', 5, rUp, { medium: 'water', level: rUp.level - 0.28, inWater: inRiver, speed: 0.7 }]);
+  spawns.push(['fishPike', 2, rDown, { medium: 'water', level: rDown.level - 0.32, inWater: inRiver, speed: 0.5 }]);
+  spawns.push(['duckM', 3, rUp, { medium: 'water', level: rUp.level + 0.03, inWater: inRiver, speed: 0.5 }]);
+  spawns.push(['duckF', 3, rUp, { medium: 'water', level: rUp.level + 0.03, inWater: inRiver, speed: 0.5 }]);
+  // swans: whoopers bred here before drainage; extirpated by the 1800s;
+  // mute swans only colonised Latvia in the 20th century (Engure 1935)
+  if (era <= 2) spawns.push(['swanWhooper', 2, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.04, inWater: inMainLake, speed: 0.4 }]);
+  if (era >= 5) spawns.push(['swanMute', 3, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.04, inWater: inMainLake, speed: 0.4 }]);
+  spawns.push(['duckM', 3, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.03, inWater: inMainLake, speed: 0.5 }]);
+  spawns.push(['frog', 5, { x: rUp.x + 14, z: rUp.z, r: 10 }, HOP_FROG]);
+  spawns.push(['dragonfly', 6, { x: rMid.x, z: rMid.z, r: 26 }, { medium: 'air', fly: 'hawk', alt: [0.6, 2.4] }]);
+  spawns.push(['butterflyW', 6, meadow, { medium: 'air', fly: 'flutter' }]);
+  spawns.push(['butterflyO', 4, wideMeadow, { medium: 'air', fly: 'flutter' }]);
+  spawns.push(['butterflyY', 4, meadow, { medium: 'air', fly: 'flutter' }]);
+  spawns.push(['buzzard', 1, { x: S2.x + 400, z: S2.z + 300, r: 1 }, { medium: 'air', fly: 'soar', alt: [70, 130] }]);
+  spawns.push(['crane', 7, { x: 500, z: 1700, r: 400 }, { medium: 'air', fly: 'cross', level: 360 }]);
+
+  if (era <= 2) {
+    // wilderness & Iron Age: the full wild suite
+    spawns.push(['redDeer', era === 1 ? 3 : 2, forestN, { grazeBias: 0.75 }]);
+    spawns.push(['roeBuck', 1, forestS, { grazeBias: 0.75 }]);
+    spawns.push(['roeDeer', 3, forestS, { grazeBias: 0.75 }]);
+    spawns.push(['boar', era === 1 ? 5 : 4, { x: S2.x - 350, z: S2.z + 700, r: 90 }, { grazeBias: 0.85, speed: 0.7 }]);
+    spawns.push(['beaver', 2, rDown, { medium: 'water', level: rDown.level + 0.02, inWater: inRiver, speed: 0.45 }]);
+    spawns.push(['fox', 1, wideMeadow, { speed: 1.2, grazeBias: 0.45 }]);
+    spawns.push(['hare', 3, wideMeadow, HOP_HARE]);
+    spawns.push(['squirrel', 2, { x: LOC.OAK.x, z: LOC.OAK.z, r: 30 }, { hop: true, hopLen: 0.8, hopH: 0.16, hopDur: 0.24, restT: [2, 6], chainT: 0.08 }]);
+    spawns.push(['wolf', 2, { x: S2.x + 400, z: S2.z - 1100, r: 120 }, { speed: 1.3, grazeBias: 0.4 }]);
+    spawns.push(['blackGrouse', 4, { x: S2.x - 500, z: S2.z + 400, r: 60 }]);
+  } else if (era <= 4) {
+    // agrarian parish: wildlife keeps to the margins; swallows own the yards
+    spawns.push(['swallow', 6, { x: S2.x, z: S2.z, r: 70 }, { medium: 'air', fly: 'hawk', alt: [4, 15] }]);
+    spawns.push(['swallow', 4, { x: LOC.MANOR.x, z: LOC.MANOR.z, r: 80 }, { medium: 'air', fly: 'hawk', alt: [4, 16] }]);
+    spawns.push(['roeDeer', 2, forestN, { grazeBias: 0.8 }]);
+    spawns.push(['fox', 1, { x: S2.x + 500, z: S2.z - 500, r: 130 }, { speed: 1.2, grazeBias: 0.45 }]);
+    spawns.push(['hare', 2, wideMeadow, HOP_HARE]);
+    spawns.push(['frog', 4, { x: LOC.POND.x - 30, z: LOC.POND.z + 20, r: 14 }, HOP_FROG]);
+    spawns.push(['stork', 2, { x: S2.x - 100, z: S2.z + 150, r: 55 }, { speed: 0.4, grazeBias: 0.55 }]);
+    spawns.push(['duckM', 2, { x: LOC.POND.x + 4, z: LOC.POND.z, r: 30 }, { medium: 'water', level: LOC.POND_LEVEL + 0.03, speed: 0.5 }]);
+  } else {
+    // the quiet century: the forest fauna is back
+    spawns.push(['roeDeer', 4, forestN, { grazeBias: 0.75 }]);
+    spawns.push(['roeBuck', 1, forestN, { grazeBias: 0.75 }]);
+    spawns.push(['redDeer', 2, forestS, { grazeBias: 0.78 }]);
+    spawns.push(['boar', 3, forestS, { grazeBias: 0.85, speed: 0.7 }]);
+    spawns.push(['beaver', 1, rDown, { medium: 'water', level: rDown.level + 0.02, inWater: inRiver, speed: 0.45 }]);
+    spawns.push(['fox', 1, wideMeadow, { speed: 1.2, grazeBias: 0.45 }]);
+    spawns.push(['hare', 2, wideMeadow, HOP_HARE]);
+    spawns.push(['swallow', 4, { x: S2.x, z: S2.z, r: 80 }, { medium: 'air', fly: 'hawk', alt: [4, 15] }]);
+    spawns.push(['stork', 2, { x: S2.x - 100, z: S2.z + 150, r: 55 }, { speed: 0.4, grazeBias: 0.55 }]);
+    spawns.push(['wolf', 1, { x: S2.x + 300, z: S2.z - 1300, r: 150 }, { speed: 1.3, grazeBias: 0.4 }]);
+  }
+}
+
 export function buildEra(era, ctx) {
   const g = new THREE.Group();
   g.name = `era${era}`;
@@ -700,12 +804,13 @@ export function buildEra(era, ctx) {
   }
 
   g.traverse((o) => { if (o.isMesh && o.castShadow === undefined) o.castShadow = true; });
+  wildSpawns(era, spawns);
   return { group: g, ticks, smokes, fires, spawns };
 }
 
 // spawn helper used by main (handles the special cases)
 export function applySpawns(mgr, spawns) {
-  for (const [kind, count, home] of spawns) {
+  for (const [kind, count, home, opts = {}] of spawns) {
     for (let i = 0; i < count; i++) {
       if (kind === 'aurochsCalf') {
         const rec = mgr.spawn('aurochsCow', home);
@@ -714,7 +819,7 @@ export function applySpawns(mgr, spawns) {
         const rec = mgr.spawn('stork', { ...home, r: 0.1 }, { static: true });
         rec.group.position.y = heightAt(home.x, home.z) + 5.75;
       } else {
-        mgr.spawn(kind, home);
+        mgr.spawn(kind, home, opts);
       }
     }
   }

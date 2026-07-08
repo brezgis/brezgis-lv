@@ -1,0 +1,25 @@
+{
+  "findings": [
+    {
+      "title": "distToRiver overestimates the rendered channel and water exclusions fail",
+      "area": "src/landuse.js:51; src/grass.js:311; src/terrain.js:157",
+      "severity": "high",
+      "evidence": "landuse splats distances only at 30m grid nodes and wdSample then bilinearly interpolates them (src/landuse.js:51-84). At the rendered spline near (-705.8,541.1), exact distance to the river centerline is 0.2m but distToRiver returns 25.67m. That bypasses grass.js:311-312, which only rejects cDRiv < 16.5 or cDRiv < 21 with low ground; replicated era-4 grass regen for focus (-725,465) produced candidates on the centerline, e.g. (-705.04,534.67) exactDist=0.02m, cDRiv=24.06, ground=183.43, riverLevel=185.00. Screenshot research/audit-codex/shots/river-apron-low.png shows blades protruding through the water. The same bad distance makes microDamp at src/terrain.js:157 essentially full strength in the carved bed: smoothstep(14,26,25.67) is about 1.",
+      "fix_hint": "Do not use bilinear grid-node distance for near-water rules. For distances below the exclusion/microDamp thresholds, compute exact distance to the local river spline segment, or store a signed/EDT field fine enough that centerline samples are near zero. Use the same exact distance for grass, flowers, paint bands, and microDamp."
+    },
+    {
+      "title": "Sandy apron is mostly back-face culled and is not draped to terrain",
+      "area": "src/water.js:224",
+      "severity": "med",
+      "evidence": "The apron positions are fixed from the water row y (src/water.js:224-232); heightAt is imported at src/water.js:8 but never used. The index order at src/water.js:240-244 winds almost all skirt triangles downward while the material is FrontSide at src/water.js:276-280; a generated-geometry probe counted 15967/16000 triangles with negative Y winding. Forced upward normals at src/water.js:253-257 do not affect face culling. Clearance against heightAt is also unstable: inner/mid/outer apron vertices float more than 0.5m above terrain at 3451/3776/3662 of 4002 samples and are buried at 148/65/120 samples; worst outer bury was -1.423m at (-1455,2957), worst outer float was 2.353m at (238,3753). Screenshot research/audit-codex/shots/river-apron-low.png shows the hidden cyan rim/drop exposed along the shore instead of a continuous sandy collar.",
+      "fix_hint": "Reverse the apron strip winding for both banks, then make the apron heights terrain-aware: keep the inner weld vertex identical to the ribbon edge, but set mid/outer y from max(heightAt(...)+clearance, waterLevel+berm) and verify no buried or floating samples remain."
+    },
+    {
+      "title": "BRIDGE2 road crossing terminates on the submerged carved shelf",
+      "area": "src/terrain.js:58; src/landuse.js:190; src/eras.js:555",
+      "severity": "med",
+      "evidence": "The shelf carve keeps terrain below water across the crossing zone (src/terrain.js:56-58), while BRIDGE2 is anchored to the raw river point (-37,-423) (src/landuse.js:190-192) and placed with a hard-coded PI/2 rotation in eras 3-5 (src/eras.js:555-556 and 618-619). bridge(false) is only a 28m deck (src/buildings.js:399). Probe at BRIDGE2: center ground=183.50 vs water=185.00; deck ends at z +/- 14 are still in open water (exactDist 11.89m/12.06m, ground 183.49/183.91). Dry ground along the deck axis starts about 22.5m north and 18.5m south of center, beyond the deck ends. Screenshot research/audit-codex/shots/bridge2-shelf-cut.png shows the bridge ending in the water.",
+      "fix_hint": "Anchor the crossing to the rendered spline, rotate it perpendicular to the local spline tangent, and size or place the deck by walking outward until meshHeightAt/heightAt is above water level plus clearance. Alternatively raise a local ford/abutment patch before painting the road approach."
+    }
+  ]
+}

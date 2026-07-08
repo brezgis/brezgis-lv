@@ -1,0 +1,42 @@
+{
+  "wanted_checks": [
+    "node data/walktest.mjs could not launch headless Chrome in this sandbox: crashpad setsockopt returned Operation not permitted. Runtime walk/dbg probes were not used."
+  ],
+  "findings": [
+    {
+      "title": "Collision ignores the top of the player's head and runs before vertical motion",
+      "area": "src/main.js:228",
+      "severity": "high",
+      "evidence": "The player eye is EYE_HEIGHT = 1.7 (src/rig.js:16), but the AABB vertical gate rejects any collider with c.y0 > feetY + 1.62. A real era-2 cabin roof created by logCabin({ w:5, d:6, wallH:2.0, roofH:2.2 }) has a Box3 minY of 1.683m from the roof geometry path in src/buildings.js:24-31 and src/buildings.js:107-116, so a standing eye at feetY + 1.70 can enter the eave while the roof collider is skipped. Walk collision also runs before jump/gravity vertical integration (src/rig.js:213-226) and there is no second or swept vertical collision after the y move; fly landing uses basePos.y - 1.0 for collision, then clamps to ground and switches to walk without rechecking at the real feet height (src/rig.js:190-196).",
+      "fix_hint": "Use a capsule height that covers the camera/head clearance, run or sweep collision after vertical integration and after landing/wading clamps, and use EYE_HEIGHT consistently for fly-mode feet tests."
+    },
+    {
+      "title": "Instanced era obstacles are never added to the collision grid",
+      "area": "src/main.js:187",
+      "severity": "med",
+      "evidence": "rebuildColliders returns before Box3.setFromObject for every o.isInstancedMesh, so whole classes of visible obstacles produce no collider. The hillfort palisade is one InstancedMesh (src/buildings.js:617) added in era 2 (src/eras.js:479), background settlement walls and roofs are InstancedMesh objects (src/eras.js:289-290) added to the era group at src/eras.js:341, and rikuFence poles are instanced (src/buildings.js:232). A Node buildEra check found era 2 has 22 instanced meshes that pass the same size filter if inspected, including the 360-instance palisade with a 34.3m x 34.3m x 3.0m AABB; main skips all of them before collider creation.",
+      "fix_hint": "Either emit explicit approximate colliders for instanced features such as palisades, fences, and settlement buildings, or iterate instance matrices and build per-instance or merged spatial colliders instead of dropping InstancedMesh nodes."
+    },
+    {
+      "title": "Space used to exit cinema is counted as a double-tap seed, and double-taps are not consumed",
+      "area": "src/rig.js:96",
+      "severity": "med",
+      "evidence": "On a non-repeat Space keydown in cinema, src/rig.js:96-99 switches to fly and requests pointer lock, but the same event then falls through into the Space handler. src/rig.js:107-108 records lastSpaceT for that intro-exit tap, so a second Space within 320ms in fly hits src/rig.js:116-117 and switches immediately to walk. Successful double-taps also leave lastSpaceT set to the second tap time, so a third Space inside 320ms can toggle straight back; setMode/adoptCamera/blur do not clear that timer.",
+      "fix_hint": "When Space exits cinema, return before double-tap handling or clear lastSpaceT. Also consume successful double-taps by resetting lastSpaceT, preferably with separate timers for fly and walk toggles."
+    },
+    {
+      "title": "View presets started while walking return to walk physics instead of fly mode",
+      "area": "src/main.js:340",
+      "severity": "med",
+      "evidence": "The preset comment says camera tweens hand control back in fly mode (src/main.js:335), but flyTo only calls rig.setMode('fly') when the old mode is cinema. While camTween is active, rig.update is skipped (src/main.js:484-505); when the tween ends, src/main.js:491-494 only calls rig.adoptCamera(). If the user starts a preset while in walk mode, the rig remains walk and the next frame applies gravity/walk collision from the preset camera position.",
+      "fix_hint": "Set fly mode unconditionally when starting or finishing flyTo, and clear walk-only state such as jumpAt/grounded as part of the handoff."
+    },
+    {
+      "title": "Player shadow visibility changes can linger until the next shadow refresh tick",
+      "area": "src/main.js:508",
+      "severity": "low",
+      "evidence": "renderer.shadowMap.autoUpdate is disabled at src/main.js:72. The player shadow proxy's visible flag and transform are changed every frame at src/main.js:508-514, but renderer.shadowMap.needsUpdate is set only on the cadence at src/main.js:520-523. Leaving or entering walk mode on a non-refresh frame leaves the previous proxy state baked in the shadow map until the next cadence tick; the governor can raise shadowEvery to 5 frames (src/main.js:452-455).",
+      "fix_hint": "Track the proxy's previous visibility/mode and force renderer.shadowMap.needsUpdate when it changes, while keeping ordinary movement on the existing cadence if needed for performance."
+    }
+  ]
+}

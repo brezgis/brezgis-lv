@@ -1,0 +1,58 @@
+[
+ {
+  "title": "Utility-pole line is a blind sine route: a pole stands in the open Gauja, others in the parish road and at the old manor's door",
+  "area": "src/eras.js:79-129 (utilityPoles), eras 4 and 5",
+  "severity": "med",
+  "evidence": "Poles follow x = S.x+46+sin(z*0.004)*4 for z=-700..zEnd with no water/road/building checks. Pole 8 at (-140,-332) is 2.4m from the rendered river spline centreline \u2014 ~9m inside the 23.6m-wide water surface (both eras). Screenshot scratchpad/audit/y3-e4-pole-field-river.png shows the wire run crossing the Gauja on the water with the pole at the channel and the line then passing directly across the old manor house frontage \u2014 the pole at z=-194 computes to (-139.8,-194), ~5m from the manorHouse placed at (Mn.x-105, Mn.z-15)=(-145,-195) in eras 4/5. Poles 14 and 29-39 stand inside the hand-laid parish-road corridor (pole 14 is 0.85m from the road centreline). Data: xmod-out2.txt section 6.",
+  "fix_hint": "Derive pole positions from the road polyline itself (walk roadsForEra points, offset perpendicular by ~8m) and skip any pole with distToRiver < 14; also clear the manor: skip() radius or distance test against MANOR."
+ },
+ {
+  "title": "Conifer crowns are sparse skeletons: needle cards float beside naked level-1 branches (anchors sit on level-2 twigs that have no tube geometry)",
+  "area": "tree generation LOD (src/treegen.js SPECIES spruce/pine)",
+  "severity": "med",
+  "evidence": "spruce/pine tubeMaxLevel:1 (src/treegen.js:786, 806) removes the level-2 twig tubes, but foliage anchorLevel is 2 with spacing 0.62/0.52 and pine tStart 0.3 (src/treegen.js:778, 798), so long bare level-1 branch tubes carry isolated floating needle combs. Screenshots: /tmp/.../audit/b3_pine_S.png (bare branch with one comb card near its tip, top-right shard slivers), b3_spruce_S.png / b3_spruce_SW.png (trunk visible through the crown, disconnected tufts).",
+  "fix_hint": "Reduce foliage spacing (more anchors) and/or bump card sizeK for conifers so cards overlap the parent branch, or keep level-2 tubes with a stride like the broadleaf species (tubeStride 3)."
+ },
+ {
+  "title": "Full-detail disc is ~2x sparser than the impostor ring around it \u2014 inverse LOD density seam at the 260 m boundary",
+  "area": "vegetation placement density (src/vegetation.js)",
+  "severity": "med",
+  "evidence": "Full tier is thinned by an extra `if (tier === 'full' && rng() < 0.5) continue;` (src/vegetation.js:391) that the far tier does not get. Probes in closed-forest zones, r=150m, era 1: KROGS full disc = 314 trees vs (200,-1500) far zone = 664 trees \u2014 the near/hero areas are half as dense as the backdrop, opposite of the 'near-closed canopy' intent (src/vegetation.js:384-386 comment, landuse.js:417-419). Visible as a denser far wall behind a parkland foreground in /tmp/.../audit/b3_brezga_pano.png and b3_boundary_out.png.",
+  "fix_hint": "Drop or soften the 0.5 full-tier thin (e.g. 0.75 keep) \u2014 full caps are not saturated in era 1 (spruce 1393/2100, pine 989/1400) \u2014 or push the removed stems into the far list so density stays continuous across FULL_R."
+ },
+ {
+  "title": "Conifer foliage renders near-black at noon \u2014 spruces read as silhouettes against midday grass",
+  "area": "foliage color/AO (src/treegen.js)",
+  "severity": "med",
+  "evidence": "Spruce/pine foliageColor 0.09-0.24 linear (src/treegen.js:785, 805) is further multiplied by crownAO strength 0.45 (src/treegen.js:648) and per-anchor age tint (1-a.age*0.25, src/treegen.js:603). At sky t=0.42 (noon) whole crowns render pitch black while grass and birches are bright: /tmp/.../audit/b3_spruce_SW.png, crop_edge_spruce.png, crop_T_spruce.png (giant black blocky crown shadows on the meadow).",
+  "fix_hint": "Raise conifer card albedo ~1.5-2x or halve card crownAO strength; consider a small emissive/hemisphere lift on card backfaces so shaded needles stay dark green instead of black."
+ },
+ {
+  "title": "Far-tier instance caps silently truncate trees, and the row-major fill dumps the entire loss on the south of the map (Bre\u017e\u0123a kalns belt)",
+  "area": "vegetation / instance capacity",
+  "severity": "med",
+  "evidence": "Live in-page probe of the built artifact: oak far InstancedMesh is saturated \u2014 cap=42000 count=42000 (all other far meshes below cap, counts match the offline replica exactly, e.g. spruce 138,332). Replica: era-5 oak demand is 51,649 -> 9,649 oaks (19%) dropped, ALL at z 4152..6046 because fillTier/setEra clamps with Math.min(arr.length, capacity) (src/vegetation.js:528) and the placement grid fills rows z=-2640 -> z=+6040 \u2014 i.e. every dropped tree is around Bre\u017e\u0123a kalns (z\u22484969) and Brezgis/krogs (z\u22485270), the family-hill area. Era 1 is much worse: spruce +47,717, pine +48,577, birch +41,126, oak +43,391 over cap (21-51% of each species dropped), all at z>~1834-4339 \u2014 the whole southern half of the 'primeval near-closed canopy' is thinned. CAPS at src/vegetation.js:221-225.",
+  "fix_hint": "Size CAPS from measured per-era demand (era-1 far total is ~673k vs 566k capacity; era-5 oak needs ~52k), or make overflow spatially fair: when arr.length > cap, keep every k-th instance (stride = arr.length/cap) instead of truncating the tail, so the loss is diffuse rather than regional."
+ },
+ {
+  "title": "2x stem-density step at the FULL_R=260 m ring: the forest is thinnest exactly where the player walks (the 6 POIs, incl. Bre\u017e\u0123a kalns)",
+  "area": "vegetation / full-tier thinning",
+  "severity": "med",
+  "evidence": "src/vegetation.js:388-391: tier = dp<260 ? 'full' : 'far'; then `if (tier === 'full' && rng() < 0.5) continue;` \u2014 inside 260 m of STEAD/MANOR/BREZGA/KROGS/CAMP/OAK the keep-probability is halved (falloff is already 1.0 there since 560/260>1), so stem density doubles abruptly when crossing the ring outward. Replica era 5: full-tier totals only 990 spruce + 745 pine + 547 birch + 154 oak across ALL six POI discs. Screenshot e5-brezga-south.png (cam 1650,292,4780 on Bre\u017e\u0123a kalns looking south) shows the thin, trunk-gappy foreground against the denser far-impostor wall behind. Combined with finding 1 this makes the near-POI woods the sparsest in the sim \u2014 the places the walk mode actually visits.",
+  "fix_hint": "Lower the full-tier rejection to ~0.25-0.3, or dither the tier transition (probabilistic full/far mix over 200-320 m) so no visible density ring; full caps (spruce 2100 etc.) have headroom \u2014 current era-5 usage is <50%."
+ },
+ {
+  "title": "Pond water edge hangs above the ground on its north and south-west rims",
+  "area": "mill pond rim",
+  "severity": "med",
+  "evidence": "Pond disc (src/water.js:299-305, flat ellipse 52x34 at 186.3) vs basin carve (src/terrain.js:71-84) which only guarantees bed depth inside rr<0.7: measured rim heights are 185.30 at (-144,-290), 184.58 at (-144,-358), 184.88 at (-107,-348) \u2014 1.0-1.7 m below the 186.3 surface, and the deeper river-channel carve passes under the ellipse. audit/e4-pond-N.png and crop-pond-edge.png show the pond plane terminating mid-air at its west edge with a tan wall face and shadow gap below the rim near the dam.",
+  "fix_hint": "Widen the dished-bed stamp so the ellipse edge (rr=1) lands on ground raised to >= POND_LEVEL+0.2 (add an outer berm ring to the basin carve), or shrink the pond ellipse to the carved basin."
+ },
+ {
+  "title": "Bright cyan 'aquarium glass' stripe along shores: the ribbon's EDGE_DROP rim wall is exposed wherever banks are sunken",
+  "area": "water ribbon edge",
+  "severity": "med",
+  "evidence": "src/water.js:61-98 ribbon profile drops the outer verts by EDGE_DROP (0.5 for the Gauja, :149) as a near-vertical rim meant to be hidden inside the bank; because the bank ground is carved below the waterline (finding 1), this rim face is visible from walking level as a continuous bright cyan band under the dark water along whole reaches. Visible at all three river spots in both eras: crop-A-edge.png (broad cyan stripe between sand wall and water), e1-A-east.png, e1-B-east.png, e1-C-east.png.",
+  "fix_hint": "Fixing the bank carve/skirt drape (finding 1) hides the rim; additionally tint the two outer UV bands of the ribbon darker (they already have distinct u=0/0.04 coords) so any residual exposed rim doesn't read as glowing glass."
+ }
+]

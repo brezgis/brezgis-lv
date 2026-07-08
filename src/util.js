@@ -65,6 +65,24 @@ export function sampleSpline(pts, t) {
   return out;
 }
 
+// Arc-length-even spline sampling. sampleSpline's parameter is uniform per
+// SEGMENT, so "N samples" cluster where source points cluster and leave
+// 25-80m gaps across long segments — every consumer that stamped, splatted
+// or measured along "fine" samples inherited those gaps.
+export function sampleSplineEven(pts, step) {
+  const N = Math.min(60000, pts.length * 40);
+  let prev = sampleSpline(pts, 0), acc = 0;
+  const out = [prev];
+  for (let i = 1; i <= N; i++) {
+    const p = sampleSpline(pts, i / N);
+    acc += Math.hypot(p[0] - prev[0], p[1] - prev[1]);
+    prev = p;
+    if (acc >= step) { out.push(p); acc = 0; }
+  }
+  out.push(prev);
+  return out;
+}
+
 export function pointInPoly(x, z, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {

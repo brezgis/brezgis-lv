@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { RIVER_PTS, STREAMS, LAKES } from './geodata.js';
 import { LOC } from './landuse.js';
 import { sampleSpline, canvasTexture, makeNoise } from './util.js';
-import { heightAt } from './terrain.js';
+import { heightAt, meshHeightAt } from './terrain.js';
 
 function waterNormalTex() {
   const n = makeNoise(777);
@@ -226,10 +226,15 @@ export function buildWater() {
         const inn = inner[si][i], out = outer[si][i];
         const mx = inn[0] + (out[0] - inn[0]) * 0.45;
         const mz = inn[2] + (out[2] - inn[2]) * 0.45;
+        // outer edge DRAPES onto the rendered terrain (clamped so it neither
+        // dives into a carved dip nor flies up a bank) — a fixed +0.07 rim
+        // floated a tan wall over the shore shelf and read as a dyke
+        const gOut = Math.min(Math.max(meshHeightAt(out[0], out[2]) + 0.03, y - 0.48), y + 0.5);
+        const gMid = Math.min(Math.max(meshHeightAt(mx, mz) + 0.03, y + 0.03), y + 0.3);
         positions.push(
           inn[0], y - 0.5, inn[2],
-          mx, y + 0.04, mz,
-          out[0], y + 0.07, out[2]);
+          mx, gMid, mz,
+          out[0], gOut, out[2]);
         for (let bI = 0; bI < 3; bI++) {
           colors.push(bandC[bI][0], bandC[bI][1], bandC[bI][2]);
         }
@@ -276,7 +281,10 @@ export function buildWater() {
     const skirt = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
       // FrontSide: any residual fold on a hairpin culls away instead of
       // flashing its black backface
-      map: sandTex, vertexColors: true, side: THREE.FrontSide,
+      // DoubleSide: half the strip quads wind downward (side-dependent index
+      // order) and FrontSide culled the whole left-bank apron from above.
+      // Normals are hand-written +y, so lighting is correct either way.
+      map: sandTex, vertexColors: true, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
     }));
     skirt.receiveShadow = true;

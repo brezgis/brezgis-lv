@@ -1,0 +1,76 @@
+{
+  "verdicts": [
+    {
+      "title": "Utility-pole line is a blind sine route: a pole stands in the open Gauja, others in the parish road and at the old manor's door",
+      "verdict": "CONFIRMED",
+      "reason": "The poles are placed on a blind sine path in src/eras.js:91-104 and the wires connect every top in src/eras.js:109-128, with no river, road, or building clearance checks. A code probe against the same RIVER_PTS spline and distToRoad found pole 8 at (-140.88,-332) 2.38 m from the river centerline, poles 14/15/30-34 inside roads, and pole 11 at (-139.80,-194), 3.10 m from the old manor door derived from src/eras.js:562 and src/buildings.js:328-329. Headless Chrome failed before screenshots, but the source geometry confirms the placement error."
+    },
+    {
+      "title": "Conifer crowns are sparse skeletons: needle cards float beside naked level-1 branches (anchors sit on level-2 twigs that have no tube geometry)",
+      "verdict": "UNCERTAIN",
+      "reason": "The structural part is real: spruce and pine place foliage anchors on level 2 in src/treegen.js:778 and src/treegen.js:798, while their tubeMaxLevel is 1 in src/treegen.js:786 and src/treegen.js:806, and tubesForSkeleton skips branches above maxLevel in src/treegen.js:401-405. However, the captured atlas cards include twig/needle-spray geometry from src/treegen.js:478-529 and src/treegen.js:532-560, so code alone does not prove the visible 'floating sparse skeleton' artifact. Headless Chrome failed before I could take conifer closeups."
+    },
+    {
+      "title": "Full-detail disc is ~2x sparser than the impostor ring around it \u2014 inverse LOD density seam at the 260 m boundary",
+      "verdict": "CONFIRMED",
+      "reason": "The tier switch is at dp < FULL_R in src/vegetation.js:226 and src/vegetation.js:388, followed by a full-tier-only 50% rejection in src/vegetation.js:389-391; far impostors do not get that rejection. Replicating the placement loop in src/vegetation.js:369-407 for era 1 gave 46.0 stems/ha in the 220-260 m inside annuli versus 71.3 stems/ha in the 260-300 m outside annuli, while full caps still had headroom under src/vegetation.js:221-225. Screenshot confirmation is still wanted because Chrome could not launch in the sandbox."
+    },
+    {
+      "title": "Conifer foliage renders near-black at noon \u2014 spruces read as silhouettes against midday grass",
+      "verdict": "UNCERTAIN",
+      "reason": "The code supports a dark-conifer risk: foliage colors are low for spruce and pine in src/treegen.js:785 and src/treegen.js:805, card tint is reduced by age in src/treegen.js:603-605, and card crown AO is applied in src/treegen.js:648. But the claim that they render near-black at noon depends on the final atlas, lighting, and tone mapping, not just the source constants. Headless Chrome failed before I could take the noon comparison screenshot."
+    },
+    {
+      "title": "Far-tier instance caps silently truncate trees, and the row-major fill dumps the entire loss on the south of the map (Bre\u017e\u0123a kalns belt)",
+      "verdict": "CONFIRMED",
+      "reason": "Far capacities are fixed in src/vegetation.js:221-225, and setEra truncates with Math.min(arr.length, farM.instanceMatrix.count) in src/vegetation.js:527-539. The placement loop is row-major with iz outside ix in src/vegetation.js:369-372, so truncating the tail removes the highest-z, southern placements. My exact source replica found era-1 overflows of 47,717 spruce, 48,577 pine, 41,126 birch, and 43,391 oak; for era 5 it found 55,089 far oaks versus the 42,000 cap, dropping 13,089 at z 3735.7..6046.2."
+    },
+    {
+      "title": "2x stem-density step at the FULL_R=260 m ring: the forest is thinnest exactly where the player walks (the 6 POIs, incl. Bre\u017e\u0123a kalns)",
+      "verdict": "CONFIRMED",
+      "reason": "The six POIs are the tier centers in src/vegetation.js:351, FULL_R is 260 in src/vegetation.js:226, and the full-only thinning at src/vegetation.js:389-391 creates the step after the already-clamped falloff in src/vegetation.js:386-388. My era-5 replica measured 32.0 stems/ha in 220-260 m inside annuli versus 48.7 stems/ha in 260-300 m outside annuli, and full-tier counts remained below cap. The reviewer's exact totals appear stale, but the density step itself holds."
+    },
+    {
+      "title": "Pond water edge hangs above the ground on its north and south-west rims",
+      "verdict": "CONFIRMED",
+      "reason": "The pond is a flat 52 x 34 ellipse at LOC.POND_LEVEL in src/water.js:299-305 and is visible in era 4 via src/main.js:268. The basin sculpt in src/terrain.js:71-82 only lowers terrain with Math.min and does not raise sunken rim/channel cells to meet the pond plane. A heightAt probe found the water level 186.30 m while rim terrain is 184.58 m at (-144,-358), 185.30 m at (-144,-290), and 183.90 m at the southwest ellipse point (-180.8,-300), confirming a 1.0-2.4 m gap."
+    },
+    {
+      "title": "Bright cyan 'aquarium glass' stripe along shores: the ribbon's EDGE_DROP rim wall is exposed wherever banks are sunken",
+      "verdict": "UNCERTAIN",
+      "reason": "The river ribbon does have a dropped outer water band: src/water.js:61-91 puts the outer vertices at y - EDGE_DROP, and the Gauja passes edgeDrop 0.5 in src/water.js:149. The bank skirt starts from that lowered inner edge in src/water.js:198-232, so an exposed water rim is plausible from code. The specific 'bright cyan continuous stripe' is a visual/color claim, and Chrome failed before I could verify it in screenshots."
+    }
+  ],
+  "wanted_shots": [
+    {
+      "name": "pole_river_manor_e4.png",
+      "args": "era=4;time=0.4;nofog=1;hide=vegetation,clouds,stars;cam=-380,250,-560;tgt=-140,188,-245;wait=900",
+      "looking_for": "Pole/wire run at the Gauja bend and its continuation past the old manor frontage."
+    },
+    {
+      "name": "pole_road_e4.png",
+      "args": "era=4;time=0.4;nofog=1;hide=vegetation,clouds,stars;cam=-360,250,150;tgt=-138,190,-30;wait=900",
+      "looking_for": "Utility poles standing inside the parish-road corridor around z=-56 and z=-10."
+    },
+    {
+      "name": "conifer_close_e1.png",
+      "args": "era=1;time=0.4;nofog=1;hide=clouds,stars;cam=-65,205,-245;tgt=-125,205,-190;wait=900",
+      "looking_for": "Whether spruce/pine crowns show floating sparse cards and whether conifer foliage reads near-black at noon."
+    },
+    {
+      "name": "forest_boundary_e5_brezga.png",
+      "args": "era=5;time=0.4;nofog=1;hide=clouds,stars;cam=1650,292,4780;tgt=1728,258,5200;wait=900",
+      "looking_for": "Near-POI full-tier foreground density versus denser far-impostor backdrop around Bre\u017e\u0123a kalns."
+    },
+    {
+      "name": "pond_edge_e4.png",
+      "args": "era=4;time=0.4;nofog=1;hide=vegetation,clouds,stars;cam=-260,205,-430;tgt=-144,186,-324;wait=900",
+      "looking_for": "Pond plane hanging above north/southwest terrain rim near the mill pond."
+    },
+    {
+      "name": "river_edge_e1.png",
+      "args": "era=1;time=0.4;nofog=1;hide=vegetation,clouds,stars;cam=-270,195,-390;tgt=-125,185,-325;wait=900",
+      "looking_for": "Exposed bright water-ribbon rim or cyan stripe along a sunken Gauja bank."
+    }
+  ]
+}

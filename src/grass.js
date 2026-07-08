@@ -8,7 +8,7 @@
 // reshuffles the sward — new growth only fades in at the feathered rim.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, distToRoad, fieldAt, riverLevelNear, PADS, ERA2_FARMS } from './landuse.js';
+import { forestDensity, distToRiver, distToRoad, fieldAt, riverLevelNear, PADS, ERA2_FARMS, LOC } from './landuse.js';
 import { LAKES } from './geodata.js';
 import { mulberry32, makeNoise, pointInPoly, smoothstep as smoothstepJ } from './util.js';
 import { WIND } from './vegetation.js';
@@ -222,7 +222,7 @@ export function buildGrass(scene) {
   const mat = grassMaterial();
   const bands = BANDS.map((b, i) => {
     const cells = Math.PI * b.r1 * b.r1 / (b.cell * b.cell);
-    const cap = Math.ceil(cells * b.perCell * 0.75); // rules thin ~40%+; headroom
+    const cap = Math.ceil(cells * b.perCell * 0.92); // 0.75 saturated in open meadow and chopped the outer feather
     const mesh = new THREE.InstancedMesh(geos[i], mat, cap);
     mesh.frustumCulled = false;
     mesh.castShadow = false;
@@ -254,11 +254,14 @@ export function buildGrass(scene) {
         const rng = mulberry32(cellSeed(ix, iz, 51 + era));
         const n = (perCell | 0) + (rng() < perCell % 1 ? 1 : 0);
         for (let k = 0; k < n; k++) {
+          // fixed draw order, ALL draws before any camera-dependent bail —
+          // a conditional draw shifted every later flower in the cell when
+          // the camera crossed the rim (flowers teleported / changed species)
           const x = (ix + rng()) * CELL, z = (iz + rng()) * CELL;
-          const rot = rng() * 6.3, sc = 0.7 + rng() * 0.7, pick = rng();
+          const rot = rng() * 6.3, sc = 0.7 + rng() * 0.7, pick = rng(), gate = rng();
           const d = Math.hypot(x - cx, z - cz);
           if (d > R || d < 3) continue;
-          if (rng() < smoothstepJ(R * 0.75, R, d)) continue;   // feathered rim
+          if (gate < smoothstepJ(R * 0.75, R, d)) continue;   // feathered rim
           const y = heightAt(x, z);
           if (forestDensity(era, x, z, y) > 0.3) continue;
           if (era >= 2 && (fieldAt(era, x, z) || distToRoad(era, x, z) < 2)) continue;
@@ -310,6 +313,9 @@ export function buildGrass(scene) {
         cY = heightAt(ccx, ccz);
         cDRiv = distToRiver(ccx, ccz);
         if (cDRiv < 16.5 || (cDRiv < 21 && cY < riverLevelNear(ccx, ccz) + 0.6)) cellOK = false;
+        // the mill pond holds water in 1860/1935 — no meadow inside it
+        if (cellOK && (era === 3 || era === 4) && cY < LOC.POND_LEVEL + 0.25 &&
+            Math.hypot((ccx - (LOC.POND.x + 4)) / 54, (ccz - LOC.POND.z) / 36) < 1.05) cellOK = false;
         if (cellOK) {
           for (const lake of LAKES) {
             if (cY < lake.level + 0.5 && pointInPoly(ccx, ccz, lake.poly)) { cellOK = false; break; }
@@ -359,6 +365,8 @@ export function buildGrass(scene) {
           dRiv = distToRiver(x, z);
           if (dRiv < 16.5) continue;             // water + bank skirt zone
           if (dRiv < 21 && y < riverLevelNear(x, z) + 0.6) continue;
+          if ((era === 3 || era === 4) && y < LOC.POND_LEVEL + 0.25 &&
+              Math.hypot((x - (LOC.POND.x + 4)) / 54, (z - LOC.POND.z) / 36) < 1.05) continue;
           let inLake = false;
           for (const lake of LAKES) {
             if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
@@ -413,8 +421,11 @@ export function buildGrass(scene) {
   function update(focus, era, camPos) {
     // from high above blades are subpixel and dense rings read as discs —
     // drop the close bands and let the mid band cover from r=0
-    const camDist = camPos ? Math.hypot(camPos.x - focus.x, camPos.y - focus.y, camPos.z - focus.z) : 0;
-    const nearOn = camDist < 220;
+    // main.js passes camera.position as BOTH focus and camPos, so the old
+    // |camPos−focus| was always 0 and the aerial shed never fired — judge by
+    // height above the ground under the camera instead
+    const camAlt = camPos ? camPos.y - heightAt(camPos.x, camPos.z) : 0;
+    const nearOn = camAlt < 140;
     if (nearOn !== bands[0].on) {
       for (const b of bands) {
         if (b.hiOff) { b.on = nearOn; b.lastEra = -1; }

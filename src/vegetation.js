@@ -7,7 +7,7 @@
 // moraine, birch and alder along water, oaks on the terrace, manor lindens.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, riverLevelNear, fieldAt, farmSiteKept, LOC } from './landuse.js';
+import { forestDensity, distToRiver, riverLevelNear, fieldAt, farmSiteKept, nearStagePOI, LOC } from './landuse.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
 import { DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
@@ -281,6 +281,17 @@ export function buildVegetation(scene, renderer) {
       for (let k = 0; k < 4; k++) nrm.push(-s, 0.25, c);
       idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
     }
+    // horizontal canopy lid at crown height: from the bird's-eye view the
+    // vertical planes vanish into stroke marks — the lid samples the crown
+    // half of the same tile and reads as foliage mass from above
+    {
+      const b = pos.length / 3;
+      const yl = 0.66;
+      pos.push(-w, yl, -w, w, yl, -w, w, yl, w, -w, yl, w);
+      uv.push(tile.u0, 0.5, tile.u1, 0.5, tile.u1, 1, tile.u0, 1);
+      for (let k = 0; k < 4; k++) nrm.push(0, 1, 0);
+      idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
+    }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
@@ -311,6 +322,29 @@ export function buildVegetation(scene, renderer) {
       fullH: S.full.map((v) => v.skel.height),
     };
   }
+
+  // ---- impostor promotion pool ---------------------------------------------
+  // The two LOD tiers are keyed to POI distance, so a walker OUTSIDE the six
+  // full-detail discs met flat billboard impostors at arm's length. A small
+  // pool of real trees follows the camera instead: the nearest impostors
+  // collapse to zero scale and a full-geometry stand-in takes each one's
+  // place until the camera moves on.
+  const PROM_CAP = 56, PROM_R = 78, PROM_CELL = 64;
+  const promPool = {};
+  for (const key of SP_KEYS) {
+    if (!CAPS[key][1]) continue;
+    const S = species[key];
+    const bark = makeInstanced(S.full[0].bark, S.bMat, PROM_CAP, true);
+    let cards = null;
+    if (S.cMat) {
+      cards = makeInstanced(S.full[0].cards, S.cMat, PROM_CAP, true);
+      cards.customDepthMaterial = cardDepthMaterial(S.twigAtlas);
+    }
+    group.add(bark);
+    if (cards) group.add(cards);
+    promPool[key] = { bark, cards, hRef: S.full[0].skel.height, active: new Map(), free: [] };
+  }
+  const farPlaced = {};   // per species: { entries, byCell, widen } for the ACTIVE era
 
   // ---- understory assets -----------------------------------------------------
   const fernAtlas = captureTwigAtlas(renderer, {
@@ -377,24 +411,30 @@ export function buildVegetation(scene, renderer) {
         }
         if (inLake) continue;
         if (distToRiver(x, z) < 42 && y < riverLevelNear(x, z) + 0.4) continue;
+        if ((era === 3 || era === 4) && y < LOC.POND_LEVEL + 0.3 &&
+            Math.hypot((x - (LOC.POND.x + 4)) / 54, (z - LOC.POND.z) / 36) < 1.05) continue;
         const d = forestDensity(era, x, z, y);
         if (d <= 0.02) continue;
         const dp = dPOI(x, z);
         // impostors are cheap — keep the deep landscape forested: primeval
         // eras are near-closed canopy, and even the agrarian mosaic reads
         // starved if the falloff bites too hard
-        const falloff = clamp(560 / Math.max(dp, 1), era <= 2 ? 0.9 : 0.7, 1);
+        const falloff = clamp(560 / Math.max(dp, 1), era <= 2 ? 0.9 : 0.85, 1);
         if (rng() > d * 0.97 * falloff) continue;
         const tier = dp < FULL_R ? 'full' : 'far';
-        // the denser grid would melt the full-geometry tier — thin it back
-        // to roughly the old stem count; the far impostors take the density
-        if (tier === 'full' && rng() < 0.5) continue;
+        // the denser grid would melt the full-geometry tier — thin it back;
+        // the far ring just outside blends DOWN to the same density so the
+        // FULL_R boundary is not a visible 2x stem-density step
+        if (tier === 'full' && rng() < 0.38) continue;
+        if (tier === 'far' && dp < FULL_R + 70 && rng() < 0.38 * (1 - (dp - FULL_R) / 70)) continue;
         if (era === 0) {
           // tundra: knee-high dwarf birch / juniper heath
           lists.shrub[tier].push([x, y, z, 0.8 + rng() * 1.1, rng() * 6.3, 0.9 + rng() * 0.25]);
           continue;
         }
-        const wet = distToRiver(x, z) < 40;
+        // alder carr reaches well past the immediate bank — a 40m band left
+        // ~100 alders on the whole map once the waterline exclusion ate it
+        const wet = distToRiver(x, z) < 70;
         const high = y > 215;
         const r = rng();
         let kind;
@@ -442,7 +482,7 @@ export function buildVegetation(scene, renderer) {
       // every viensēta keeps a few apple trees by the dwelling (the classic
       // Latvian farm orchard) — same site-keep rule as the buildings
       DWELLINGS_OSM.forEach(([dx, dz], si) => {
-        if (!farmSiteKept(si, era)) return;
+        if (!farmSiteKept(si, era) || nearStagePOI(dx, dz)) return;   // no orchard without a house
         const n = 2 + ((si * 7) % 3);
         for (let k = 0; k < n; k++) {
           const a = (k / n) * 6.28 + si;
@@ -493,9 +533,12 @@ export function buildVegetation(scene, renderer) {
       const list = per[vi];
       const capacity = pair.bark.instanceMatrix.count;
       const n = Math.min(list.length, capacity);
+      // over cap: stride-subsample — first-n would drop everything north of
+      // some grid row (the lists come from a south-to-north scan)
+      const stride = n > 0 ? list.length / n : 1;
       const hRef = heights[vi];
       for (let i = 0; i < n; i++) {
-        const [x, y, z, h, rot, tint] = list[i];
+        const [x, y, z, h, rot, tint] = list[(i * stride) | 0];
         const s = h / hRef;
         dummy.position.set(x, y - 0.08 * s, z);
         dummy.rotation.set(0, rot, 0);
@@ -520,23 +563,56 @@ export function buildVegetation(scene, renderer) {
 
   function setEra(era) {
     const lists = placementsFor(era);
+    // reset the promotion pool — far buffers are about to be refilled
+    for (const key of SP_KEYS) {
+      const pool = promPool[key];
+      if (!pool) continue;
+      pool.active.clear();
+      pool.free.length = 0;
+      for (let s = 0; s < PROM_CAP; s++) {
+        pool.free.push(s);
+        dummy.position.set(0, -500, 0);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(0.001, 0.001, 0.001);
+        dummy.updateMatrix();
+        pool.bark.setMatrixAt(s, dummy.matrix);
+        if (pool.cards) pool.cards.setMatrixAt(s, dummy.matrix);
+      }
+      pool.bark.count = PROM_CAP;
+      pool.bark.instanceMatrix.needsUpdate = true;
+      if (pool.cards) { pool.cards.count = PROM_CAP; pool.cards.instanceMatrix.needsUpdate = true; }
+    }
+    promLast.x = NaN;
     for (const key of SP_KEYS) {
       fillTier(meshes[key].full, meshes[key].fullH, lists[key].full);
       const farM = farMeshes[key];
       if (farM) {
         const arr = lists[key].far;
         const n = Math.min(arr.length, farM.instanceMatrix.count);
+        // over cap: stride-subsample (unbiased thin — first-n deforested the
+        // whole north incl. Brežģa kalns) and widen crowns to conserve the
+        // canopy coverage the dropped stems carried
+        const stride = n > 0 ? arr.length / n : 1;
+        const widen = Math.min(1.3, Math.sqrt(stride));
+        const fp = { entries: new Array(n), byCell: new Map(), widen };
         for (let i = 0; i < n; i++) {
-          const [x, y, z, h, , tint] = arr[i];
+          const [x, y, z, h, , tint] = arr[(i * stride) | 0];
           dummy.position.set(x, y - 0.4, z);
           dummy.rotation.set(0, (i * 2.399) % 6.283, 0);
-          dummy.scale.set(h * 1.12, h, h * 1.12); // crowns overlap -> closed canopy
+          dummy.scale.set(h * 1.12 * widen, h, h * 1.12 * widen); // crowns overlap -> closed canopy
           dummy.updateMatrix();
           farM.setMatrixAt(i, dummy.matrix);
           col.setScalar(0.82 + 0.28 * tint * 0.5);
           farM.setColorAt(i, col);
+          fp.entries[i] = [x, y, z, h, tint];
+          const ck = Math.floor(x / PROM_CELL) + ':' + Math.floor(z / PROM_CELL);
+          let ca = fp.byCell.get(ck);
+          if (!ca) fp.byCell.set(ck, ca = []);
+          ca.push(i);
         }
+        farPlaced[key] = fp;
         farM.count = n;
+        farM.instanceMatrix.clearUpdateRanges();  // stale promote ranges would mask this full refill
         farM.instanceMatrix.needsUpdate = true;
         if (farM.instanceColor) farM.instanceColor.needsUpdate = true;
       }
@@ -545,8 +621,9 @@ export function buildVegetation(scene, renderer) {
     {
       const arr = lists.rock;
       const n = Math.min(arr.length, rocks.instanceMatrix.count);
+      const stride = n > 0 ? arr.length / n : 1;
       for (let i = 0; i < n; i++) {
-        const [x, y, z, sc, rot] = arr[i];
+        const [x, y, z, sc, rot] = arr[(i * stride) | 0];
         dummy.position.set(x, y - sc * 0.3, z);
         dummy.rotation.set(0, rot, 0);
         dummy.scale.set(sc, sc * 0.7, sc);
@@ -560,8 +637,9 @@ export function buildVegetation(scene, renderer) {
     {
       const arr = lists.fern;
       const n = Math.min(arr.length, ferns.instanceMatrix.count);
+      const stride = n > 0 ? arr.length / n : 1;
       for (let i = 0; i < n; i++) {
-        const [x, y, z, s, rot] = arr[i];
+        const [x, y, z, s, rot] = arr[(i * stride) | 0];
         dummy.position.set(x, y - 0.02, z);
         dummy.rotation.set(0, rot, 0);
         dummy.scale.set(s, s * (0.85 + ((i * 31) % 7) / 14), s);
@@ -694,6 +772,9 @@ export function buildVegetation(scene, renderer) {
           const px = p[0] + side * (11 + rng() * 4), pz = p[1] + (rng() - 0.5) * 22;
           const y = heightAt(px, pz);
           if (y > p[2] + 1.0) continue;
+          // raw OSM points sit off the smoothed spline on bends — verify
+          // against the real channel so no reed stands in open water
+          if (distToRiver(px, pz) < 9.6 || y < p[2] - 0.45) continue;
           dummy.position.set(px, y - 0.1, pz);
           dummy.rotation.y = rng() * 6.3;
           const s = 0.45 + rng() * 0.6;
@@ -765,5 +846,75 @@ export function buildVegetation(scene, renderer) {
     return out;
   }
 
-  return { setEra, group, tick, getColliders };
+  // ---- impostor promotion driver -------------------------------------------
+  const promLast = { x: NaN, z: NaN };
+  const _pm = new THREE.Matrix4();
+  function promote(camX, camZ) {
+    if (Math.hypot(camX - promLast.x, camZ - promLast.z) < 14) return;
+    promLast.x = camX; promLast.z = camZ;
+    for (const key of SP_KEYS) {
+      const pool = promPool[key], fp = farPlaced[key], farM = farMeshes[key];
+      if (!pool || !fp || !farM) continue;
+      // nearest far-impostors around the camera
+      const cand = [];
+      const cx = Math.floor(camX / PROM_CELL), cz = Math.floor(camZ / PROM_CELL);
+      for (let iz = cz - 2; iz <= cz + 2; iz++) for (let ix = cx - 2; ix <= cx + 2; ix++) {
+        const arr = fp.byCell.get(ix + ':' + iz);
+        if (!arr) continue;
+        for (const idx of arr) {
+          const e = fp.entries[idx];
+          const d = Math.hypot(e[0] - camX, e[2] - camZ);
+          if (d < PROM_R) cand.push([d, idx]);
+        }
+      }
+      cand.sort((a, b) => a[0] - b[0]);
+      const want = new Set();
+      for (let i = 0; i < cand.length && want.size < PROM_CAP; i++) want.add(cand[i][1]);
+      let farDirty = false;
+      // demote: restore the impostor's real matrix, free the pool slot
+      for (const [idx, slot] of [...pool.active]) {
+        if (want.has(idx)) continue;
+        const [x, y, z, h] = fp.entries[idx];
+        dummy.position.set(x, y - 0.4, z);
+        dummy.rotation.set(0, (idx * 2.399) % 6.283, 0);
+        dummy.scale.set(h * 1.12 * fp.widen, h, h * 1.12 * fp.widen);
+        dummy.updateMatrix();
+        farM.setMatrixAt(idx, dummy.matrix);
+        farM.instanceMatrix.addUpdateRange(idx * 16, 16);
+        farDirty = true;
+        pool.active.delete(idx);
+        pool.free.push(slot);
+      }
+      // promote: hide the impostor, stand a real tree in its place
+      for (const idx of want) {
+        if (pool.active.has(idx) || !pool.free.length) continue;
+        const slot = pool.free.pop();
+        _pm.makeScale(0.0001, 0.0001, 0.0001);
+        farM.setMatrixAt(idx, _pm);
+        farM.instanceMatrix.addUpdateRange(idx * 16, 16);
+        farDirty = true;
+        const [x, y, z, h, tint] = fp.entries[idx];
+        const s = h / pool.hRef;
+        dummy.position.set(x, y - 0.08 * s, z);
+        dummy.rotation.set(0, (idx * 2.399) % 6.283, 0);
+        dummy.scale.set(s, s, s);
+        dummy.updateMatrix();
+        pool.bark.setMatrixAt(slot, dummy.matrix);
+        if (pool.cards) pool.cards.setMatrixAt(slot, dummy.matrix);
+        col.setScalar(tint);
+        pool.bark.setColorAt(slot, col);
+        if (pool.cards) pool.cards.setColorAt(slot, col);
+        pool.active.set(idx, slot);
+      }
+      if (farDirty) farM.instanceMatrix.needsUpdate = true;
+      pool.bark.instanceMatrix.needsUpdate = true;
+      if (pool.bark.instanceColor) pool.bark.instanceColor.needsUpdate = true;
+      if (pool.cards) {
+        pool.cards.instanceMatrix.needsUpdate = true;
+        if (pool.cards.instanceColor) pool.cards.instanceColor.needsUpdate = true;
+      }
+    }
+  }
+
+  return { setEra, group, tick, getColliders, promote };
 }

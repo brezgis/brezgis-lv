@@ -183,8 +183,28 @@ async function boot() {
     COLL.map.clear();
     COLL.list.length = 0;
     group.updateMatrixWorld(true);
+    const _m = new THREE.Matrix4(), _ib = new THREE.Box3();
     group.traverse((o) => {
-      if (!o.isMesh || o.isInstancedMesh) return;
+      if (!o.isMesh) return;
+      if (o.isInstancedMesh) {
+        // per-instance AABBs (palisade posts, background walls, fences were
+        // walk-through because instanced meshes were skipped wholesale)
+        if (o.count > 900) return;                           // grass-scale stays cheap
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const bb = o.geometry.boundingBox;
+        for (let ii = 0; ii < o.count; ii++) {
+          o.getMatrixAt(ii, _m);
+          _m.premultiply(o.matrixWorld);
+          _ib.copy(bb).applyMatrix4(_m);
+          const w = _ib.max.x - _ib.min.x, d = _ib.max.z - _ib.min.z, h = _ib.max.y - _ib.min.y;
+          if (!Number.isFinite(w) || w > 36 || d > 36) continue;
+          // keep tall thin instances (palisade posts) that the prop filter
+          // would drop — a chest-high stockade must not be walk-through
+          if (h < 0.5 || (h < 1.2 && w < 0.26 && d < 0.26)) continue;
+          COLL.list.push({ circ: false, x0: _ib.min.x, x1: _ib.max.x, z0: _ib.min.z, z1: _ib.max.z, y0: _ib.min.y, y1: _ib.max.y });
+        }
+        return;
+      }
       _box.setFromObject(o);
       const w = _box.max.x - _box.min.x, d = _box.max.z - _box.min.z, h = _box.max.y - _box.min.y;
       if (!Number.isFinite(w) || w > 36 || d > 36) return;   // bridges, wires
@@ -225,7 +245,7 @@ async function boot() {
               pz = c.z + (dz / d) * rr;
             }
           } else {
-            if (c.y0 > feetY + 1.62 || c.y1 < feetY + 0.32) continue; // duck under / step over
+            if (c.y0 > feetY + 1.86 || c.y1 < feetY + 0.32) continue; // duck under (head clears 1.8) / step over
             const ex0 = c.x0 - R_PLAYER, ex1 = c.x1 + R_PLAYER;
             const ez0 = c.z0 - R_PLAYER, ez1 = c.z1 + R_PLAYER;
             if (px > ex0 && px < ex1 && pz > ez0 && pz < ez1) {
@@ -337,7 +357,9 @@ async function boot() {
   const _lookT = new THREE.Vector3();
   function flyTo(name) {
     const [pos, tgt] = PRESETS[name]();
-    if (rig.mode === 'cinema') rig.setMode('fly');
+    // presets park the camera mid-air: hand control back in FLY regardless of
+    // the old mode, or a walking player resumes walk physics in the sky
+    if (rig.mode !== 'fly') rig.setMode('fly');
     const fwd = new THREE.Vector3();
     camera.getWorldDirection(fwd);
     camTween = {
@@ -347,7 +369,7 @@ async function boot() {
     };
   }
   function jumpTo(pos, tgt) {
-    if (rig.mode === 'cinema') rig.setMode('fly');
+    if (rig.mode !== 'fly') rig.setMode('fly');
     camTween = null;
     camera.position.set(pos[0], pos[1], pos[2]);
     camera.lookAt(tgt[0], tgt[1], tgt[2]);
@@ -505,12 +527,18 @@ async function boot() {
     }
 
     // player shadow: your body is real to the sun while you stand on earth
-    if (rig.mode === 'walk') {
-      shadowProxy.visible = true;
-      shadowProxy.position.set(rig.basePos.x, rig.basePos.y - 1.7, rig.basePos.z);
-      shadowProxy.rotation.y = rig.yaw;
-    } else {
-      shadowProxy.visible = false;
+    {
+      const wasVisible = shadowProxy.visible;
+      if (rig.mode === 'walk') {
+        shadowProxy.visible = true;
+        shadowProxy.position.set(rig.basePos.x, rig.basePos.y - 1.7, rig.basePos.z);
+        shadowProxy.rotation.y = rig.yaw;
+      } else {
+        shadowProxy.visible = false;
+      }
+      // appearing/vanishing must not wait for the cadence tick — a stale
+      // shadow lingered mid-air after takeoff
+      if (shadowProxy.visible !== wasVisible) gov.shadowTick = 1e9;
     }
 
     const focus = camera.position;
@@ -524,6 +552,7 @@ async function boot() {
     }
     sky.update(dt, focus, shadowNow);
     veg.tick(sky.state.sunColor, sky.state.ambient);
+    veg.promote(camera.position.x, camera.position.z);
     water.tick(t);
     WIND.time.value = t;
     grass.update(focus, currentEra, camera.position);

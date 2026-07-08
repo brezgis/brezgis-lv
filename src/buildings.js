@@ -396,23 +396,29 @@ export function bridge(simple = false) {
     log2.position.set(0, 0.5, 0.5);
     g.add(log1, log2);
   } else {
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(28, 0.3, 3.6), MAT.plank);
+    // 34m deck + sloped approach ramps: the channel carve is sub-waterline
+    // out to ±16m, so the old 28m deck ended standing in open water
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(34, 0.3, 3.6), MAT.plank);
     deck.position.y = 1.2;
     g.add(deck);
     for (const s of [-1, 1]) {
-      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 28, 5), MAT.lightWood);
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 34, 5), MAT.lightWood);
       rail.rotation.z = Math.PI / 2;
       rail.position.set(0, 2.1, s * 1.7);
       g.add(rail);
-      for (let i = -3; i <= 3; i++) {
+      for (let i = -4; i <= 4; i++) {
         const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1, 0.12), MAT.darkWood);
-        post.position.set(i * 4, 1.7, s * 1.7);
+        post.position.set(i * 4.2, 1.7, s * 1.7);
         g.add(post);
       }
+      const ramp = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.28, 3.6), MAT.plank);
+      ramp.position.set(s * 21.4, 0.64, 0);
+      ramp.rotation.z = s * -0.13;
+      g.add(ramp);
     }
-    for (const px of [-9, 0, 9]) {
-      const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 2.6, 6), MAT.logOld);
-      pile.position.set(px, 0, 0);
+    for (const px of [-13, -4.5, 4.5, 13]) {
+      const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 2.9, 6), MAT.logOld);
+      pile.position.set(px, -0.1, 0);
       g.add(pile);
     }
   }

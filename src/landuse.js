@@ -8,11 +8,11 @@
 //       3 = 1860     (Nēķens manor era)
 //       4 = 1935     (Taurene, independent Latvia)
 //       5 = 2025     (today — terrain draped in Sentinel-2 imagery)
-import { RIVER_PTS, STREAMS, BREZGA } from './geodata.js';
+import { RIVER_PTS, STREAMS, LAKES, BREZGA } from './geodata.js';
 import { ROADS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
-import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, sampleSpline } from './util.js';
+import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, sampleSpline, sampleSplineEven, pointInPoly } from './util.js';
 
 const noise = makeNoise(4217);
 
@@ -22,6 +22,30 @@ const WD_N = Math.ceil(HM_SPAN / WD_RES) + 1;
 const wdRiver = new Float32Array(WD_N * WD_N).fill(1e9);
 const wdLevel = new Float32Array(WD_N * WD_N);
 const wdStream = new Float32Array(WD_N * WD_N).fill(1e9);
+// EXACT near-field buckets: bilinear interpolation of a 30m distance grid
+// cannot return ~0 ON the channel between nodes (it reported 25m at true
+// 0.2m and let grass stand in the water) — near the channel we measure
+// against the fine spline samples themselves
+const BK_W = 16;
+const rivBuckets = new Map(), strmBuckets = new Map();
+function bucketAdd(m, p) {
+  const k = Math.floor(p[0] / BK_W) * 8192 + Math.floor(p[1] / BK_W);
+  if (!m.has(k)) m.set(k, []);
+  m.get(k).push(p);
+}
+function bucketDist(m, x, z) {
+  const bx = Math.floor(x / BK_W), bz = Math.floor(z / BK_W);
+  let best = Infinity;
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    const arr = m.get((bx + dx) * 8192 + (bz + dz));
+    if (!arr) continue;
+    for (const p of arr) {
+      const d = (p[0] - x) * (p[0] - x) + (p[1] - z) * (p[1] - z);
+      if (d < best) best = d;
+    }
+  }
+  return Math.sqrt(best);   // Infinity → caller keeps the coarse value
+}
 {
   const x0 = HM_OFF_X - HM_SPAN / 2, z0 = HM_OFF_Z - HM_SPAN / 2;
   for (let gz = 0; gz < WD_N; gz++) {
@@ -63,16 +87,14 @@ const wdStream = new Float32Array(WD_N * WD_N).fill(1e9);
       }
     }
   };
-  const NR = Math.min(2200, RIVER_PTS.length * 5);
-  const fineR = [];
-  for (let i = 0; i <= NR; i++) fineR.push(sampleSpline(RIVER_PTS, i / NR));
+  const fineR = sampleSplineEven(RIVER_PTS, 4.5);
   splat(fineR, wdRiver, true);
   for (const st of STREAMS) {
-    const NS = st.pts.length * 5;
-    const fineS = [];
-    for (let i = 0; i <= NS; i++) fineS.push(sampleSpline(st.pts, i / NS));
+    const fineS = sampleSplineEven(st.pts, 4.5);
     splat(fineS, wdStream, false);
+    for (const p of fineS) bucketAdd(strmBuckets, p);
   }
+  for (const p of fineR) bucketAdd(rivBuckets, p);
 }
 function wdSample(arr, x, z) {
   const fx = clamp((x - (HM_OFF_X - HM_SPAN / 2)) / WD_RES, 0, WD_N - 1.001);
@@ -104,7 +126,9 @@ export function riverLevelAt(z) {
   return best[2];
 }
 export function distToRiver(x, z) {
-  return wdSample(wdRiver, x, z);
+  const d = wdSample(wdRiver, x, z);
+  if (d >= 46) return d;              // coarse is fine away from the channel
+  return Math.min(d, bucketDist(rivBuckets, x, z));
 }
 export function riverLevelNear(x, z) {
   const gx = Math.round(clamp((x - (HM_OFF_X - HM_SPAN / 2)) / WD_RES, 0, WD_N - 1));
@@ -112,7 +136,9 @@ export function riverLevelNear(x, z) {
   return wdLevel[gz * WD_N + gx];
 }
 export function distToStreams(x, z) {
-  return wdSample(wdStream, x, z);
+  const d = wdSample(wdStream, x, z);
+  if (d >= 46) return d;
+  return Math.min(d, bucketDist(strmBuckets, x, z));
 }
 export { distToPolyline };
 function riverPointNearest(x, z) {
@@ -230,17 +256,40 @@ export function roadsForEra(era) {
 function bgFieldsFor(era) {
   const out = [];
   const TYPES = ['rye', 'barley', 'flax', 'potato', 'clover', 'fallow'];
-  DWELLINGS_OSM.forEach(([x, z], si) => {
-    if (!farmSiteKept(si, era)) return;
+  // an ellipse is a valid field only if it stays out of the river, the
+  // lakes and the through-roads (checked at centre + the four extremes)
+  const fieldOK = (cx, cz, rx, rz) => {
+    const R = Math.max(rx, rz);
+    for (const [px, pz] of [[cx, cz], [cx + rx, cz], [cx - rx, cz], [cx, cz + rz], [cx, cz - rz]]) {
+      if (distToRiver(px, pz) < 18 || distToStreams(px, pz) < 9) return false;
+      const rd = distToRoadEx(era, px, pz);
+      if (rd.c <= 1 && rd.d < 6) return false;
+      for (const lake of LAKES) {
+        if (pointInPoly(px, pz, lake.poly)) return false;
+      }
+    }
+    if (Math.hypot((cx - (LOC.POND.x + 4)) / (54 + R), (cz - LOC.POND.z) / (36 + R)) < 1) return false;
+    return true;
+  };
+  DWELLINGS_OSM.forEach(([x, z, name], si) => {
+    if (!farmSiteKept(si, era) || nearStagePOI(x, z)) return;
+    if (/pienotava/i.test(name || '')) return;      // the creamery farms no fields
     const r = mulberry32(si * 449 + era * 61);
-    const n = 1 + (r() < 0.6 ? 1 : 0);
+    // 1929 census: ~20 ha holdings, a good third under the plough — two to
+    // three fields of 1-3 ha each (the old 0.8 ha ellipses read as gardens)
+    const n = 2 + (r() < 0.5 ? 1 : 0);
     for (let k = 0; k < n; k++) {
-      const a = r() * 6.28, dist = 60 + r() * 60;
-      out.push({
-        cx: x + Math.cos(a) * dist, cz: z + Math.sin(a) * dist,
-        rx: 42 + r() * 42, rz: 28 + r() * 26, rot: r() * 3.1,
-        type: TYPES[(r() * 6) | 0],
-      });
+      let a = r() * 6.28, dist = 70 + r() * 80;
+      const rx = 62 + r() * 55, rz = 40 + r() * 32, rot = r() * 3.1;
+      const type = TYPES[(r() * 6) | 0];
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const cx = x + Math.cos(a) * dist, cz = z + Math.sin(a) * dist;
+        if (fieldOK(cx, cz, rx, rz)) {
+          out.push({ cx, cz, rx, rz, rot, type });
+          break;
+        }
+        a = r() * 6.28; dist = 70 + r() * 90;        // resample, don't shrink
+      }
     }
   });
   return out;
@@ -376,7 +425,20 @@ function roadGridFor(era) {
 // (eras.js), the orchards (vegetation.js) and the yard props so one farm
 // never gets an orchard without a house
 export function farmSiteKept(i, era) {
-  return mulberry32(i * 977 + era * 131)() < (era === 4 ? 0.96 : 0.6);
+  // 1860 farms must be a SUBSET of 1935's: the interwar reform ADDED farms,
+  // none vanished — so the 1860 draw nests inside the 1935 keep
+  const kept1935 = mulberry32(i * 977 + 4 * 131)() < 0.96;
+  if (era !== 3) return kept1935;
+  return kept1935 && mulberry32(i * 977 + 3 * 131)() < 0.625;   // 0.96×0.625 = 0.6 net
+}
+
+// Stage-anchor zones where background items must not spawn. Shared by
+// bgSettlement (houses), the orchard pass and bgFieldsFor — a site either
+// fully exists (house+orchard+fields) or fully doesn't.
+export function nearStagePOI(x, z) {
+  const n = (p, r) => Math.hypot(x - p.x, z - p.z) < r;
+  return n(LOC.STEAD, 100) || n(LOC.MANOR, 140) || n(LOC.KROGS, 70) ||
+         n(LOC.BREZGA, 70) || n(LOC.POND, 80) || n(LOC.CAMP, 60);
 }
 
 export function distToRoadEx(era, x, z) {
@@ -431,8 +493,10 @@ export function forestDensity(era, x, z, y) {
     d *= smoothstep(25, 80, Math.hypot(x - LOC.BARROWS.x, z - LOC.BARROWS.z));
     for (const f of ERA2_FARMS) d *= smoothstep(18, 60, Math.hypot(x - f.x, z - f.z));
   } else if (era === 5) {
-    // today: the real forest pattern from Sentinel-2
-    d = forestMaskAt(x, z) ? 0.85 + n * 0.15 : 0;
+    // today: the real forest pattern from Sentinel-2. Where the satellite
+    // says forest, it IS forest — near-certain keep, or the Bernoulli thinning
+    // reads as savanna (clumps of 2-4 stems, then 40m gaps)
+    d = forestMaskAt(x, z) ? 0.97 + n * 0.03 : 0;
     d *= smoothstep(55, 140, dStead) * 0.94 + 0.06;
     d *= smoothstep(60, 150, dManor) * 0.94 + 0.06;
   } else {

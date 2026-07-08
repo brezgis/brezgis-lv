@@ -598,27 +598,30 @@ export function buildFoliageCards(g, anchors, opts, rng) {
     out.set(0, 0, 1).applyQuaternion(_q);
     const flex = 0.45 + rng.float() * 0.35;
     const phase = rng.float() * Math.PI * 2;
-    const planes = opts.mode === 'cross' ? 2 : 1;
+    // 'lying' fans get a smaller perpendicular fin too — a single quad
+    // collapses to a razor slice seen edge-on at eye level
+    const planes = opts.mode === 'flat' ? 1 : 2;
     const bendJ = bend * (0.75 + rng.float() * 0.5);
     const tintV = 1 - a.age * 0.25;
     const hueK = a.hue * 0.12;
     const cr = tintV * (1 + hueK), cg = tintV, cb = tintV * (1 - hueK);
     for (let pl = 0; pl < planes; pl++) {
+      const sPl = opts.mode === 'lying' && pl === 1 ? s * 0.6 : s;
       const w = pl === 0 ? right : upL;
       const nrm = pl === 0 ? upL : right;
       const base = g.vertCount;
-      rowPos.copy(a.pos).addScaledVector(out, -0.08 * s);
+      rowPos.copy(a.pos).addScaledVector(out, -0.08 * sPl);
       for (let iv = 0; iv <= rows; iv++) {
         const t = iv / rows;
         const ang = bendJ * t;
         dirRow.copy(out).multiplyScalar(Math.cos(ang)).addScaledVector(nrm, -Math.sin(ang));
         nrmRow.copy(nrm).multiplyScalar(Math.cos(ang)).addScaledVector(out, Math.sin(ang));
         for (let iu = 0; iu <= 1; iu++) {
-          p.copy(rowPos).addScaledVector(w, (iu - 0.5) * s);
+          p.copy(rowPos).addScaledVector(w, (iu - 0.5) * sPl);
           g.vertex(p.x, p.y, p.z, nrmRow.x, nrmRow.y, nrmRow.z,
             u0 + iu * 0.5, v0 + t * 0.5, cr, cg, cb, flex, phase);
         }
-        if (iv < rows) rowPos.addScaledVector(dirRow, s / rows);
+        if (iv < rows) rowPos.addScaledVector(dirRow, sPl / rows);
       }
       for (let iv = 0; iv < rows; iv++) {
         const r0 = base + iv * 2;

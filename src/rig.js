@@ -92,10 +92,13 @@ export class Rig {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       const code = KEY_ALIAS[e.code] || e.code;
       if (KEY_ALIAS[e.code]) e.preventDefault();     // arrows must never scroll
-      // first input leaves the intro orbit flying
+      // first input leaves the intro orbit flying — and is CONSUMED: letting
+      // the same Space fall through seeded lastSpaceT, so a second tap within
+      // 320ms dropped the player straight out of the sky into walk mode
       if (this.mode === 'cinema' && (MOVE_KEYS.has(code) || e.code === 'Space') && !e.repeat) {
         this.setMode('fly');
         requestLock();
+        if (e.code === 'Space') { e.preventDefault(); this.keys.add(code); return; }
       }
       if (e.code === 'KeyV' && !e.repeat) {
         this.setMode(this.mode === 'walk' ? 'fly' : 'walk');

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
-import { makeNoise, clamp, lerp, smoothstep, pointInPoly, sampleSpline } from './util.js';
+import { makeNoise, clamp, lerp, smoothstep, pointInPoly, sampleSpline, sampleSplineEven } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
 const noise = makeNoise(1907);
@@ -39,31 +39,70 @@ function cellToWorld(gx, gy) {
       if (cand < field[i]) field[i] = cand;
     }
   }
-  // wider, softer valley profile: gentle grassed banks instead of a trench
-  for (const p of RIVER_PTS) stamp(p[0], p[1], 50, 17, p[2] - 1.8);
+  // soft valley profile — kept narrow: the old 50m radius carved whole
+  // floodplains a metre below the waterline and the river read as an
+  // elevated canal crossing a sunken pan
+  for (const p of RIVER_PTS) stamp(p[0], p[1], 32, 13, p[2] - 1.7);
   // …and a tight channel stamped along the RIBBON SPLINE itself: the water
   // mesh follows the Catmull-Rom curve between the OSM points, which bulges
   // off the point-stamped corridor on bends and left the river beheaded by
   // untouched ground in places
-  {
-    // stamps every ~5.5m: at the old 11m spacing the r=8 deep zones waisted
-    // between samples and the channel bed rose in ridges (the river read as
-    // disconnected pools)
-    const SAMP = Math.min(3000, RIVER_PTS.length * 8);
-    for (let i = 0; i <= SAMP; i++) {
-      const [x, z, y] = sampleSpline(RIVER_PTS, i / SAMP);
-      stamp(x, z, 26, 9, y - 1.9);
-      // shallow SHELF to 16m: guarantees no 17m-cell terrain triangle can
-      // bulge up through the bank apron mid-collar (the black-wedge bug)
-      stamp(x, z, 30, 16, y - 0.55);
-    }
+  const waterSamples = [];   // [x, z, level] along every carved spline
+  // ARC-LENGTH-EVEN stamping every ~5m: parametric sampling clustered where
+  // the OSM points cluster and left 25-80m unstamped gaps on long segments
+  // (the river read as disconnected pools in exactly those reaches)
+  for (const [x, z, y] of sampleSplineEven(RIVER_PTS, 5)) {
+    stamp(x, z, 26, 9, y - 1.9);
+    // shallow SHELF to 16m: guarantees no 17m-cell terrain triangle can
+    // bulge up through the bank apron mid-collar (the black-wedge bug)
+    stamp(x, z, 30, 16, y - 0.55);
+    waterSamples.push([x, z, y]);
   }
   for (const s of STREAMS) {
     for (const p of s.pts) stamp(p[0], p[1], 24, 6, p[2] - 0.8);
-    const SAMP = s.pts.length * 4;
-    for (let i = 0; i <= SAMP; i++) {
-      const [x, z, y] = sampleSpline(s.pts, i / SAMP);
+    for (const [x, z, y] of sampleSplineEven(s.pts, 4)) {
       stamp(x, z, 10, 3.5, y - 0.75);
+      waterSamples.push([x, z, y]);
+    }
+  }
+  // FLOOR CLAMP: land beyond the shore shelf can never sit below its local
+  // waterline — a river keeps its floodplain flooded, not sunken. Overlapping
+  // meander stamps compounded into pans carved ~1.9m below river level (the
+  // Dzērbe confluence loop hung the water ribbon in mid-air over one).
+  {
+    const BK = 28, key = (bx, bz) => bx * 4096 + bz;
+    const buckets = new Map();
+    for (const s of waterSamples) {
+      const k = key(Math.floor(s[0] / BK), Math.floor(s[1] / BK));
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k).push(s);
+    }
+    const R = 84;
+    const inAnyLake = (x, z) => {
+      for (const lake of LAKES) { if (pointInPoly(x, z, lake.poly)) return true; }
+      return false;
+    };
+    const P = LOC.POND;
+    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+      const [x, z] = cellToWorld(gx, gy);
+      let dmin = 1e9, lvl = 0;
+      const bx = Math.floor(x / BK), bz = Math.floor(z / BK);
+      // ±4 buckets: ±3 only guaranteed ~56m of the 84m clamp radius, leaving
+      // unclamped sunken pans in the 56-84m ring
+      for (let by = bz - 4; by <= bz + 4; by++) for (let bxx = bx - 4; bxx <= bx + 4; bxx++) {
+        const arr = buckets.get(key(bxx, by));
+        if (!arr) continue;
+        for (const s of arr) {
+          const d = Math.hypot(x - s[0], z - s[1]);
+          if (d < dmin) { dmin = d; lvl = s[2]; }
+        }
+      }
+      if (dmin > R || dmin <= 16.2) continue;                 // bed+shelf stay carved
+      if (Math.hypot((x - (P.x + 4)) / 56, (z - P.z) / 38) < 1.25) continue; // pond basin
+      if (inAnyLake(x, z)) continue;
+      const minH = lvl - 0.5 + 0.75 * smoothstep(16.2, 27, dmin); // → lvl+0.25 past 27m
+      const i = gy * G + gx;
+      if (field[i] < minH) field[i] = minH;
     }
   }
   // the mill-pond basin: a real dished bed at the Gauja bend so the pond
@@ -79,6 +118,9 @@ function cellToWorld(gx, gy) {
         const i = gy * G + gx;
         const bed = lvl - 1.2 + smoothstep(0.7, 1.15, rr) * 2.6;
         field[i] = Math.min(field[i], Math.max(bed, lvl - 1.2));
+        // …and RAISE low rims to the same profile: the N/SW rims sat below
+        // the waterline, so the flat pond sheet hung in the air past them
+        field[i] = Math.max(field[i], Math.min(bed, lvl + 0.25) - 0.35);
       }
     }
   }

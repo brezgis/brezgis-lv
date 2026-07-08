@@ -15,7 +15,7 @@ import {
 } from './buildings.js';
 import { MAT } from './textures.js';
 import { heightAt, meshHeightAt } from './terrain.js';
-import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS } from './landuse.js';
+import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI } from './landuse.js';
 import { LAKES } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM, ROADS_OSM } from './geodata-osm.js';
 import { mulberry32 } from './util.js';
@@ -77,20 +77,47 @@ function offeringPile() {
 }
 
 function utilityPoles(group, modern) {
+  // the line follows the REAL main road (poles offset onto the verge), the
+  // way the 1935 chronicle photo shows it — the old blind sine route stood
+  // poles in the Gauja, in the carriageway and at the manor door
+  const stops = [];
+  {
+    let best = null, bestLen = 0;
+    for (const r of ROADS_OSM) {
+      if (r.c !== 0) continue;
+      let L = 0;
+      for (let k = 0; k < r.pts.length - 1; k++) L += Math.hypot(r.pts[k + 1][0] - r.pts[k][0], r.pts[k + 1][1] - r.pts[k][1]);
+      if (L > bestLen) { bestLen = L; best = r; }
+    }
+    if (best) {
+      const zMin = -760, zMax = modern ? 2450 : 950;
+      let carry = 0;
+      for (let k = 0; k < best.pts.length - 1 && stops.length < 118; k++) {
+        const [ax, az] = best.pts[k], [bx, bz] = best.pts[k + 1];
+        const segL = Math.hypot(bx - ax, bz - az) || 1;
+        const dx = (bx - ax) / segL, dz = (bz - az) / segL;
+        for (let s = carry; s < segL; s += 46) {
+          const px = ax + dx * s - dz * 6.2, pz = az + dz * s + dx * 6.2; // verge side
+          carry = s + 46 - segL;
+          if (pz < zMin || pz > zMax) continue;
+          if (distToRiver(px, pz) < 14 || distToStreams(px, pz) < 8) continue; // wire spans water
+          stops.push([px, pz]);
+        }
+      }
+    }
+  }
   const geo = new THREE.CylinderGeometry(0.07, 0.1, 6.4, 5);
-  const mesh = new THREE.InstancedMesh(geo, MAT.logOld, 60);
+  const cap = Math.max(stops.length, 1);
+  const mesh = new THREE.InstancedMesh(geo, MAT.logOld, cap);
   mesh.frustumCulled = false;
   const arm = new THREE.CylinderGeometry(0.03, 0.03, 1.0, 4);
   arm.rotateZ(Math.PI / 2);
-  const arms = new THREE.InstancedMesh(arm, MAT.darkWood, 60);
+  const arms = new THREE.InstancedMesh(arm, MAT.darkWood, cap);
   arms.frustumCulled = false;
   const dummy = new THREE.Object3D();
   let i = 0;
   const tops = [];
-  const zEnd = modern ? 2400 : 900;
-  for (let zz = -700; zz <= zEnd; zz += 46) {
-    if (i >= 60) break;
-    const x = S.x + 46 + Math.sin(zz * 0.004) * 4;
+  for (const [x, zz] of stops) {
     const yBase = heightAt(x, zz);
     dummy.position.set(x, yBase + 3.2, zz);
     dummy.rotation.set(0, 0, 0);
@@ -107,9 +134,12 @@ function utilityPoles(group, modern) {
   group.add(mesh, arms);
   // the wires: two catenaries between crossarm tips, sagging mid-span
   const wirePos = [];
-  const SAG = 0.6, STEPS = 9;
+  const STEPS = 9;
   for (let p = 0; p < tops.length - 1; p++) {
     const [ax, ay, az] = tops[p], [bx, by, bz] = tops[p + 1];
+    const span = Math.hypot(bx - ax, bz - az);
+    if (span > 220) continue;                        // line break, not a 200m drape
+    const SAG = Math.min(3.4, 0.6 * (span / 46) * (span / 46)); // sag ∝ span²
     for (const off of [-0.45, 0.45]) {
       for (let s = 0; s < STEPS; s++) {
         const t0 = s / STEPS, t1 = (s + 1) / STEPS;
@@ -133,14 +163,19 @@ function utilityPoles(group, modern) {
 // terrain vertices, so a 5m carriageway all but vanished. The P30 is a
 // paved regional highway today; gravel before the war.
 function roadRibbons(group, era) {
-  const mat = new THREE.MeshLambertMaterial({
-    color: era === 5 ? 0x393c40 : 0x8d7c5f,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  // 2025: only the P30 (class 0) is asphalt — the V-roads are still gravel.
+  // Before the war everything is gravel.
+  const mkMat = (color) => new THREE.MeshLambertMaterial({
+    color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
-  const positions = [], indices = [];
+  const surf = {
+    asphalt: { mat: mkMat(0x393c40), positions: [], indices: [] },
+    gravel: { mat: mkMat(0x8d7c5f), positions: [], indices: [] },
+  };
   const dashPos = [], dashIdx = [];   // painted centreline on today's P30
   for (const r of ROADS_OSM) {
     if (r.c > 1) continue;
+    const { positions, indices } = era === 5 && r.c === 0 ? surf.asphalt : surf.gravel;
     const half = r.c === 0 ? 3.2 : 2.4;
     const pts = [];
     for (let i = 0; i < r.pts.length - 1; i++) {
@@ -169,14 +204,17 @@ function roadRibbons(group, era) {
         // wind CCW seen from +y or the whole ribbon back-face culls from above
         indices.push(a2, a2 + 4, a2 + 1, a2, a2 + 3, a2 + 4);
         indices.push(a2 + 1, a2 + 5, a2 + 2, a2 + 1, a2 + 4, a2 + 5);
-        // dashed centreline: every other 9m span on the paved P30
+        // dashed centreline on the paved P30: ~3.4m of paint per 18m cycle
+        // (the full-span 9m dashes read like runway markings from the air)
         if (era === 5 && r.c === 0 && i % 2 === 0) {
           const b2 = dashPos.length / 3;
           const px = pts[i - 1][0], pz = pts[i - 1][1];
-          const py = meshHeightAt(px, pz) + 0.17, cy = y + 0.17;
+          const sx = px + (x - px) * 0.31, sz = pz + (z - pz) * 0.31;
+          const ex = px + (x - px) * 0.69, ez = pz + (z - pz) * 0.69;
+          const sy = meshHeightAt(sx, sz) + 0.17, ey = meshHeightAt(ex, ez) + 0.17;
           dashPos.push(
-            px - dz * 0.09, py, pz + dx * 0.09, px + dz * 0.09, py, pz - dx * 0.09,
-            x + dz * 0.09, cy, z - dx * 0.09, x - dz * 0.09, cy, z + dx * 0.09);
+            sx - dz * 0.09, sy, sz + dx * 0.09, sx + dz * 0.09, sy, sz - dx * 0.09,
+            ex + dz * 0.09, ey, ez - dx * 0.09, ex - dz * 0.09, ey, ez + dx * 0.09);
           dashIdx.push(b2, b2 + 2, b2 + 1, b2, b2 + 3, b2 + 2);
         }
       }
@@ -192,18 +230,22 @@ function roadRibbons(group, era) {
     }));
     group.add(dashes);
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.receiveShadow = true;
-  group.add(mesh);
+  for (const key of ['asphalt', 'gravel']) {
+    const { mat, positions, indices } = surf[key];
+    if (!positions.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Background settlement — the real pattern, not one lonely diorama:
-//   2025: every OSM building footprint (768 of them, © OSM contributors)
+//   2025: every OSM building footprint (496 of them, © OSM contributors)
 //   1935: the OSM viensēta sites — Latvian farm names persist for centuries,
 //         and the parish then held ~1,300 people on these same farms
 //   1860: ~60% of the sites (the 1920 agrarian reform later carved 72 new
@@ -233,10 +275,7 @@ function bgSettlement(group, era, smokes) {
   const rng = mulberry32(4300 + era * 17);
   const props = { hay: [], wood: [], vinda: [], fence: [] };
   const { wall, roof } = bgAssets();
-  const nearP = (x, z, p, r) => Math.hypot(x - p.x, z - p.z) < r;
-  const skip = (x, z) =>
-    nearP(x, z, S, 100) || nearP(x, z, Mn, 140) || nearP(x, z, K, 70) ||
-    nearP(x, z, B, 70) || nearP(x, z, P, 80) || nearP(x, z, C, 60);
+  const skip = (x, z) => nearStagePOI(x, z);
   const items = [];
   if (era === 5) {
     for (const [x, z, w, d, rot] of BUILDINGS_OSM) {
@@ -252,6 +291,19 @@ function bgSettlement(group, era, smokes) {
         return;
       }
       if (skip(x, z) || !farmSiteKept(si, era)) return;
+      // OSM place nodes are approximate: nudge any site out of the
+      // carriageway (a farmhouse stood ON the P30 before this check)
+      {
+        const rd = distToRoadEx(era, x, z);
+        if (rd.c <= 1 && rd.d < 8) {
+          let moved = false;
+          for (const a of [0, 1.57, 3.14, 4.71, 0.79, 2.36, 3.93, 5.5]) {
+            const nx2 = x + Math.cos(a) * 16, nz2 = z + Math.sin(a) * 16;
+            if (distToRoadEx(era, nx2, nz2).d >= 8) { x = nx2; z = nz2; moved = true; break; }
+          }
+          if (!moved) return;
+        }
+      }
       const sr = mulberry32(si * 613 + era * 37);
       const rot = sr() * Math.PI;
       const ca = Math.cos(rot), sa = Math.sin(rot);
@@ -292,8 +344,18 @@ function bgSettlement(group, era, smokes) {
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
   items.forEach((it, i) => {
-    const y = heightAt(it.x, it.z) - 0.15;
-    const wallH = it.big ? 4.6 + rng() * 1.4 : Math.min(3.4, Math.max(2.3, Math.min(it.w, it.d) * 0.5));
+    // seat on the LOWEST footprint corner and stretch the walls up to the
+    // highest — a single centre sample floated corners 2m+ on slopes
+    const cca = Math.cos(it.rot), csa = Math.sin(it.rot);
+    let minH = Infinity, maxH = -Infinity;
+    for (const [ox, oz] of [[it.w / 2, it.d / 2], [it.w / 2, -it.d / 2], [-it.w / 2, it.d / 2], [-it.w / 2, -it.d / 2]]) {
+      const hh = heightAt(it.x + ox * cca - oz * csa, it.z + ox * csa + oz * cca);
+      if (hh < minH) minH = hh;
+      if (hh > maxH) maxH = hh;
+    }
+    const y = minH - 0.1;
+    const plinth = Math.min(1.4, maxH - minH);
+    const wallH = (it.big ? 4.6 + rng() * 1.4 : Math.min(3.4, Math.max(2.3, Math.min(it.w, it.d) * 0.5))) + plinth;
     const roofH = Math.min(it.w, it.d) * (era === 3 ? 0.52 : 0.42);
     dummy.position.set(it.x, y, it.z);
     dummy.rotation.set(0, -it.rot, 0);

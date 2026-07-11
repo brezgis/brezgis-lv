@@ -93,6 +93,52 @@ function cornerLogs(w, d, wallH) {
   return g;
 }
 
+function wallBox(axis, w, h, depth, along, y, normal, mat) {
+  const geo = axis === 'z'
+    ? new THREE.BoxGeometry(w, h, depth)
+    : new THREE.BoxGeometry(depth, h, w);
+  const m = new THREE.Mesh(geo, mat);
+  if (axis === 'z') m.position.set(along, y, normal);
+  else m.position.set(normal, y, along);
+  return m;
+}
+
+function addDoor(g, { axis = 'z', face, along = 0, w = 0.9, h = 1.7, lintel = true, threshold = true, double = false }) {
+  const side = Math.sign(face) || 1;
+  // Leaf face is 0.07m behind the lintel face, but clear of the wall plane.
+  const leaf = wallBox(axis, w, h, 0.04, along, h / 2, face + side * 0.03, MAT.door);
+  g.add(leaf);
+  if (lintel) g.add(wallBox(axis, w + 0.2, 0.14, 0.12, along, h + 0.07, face + side * 0.06, MAT.darkWood));
+  if (threshold) g.add(wallBox(axis, w + 0.24, 0.12, 0.34, along, 0.06, face + side * 0.17, MAT.stone));
+  if (double) {
+    const seam = new THREE.Mesh(new THREE.PlaneGeometry(0.035, h * 0.88), MAT.darkWood);
+    if (axis === 'z') seam.position.set(along, h * 0.5, face + side * 0.052);
+    else seam.position.set(face + side * 0.052, h * 0.5, along);
+    seam.rotation.y = axis === 'z' ? (side > 0 ? 0 : Math.PI) : side * Math.PI / 2;
+    g.add(seam);
+  }
+}
+
+function addWindow(g, { axis = 'z', face, along, y, w = 1, h = 1.4, trim = MAT.white, panes = 6 }) {
+  const side = Math.sign(face) || 1;
+  const innerW = w - 0.18, innerH = h - 0.18;
+  const fr = wallBox(axis, w, h, 0.08, along, y, face + side * 0.045, trim);
+  const gl = wallBox(axis, innerW, innerH, 0.018, along, y, face + side * 0.058, MAT.glass);
+  g.add(fr, gl);
+  const addBar = (bw, bh, da, dy) => {
+    const bar = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), trim);
+    if (axis === 'z') bar.position.set(along + da, y + dy, face + side * 0.087);
+    else bar.position.set(face + side * 0.087, y + dy, along + da);
+    bar.rotation.y = axis === 'z' ? (side > 0 ? 0 : Math.PI) : side * Math.PI / 2;
+    g.add(bar);
+  };
+  addBar(0.035, innerH, 0, 0);
+  if (panes === 6) {
+    addBar(innerW, 0.035, 0, -innerH / 6);
+    addBar(innerW, 0.035, 0, innerH / 6);
+  } else addBar(innerW, 0.035, 0, 0);
+}
+
 // --- the log building family ------------------------------------------------
 export function logCabin({
   w = 6, d = 8, wallH = 2.2, roofH = 2.4, roof = 'thatchGable', old = false,
@@ -131,22 +177,18 @@ export function logCabin({
     }
   }
 
-  // door
-  const door = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.7, 0.12), MAT.door);
-  if (doorEnd) door.position.set(0, 0.88, d / 2 + 0.04);
-  else door.position.set(w / 2 + 0.04, 0.88, 0);
-  if (!doorEnd) door.rotation.y = Math.PI / 2;
-  g.add(door);
+  addDoor(g, doorEnd ? { face: d / 2 } : { axis: 'x', face: w / 2 });
 
   // windows on the long sides
+  const whitePanes = windowStyle === 'framed' || hasChimney;
   for (let i = 0; i < windows; i++) {
     const zoff = (i - (windows - 1) / 2) * (d / (windows + 0.4));
     for (const side of [1, -1]) {
-      const fr = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.86, 0.7), windowStyle === 'framed' ? MAT.white : MAT.darkWood);
-      fr.position.set(side * (w / 2 + 0.03), wallH * 0.62, zoff);
-      const gl = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.7, 0.56), windowStyle === 'framed' ? MAT.glass : MAT.door);
-      gl.position.set(side * (w / 2 + 0.07), wallH * 0.62, zoff);
-      g.add(fr, gl);
+      addWindow(g, {
+        axis: 'x', face: side * w / 2, along: zoff, y: wallH * 0.62, w: 0.7, h: 0.86,
+        trim: whitePanes ? MAT.white : MAT.darkWood,
+        panes: whitePanes ? 6 : 4,
+      });
     }
   }
   if (hasChimney) {
@@ -318,16 +360,10 @@ export function manorHouse({ flag = false } = {}) {
     for (let i = 0; i < 8; i++) {
       if (side > 0 && (i === 3 || i === 4)) continue;           // door bay
       const x = -12.7 + i * 3.65;
-      const fr = new THREE.Mesh(new THREE.BoxGeometry(1.15, 2.0, 0.1), MAT.white);
-      fr.position.set(x, 2.7, side * 6.55);
-      const gl = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.75, 0.08), MAT.glass);
-      gl.position.set(x, 2.7, side * 6.62);
-      g.add(fr, gl);
+      addWindow(g, { face: side * 6.5, along: x, y: 2.7, w: 1.15, h: 2.0 });
     }
   }
-  const door = new THREE.Mesh(new THREE.BoxGeometry(2, 2.8, 0.15), MAT.door);
-  door.position.set(0, 1.4, 6.6);
-  g.add(door);
+  addDoor(g, { face: 6.5, w: 2, h: 2.8, threshold: false });
 
   if (flag) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 8, 6), MAT.white);
@@ -361,6 +397,12 @@ export function manorOutbuilding(len = 20) {
   roof.rotation.y = Math.PI / 2;
   roof.position.y = 3.2;
   g.add(roof);
+  addDoor(g, { face: 4, w: 1.6, h: 2.25, double: true });
+  for (const side of [1, -1]) {
+    for (const f of [-0.36, -0.12, 0.12, 0.36]) {
+      addWindow(g, { face: side * 4, along: f * len, y: 2.3, w: 0.9, h: 1.25 });
+    }
+  }
   return shadowize(g);
 }
 
@@ -612,6 +654,11 @@ export function churchSilhouette() {
   const spire = new THREE.Mesh(new THREE.ConeGeometry(4.4, 12, 8), MAT.iron);
   spire.position.set(14, 22, 0);
   g.add(nave, naveRoof, tower, spire);
+  addDoor(g, { axis: 'x', face: 18, w: 2.2, h: 3.2 });
+  for (const side of [1, -1]) {
+    for (const x of [-8, -2, 5]) addWindow(g, { face: side * 6, along: x, y: 5, w: 1.4, h: 3.6 });
+  }
+  addWindow(g, { axis: 'x', face: 18, along: 0, y: 11.5, w: 1.25, h: 2.2, panes: 4 });
   return g;
 }
 
@@ -674,26 +721,17 @@ export function manorNew({ flag = false } = {}) {
       for (let i = 0; i < 6; i++) {
         const x = -9.5 + i * 3.8;
         if (Math.abs(x) < 4 && side > 0) continue;            // risalit face handled below
-        const fr = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.0, 0.12), MAT.plaster);
-        fr.position.set(x, 2.1 + fl * 3.1, side * 5.55);
-        const gl = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.7, 0.08), MAT.glass);
-        gl.position.set(x, 2.1 + fl * 3.1, side * 5.63);
-        g.add(fr, gl);
+        addWindow(g, { face: side * 5.5, along: x, y: 2.1 + fl * 3.1, w: 1.2, h: 2.0, trim: MAT.plaster });
       }
     }
   }
   // risalit door + windows
-  const door = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 0.16), MAT.door);
-  door.position.set(0, 1.5, 6.34);
+  addDoor(g, { face: 6.3, w: 2, h: 3, lintel: false, threshold: false });
   const arch = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.5, 0.2), MAT.plaster);
   arch.position.set(0, 3.2, 6.34);
-  g.add(door, arch);
+  g.add(arch);
   for (const dx of [-2.2, 2.2]) {
-    const fr = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.0, 0.12), MAT.plaster);
-    fr.position.set(dx, 5.6, 6.36);
-    const gl = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.7, 0.08), MAT.glass);
-    gl.position.set(dx, 5.6, 6.42);
-    g.add(fr, gl);
+    addWindow(g, { face: 6.3, along: dx, y: 5.6, w: 1.1, h: 2.0, trim: MAT.plaster });
   }
   const steps = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 2), MAT.stone);
   steps.position.set(0, 0.3, 7.4);
@@ -745,6 +783,10 @@ export function brewery() {
     mouth.position.set(dx, 1.0, -3.86);
     g.add(arch, mouth);
   }
+  addDoor(g, { face: 3.75, w: 1.35, h: 2.15 });
+  for (const x of [-5.5, -2.5, 2.5, 5.5]) {
+    addWindow(g, { face: 3.75, along: x, y: 3.35, w: 1, h: 1.3 });
+  }
   return shadowize(g);
 }
 
@@ -783,15 +825,10 @@ export function krogs() {
   ch.position.set(-3, 4.4, 0);
   g.add(ch);
   // tavern door + wide stable door
-  const door = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.9, 0.14), MAT.door);
-  door.position.set(-4, 0.95, 4.3);
-  const stable = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.2, 0.14), MAT.door);
-  stable.position.set(6, 1.1, 4.3);
-  g.add(door, stable);
+  addDoor(g, { face: 4.25, along: -4, w: 1.1, h: 1.9 });
+  addDoor(g, { face: 4.25, along: 6, w: 2.6, h: 2.2, double: true });
   for (const wx of [-7.5, -0.5]) {
-    const fr = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), MAT.darkWood);
-    fr.position.set(wx, 1.6, 4.28);
-    g.add(fr);
+    addWindow(g, { face: 4.25, along: wx, y: 1.6, w: 0.8, h: 0.8, trim: MAT.darkWood, panes: 4 });
   }
   // hitching rail
   const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 5, 5), MAT.lightWood);
@@ -851,15 +888,9 @@ export function modernHouse() {
   ch.position.set(1.5, 4.4, 0);
   g.add(ch);
   for (let i = 0; i < 3; i++) {
-    const fr = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.25, 0.1), MAT.white);
-    fr.position.set(-3 + i * 3, 1.55, 3.55);
-    const gl = new THREE.Mesh(new THREE.BoxGeometry(1.05, 1.0, 0.08), MAT.glass);
-    gl.position.set(-3 + i * 3, 1.55, 3.62);
-    g.add(fr, gl);
+    addWindow(g, { face: 3.5, along: -3 + i * 3, y: 1.55, w: 1.3, h: 1.25 });
   }
-  const door = new THREE.Mesh(new THREE.BoxGeometry(1, 2.1, 0.12), new THREE.MeshLambertMaterial({ color: 0x5a3c28 }));
-  door.position.set(3.9, 1.05, 3.55);
-  g.add(door);
+  addDoor(g, { face: 3.5, along: 3.9, w: 1, h: 2.1 });
   return shadowize(g);
 }
 

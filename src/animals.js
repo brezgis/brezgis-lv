@@ -744,8 +744,44 @@ export const SPECIES = {
 };
 
 // --- behaviour ----------------------------------------------------------------
+const TAU = Math.PI * 2;
+const HERD_PROFILES = {
+  sheepDark: { radius: 16, spacing: 1.7 },
+  sheepWhite: { radius: 16, spacing: 1.8 },
+  cattleIron: { radius: 24, spacing: 2.5 },
+  cattleFarm: { radius: 26, spacing: 2.7 },
+  horseKonik: { radius: 30, spacing: 2.8 },
+  reindeer: { radius: 55, spacing: 2.4 },
+};
+
+function turnRateFor(kind) {
+  if (kind.startsWith('aurochs')) return 0.55;
+  if (kind.startsWith('cattle')) return 0.65;
+  if (kind.startsWith('horse')) return 0.82;
+  if (kind.startsWith('sheep')) return 1.05;
+  if (kind === 'reindeer' || kind === 'elk') return 0.9;
+  if (kind.includes('Deer') || kind === 'roeBuck') return 1.3;
+  if (kind === 'hare' || kind === 'arcticHare') return 4.5;
+  if (kind === 'frog') return 5.2;
+  if (kind === 'wolf' || kind === 'fox' || kind === 'arcticFox') return 1.8;
+  if (kind === 'chicken' || kind === 'rooster' || kind === 'goose') return 2.4;
+  return 1.35;
+}
+
+function angleDelta(from, to) {
+  let d = to - from;
+  while (d > Math.PI) d -= TAU;
+  while (d < -Math.PI) d += TAU;
+  return d;
+}
+
 export class AnimalManager {
-  constructor() { this.animals = []; this.group = new THREE.Group(); this.group.name = 'animals'; }
+  constructor() {
+    this.animals = [];
+    this.herds = [];
+    this.group = new THREE.Group();
+    this.group.name = 'animals';
+  }
 
   spawn(kind, home, opts = {}) {
     const a = SPECIES[kind]();
@@ -781,7 +817,26 @@ export class AnimalManager {
       hopT: -1, wingP: rng() * Math.PI * 2,
       hopLen: opts.hopLen ?? 0.5, hopH: opts.hopH ?? 0.12,
       hopDur: opts.hopDur ?? 0.32, restT: opts.restT ?? [2, 6], chainT: opts.chainT ?? 0.15,
+      turnRate: opts.turnRate ?? turnRateFor(kind), visualHeading: a.group.rotation.y,
+      moveSpeed: 0, gaitP: 0, fleeing: false,
+      waterfowl: kind.startsWith('duck') || kind.startsWith('swan'),
+      herd: null, herdIndex: -1,
     };
+    rec.gaitP = rec.phase;
+    const profile = HERD_PROFILES[kind];
+    if (profile) {
+      let herd = null;
+      for (let i = 0; i < this.herds.length; i++) {
+        if (this.herds[i].kind === kind && this.herds[i].home === home) { herd = this.herds[i]; break; }
+      }
+      if (!herd) {
+        herd = { kind, home, profile, members: [], cx: x, cz: z, phase: rec.phase };
+        this.herds.push(herd);
+      }
+      rec.herd = herd;
+      rec.herdIndex = herd.members.length;
+      herd.members.push(rec);
+    }
     this.animals.push(rec);
     this.group.add(a.group);
     return rec;
@@ -800,6 +855,21 @@ export class AnimalManager {
     geometries.forEach((g) => g.dispose());
     materials.forEach((m) => m.dispose());
     this.animals.length = 0;
+    this.herds.length = 0;
+  }
+
+  updateHerds() {
+    for (let hi = 0; hi < this.herds.length; hi++) {
+      const herd = this.herds[hi];
+      let x = 0, z = 0;
+      for (let i = 0; i < herd.members.length; i++) {
+        x += herd.members[i].group.position.x;
+        z += herd.members[i].group.position.z;
+      }
+      const n = herd.members.length || 1;
+      herd.cx = x / n;
+      herd.cz = z / n;
+    }
   }
 
   // shared wing flap
@@ -832,17 +902,19 @@ export class AnimalManager {
     const g = a.group;
     if (a.state === 'swim') {
       const dx = a.tx - g.position.x, dz = a.tz - g.position.z;
-      if (Math.hypot(dx, dz) < 0.6) { a.state = 'idle'; a.timer = 1.5 + rng() * 4; }
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.6) { a.state = 'idle'; a.timer = 1.5 + rng() * 4; }
       else {
         const want = Math.atan2(dx, dz);
-        let da = want - a.heading;
-        while (da > Math.PI) da -= Math.PI * 2;
-        while (da < -Math.PI) da += Math.PI * 2;
+        const da = angleDelta(a.heading, want);
         a.heading += clamp(da, -1.2 * dt, 1.2 * dt);
         // fish put on occasional darts; ducks paddle steadily
         const dart = a.wiggle && Math.sin(t * 0.23 + a.phase * 3) > 0.94 ? 3.4 : 1;
-        const nx = g.position.x + Math.sin(a.heading) * a.speed * dart * dt;
-        const nz = g.position.z + Math.cos(a.heading) * a.speed * dart * dt;
+        const arrive = clamp((dist - 0.6) / 2.4, 0, 1);
+        const desiredSpeed = a.speed * dart * arrive;
+        a.moveSpeed += clamp(desiredSpeed - a.moveSpeed, -1.1 * dt, 0.8 * dt);
+        const nx = g.position.x + Math.sin(a.heading) * a.moveSpeed * dt;
+        const nz = g.position.z + Math.cos(a.heading) * a.moveSpeed * dt;
         // a straight chord between two in-water targets can cut a meander
         // bank — never take a step onto dry land, retarget instead
         if (!a.inWater || a.inWater(nx, nz)) {
@@ -851,30 +923,64 @@ export class AnimalManager {
           a.state = 'idle'; a.timer = 0.4 + rng();
         }
       }
+    } else {
+      a.moveSpeed = Math.max(0, a.moveSpeed - 1.1 * dt);
     }
     // stay at the waterline (fish ride a little under it)
     g.position.y = a.level + Math.sin(t * (a.wiggle ? 1.3 : 0.7) + a.phase) * (a.wiggle ? 0.06 : 0.015);
-    g.rotation.y = a.heading + (a.wiggle ? Math.sin(t * 7 + a.phase) * 0.12 : 0);
+    if (a.waterfowl) {
+      const da = angleDelta(a.visualHeading, a.heading);
+      a.visualHeading += clamp(da, -0.72 * dt, 0.72 * dt);
+      g.rotation.y = a.visualHeading;
+    } else {
+      a.visualHeading = a.heading;
+      g.rotation.y = a.heading + (a.wiggle ? Math.sin(t * 7 + a.phase) * 0.12 : 0);
+    }
     if (a.neck && !a.wiggle) {
-      // dabble: head dips to the water now and then
-      a.neck.rotation.x = Math.sin(t * 0.4 + a.phase) > 0.86 ? 0.9 : Math.sin(t * 0.8 + a.phase) * 0.08;
+      // Dabbling waterfowl tip tail-up briefly; their visible yaw also lags
+      // the swimming heading, as a floating body has some rotational drag.
+      const dabble = a.waterfowl && Math.sin(t * 0.4 + a.phase) > 0.88;
+      a.neck.rotation.x = dabble ? 0.95 : Math.sin(t * 0.8 + a.phase) * 0.08;
+      const tip = dabble ? (a.kind.startsWith('swan') ? 0.28 : 0.4) : 0;
+      g.rotation.x = lerp(g.rotation.x, tip, clamp(dt * 4, 0, 1));
     }
   }
 
-  tickHop(a, t, dt) {
+  tickHop(a, t, dt, camPos) {
     const g = a.group;
+    if (camPos) {
+      const cx = g.position.x - camPos.x, cz = g.position.z - camPos.z;
+      const d2 = cx * cx + cz * cz;
+      const cameraLow = camPos.y - heightAt(camPos.x, camPos.z) < 4.5;
+      if (cameraLow && d2 < 12 * 12) {
+        const d = Math.sqrt(d2) || 1;
+        const ax = d2 > 0.001 ? cx / d : Math.sin(a.phase);
+        const az = d2 > 0.001 ? cz / d : Math.cos(a.phase);
+        a.tx = g.position.x + ax * 18;
+        a.tz = g.position.z + az * 18;
+        a.state = 'move';
+        a.timer = 0;
+        a.fleeing = true;
+      } else if (a.fleeing && d2 > 18 * 18) {
+        a.fleeing = false;
+      }
+    }
     if (a.hopT >= 0) {
       // mid-hop: parabolic arc toward the target
-      a.hopT += dt / a.hopDur;
+      const hopDur = a.fleeing ? a.hopDur * 0.72 : a.hopDur;
+      a.hopT += dt / hopDur;
       const k = Math.min(1, a.hopT);
-      g.position.x += Math.sin(a.heading) * a.hopLen * dt / a.hopDur;
-      g.position.z += Math.cos(a.heading) * a.hopLen * dt / a.hopDur;
+      g.position.x += Math.sin(a.heading) * a.hopLen * dt / hopDur;
+      g.position.z += Math.cos(a.heading) * a.hopLen * dt / hopDur;
       g.position.y = heightAt(g.position.x, g.position.z) + a.hopH * 4 * k * (1 - k);
+      const turn = angleDelta(a.visualHeading, a.heading);
+      a.visualHeading += clamp(turn, -a.turnRate * dt, a.turnRate * dt);
+      g.rotation.y = a.visualHeading;
       if (a.hopT >= 1) {
         a.hopT = -1;
         g.position.y = heightAt(g.position.x, g.position.z);
         const dx = a.tx - g.position.x, dz = a.tz - g.position.z;
-        if (Math.hypot(dx, dz) < a.hopLen || rng() < 0.12) { a.state = 'idle'; a.timer = a.restT[0] + rng() * a.restT[1]; }
+        if (Math.hypot(dx, dz) < a.hopLen || (!a.fleeing && rng() < 0.12)) { a.state = 'idle'; a.timer = a.restT[0] + rng() * a.restT[1]; }
         else a.timer = a.chainT;
       }
       return;
@@ -889,7 +995,6 @@ export class AnimalManager {
     }
     const want = Math.atan2(a.tx - g.position.x, a.tz - g.position.z);
     a.heading = want + (rng() - 0.5) * 0.4;
-    g.rotation.y = a.heading;
     a.hopT = 0;
   }
 
@@ -921,6 +1026,7 @@ export class AnimalManager {
       this.flap(a, t, a.low ? 70 : 24, a.low ? 0.5 : 1.05);
     } else if (a.fly === 'hawk') {
       // swallow: fast sweeping curves over meadow and water
+      const oldHeading = a.heading;
       a.heading += (Math.sin(t * 0.8 + a.phase) + Math.sin(t * 0.31 + a.phase * 2) * 0.7) * 1.6 * dt;
       const hx = a.home.x - g.position.x, hz = a.home.z - g.position.z;
       const hd = Math.hypot(hx, hz);
@@ -938,11 +1044,14 @@ export class AnimalManager {
       const wantY = ground + a.alt[0] + (Math.sin(t * 0.42 + a.phase) + 1) * 0.5 * (a.alt[1] - a.alt[0]);
       g.position.y += clamp(wantY - g.position.y, -6 * dt, 6 * dt);
       g.rotation.y = a.heading;
-      g.rotation.z = clamp(-Math.sin(t * 0.8 + a.phase) * 0.7, -0.8, 0.8);
+      const yawRate = angleDelta(oldHeading, a.heading) / Math.max(dt, 0.001);
+      const bank = clamp(-yawRate * 0.34, -0.75, 0.75);
+      g.rotation.z += clamp(bank - g.rotation.z, -3.2 * dt, 3.2 * dt);
       const gliding = Math.sin(t * 0.9 + a.phase * 3) > 0.2;
       this.flap(a, t, 16, gliding ? 0.06 : 0.6);
     } else if (a.fly === 'soar') {
       // buzzard: circling a thermal, wings held still
+      const oldYaw = g.rotation.y;
       a.soarA += (7 / a.soarR) * dt * (a.phase > 5 ? 1 : -1);
       a.soarR += Math.sin(t * 0.05 + a.phase) * 0.6 * dt * 10;
       a.soarR = clamp(a.soarR, 35, 110);
@@ -950,7 +1059,9 @@ export class AnimalManager {
       g.position.z = a.home.z + Math.sin(a.soarA) * a.soarR;
       g.position.y = a.homeY + a.alt[0] + (Math.sin(t * 0.04 + a.phase) + 1) * 0.5 * (a.alt[1] - a.alt[0]);
       g.rotation.y = -a.soarA + (a.phase > 5 ? 0 : Math.PI);
-      g.rotation.z = (a.phase > 5 ? -1 : 1) * 0.22;
+      const yawRate = angleDelta(oldYaw, g.rotation.y) / Math.max(dt, 0.001);
+      const bank = clamp(-yawRate * 1.4, -0.42, 0.42);
+      g.rotation.z += clamp(bank - g.rotation.z, -1.5 * dt, 1.5 * dt);
       this.flap(a, t, 3, Math.sin(t * 0.11 + a.phase) > 0.9 ? 0.4 : 0.02);
     } else if (a.fly === 'perch') {
       // wagtail life: bound-flight to a perch, sit and WAG, drop to the
@@ -1026,6 +1137,7 @@ export class AnimalManager {
   }
 
   tick(t, dt, camPos) {
+    this.updateHerds();
     for (const a of this.animals) {
       // distance cull: ground fauna beyond 650m is invisible anyway but
       // still costs its draw calls; sky fliers stay (silhouettes carry far).
@@ -1043,13 +1155,61 @@ export class AnimalManager {
       }
       if (a.medium === 'air') { this.tickAir(a, t, dt); continue; }
       if (a.medium === 'water') { this.tickWater(a, t, dt); continue; }
-      if (a.hop) { this.tickHop(a, t, dt); continue; }
+      if (a.hop) { this.tickHop(a, t, dt, camPos); continue; }
+      const g = a.group;
+      const deer = a.kind === 'roeDeer' || a.kind === 'roeBuck' || a.kind === 'redDeer';
+      if (deer && camPos) {
+        const cx = g.position.x - camPos.x, cz = g.position.z - camPos.z;
+        const d2 = cx * cx + cz * cz;
+        const cameraLow = camPos.y - heightAt(camPos.x, camPos.z) < 4.5;
+        if (cameraLow && d2 < 12 * 12) {
+          const d = Math.sqrt(d2) || 1;
+          const ax = d2 > 0.001 ? cx / d : Math.sin(a.phase);
+          const az = d2 > 0.001 ? cz / d : Math.cos(a.phase);
+          a.tx = g.position.x + ax * 20;
+          a.tz = g.position.z + az * 20;
+          a.state = 'walk';
+          a.timer = 8;
+          a.fleeing = true;
+        } else if (a.fleeing && d2 > 18 * 18) {
+          a.fleeing = false;
+        }
+      }
+      // A shared centroid keeps herds from leaking across a whole pasture.
+      // Deterministic slots around it provide cheap spacing without O(n²)
+      // neighbour checks or per-tick spatial-hash allocations.
+      if (a.herd && a.state !== 'walk') {
+        const herd = a.herd, n = herd.members.length;
+        const hx = g.position.x - herd.cx, hz = g.position.z - herd.cz;
+        const hd = Math.hypot(hx, hz);
+        // Slightly oversize the ring so normal steering error still leaves
+        // approximately the requested body-to-body clearance.
+        const slotR = n > 1 ? herd.profile.spacing * 1.75 / (2 * Math.sin(Math.PI / n)) : 0;
+        const slotA = herd.phase + a.herdIndex * TAU / n;
+        const sx = herd.cx + Math.sin(slotA) * slotR;
+        const sz = herd.cz + Math.cos(slotA) * slotR;
+        const slotD = Math.hypot(sx - g.position.x, sz - g.position.z);
+        if (hd > herd.profile.radius || slotD > herd.profile.spacing * 0.2) {
+          a.tx = sx; a.tz = sz;
+          a.state = 'walk'; a.timer = 30;
+        }
+      }
       a.timer -= dt;
       if (a.timer <= 0) {
         if (a.state !== 'walk' && rng() > a.grazeBias) {
           const ang = rng() * Math.PI * 2, r = Math.sqrt(rng()) * a.home.r;
           a.tx = a.home.x + Math.cos(ang) * r;
           a.tz = a.home.z + Math.sin(ang) * r;
+          if (a.herd) {
+            // Preserve the established RNG stream, but let herd members take
+            // short walks around their own loose slot instead of crossing the
+            // whole pasture through one another.
+            const n = a.herd.members.length;
+            const slotR = n > 1 ? a.herd.profile.spacing * 1.75 / (2 * Math.sin(Math.PI / n)) : 0;
+            const slotA = a.herd.phase + a.herdIndex * TAU / n;
+            a.tx = a.herd.cx + Math.sin(slotA) * slotR;
+            a.tz = a.herd.cz + Math.cos(slotA) * slotR;
+          }
           a.state = 'walk';
           a.timer = 30;
         } else {
@@ -1057,29 +1217,61 @@ export class AnimalManager {
           a.timer = 2.5 + rng() * 6;
         }
       }
-      const g = a.group;
       if (a.state === 'walk') {
-        const dx = a.tx - g.position.x, dz = a.tz - g.position.z;
+        let dx = a.tx - g.position.x, dz = a.tz - g.position.z;
         const dist = Math.hypot(dx, dz);
-        if (dist < 0.8) { a.state = 'graze'; a.timer = 3 + rng() * 5; }
+        if (dist < 0.65) { a.state = 'graze'; a.timer = 3 + rng() * 5; }
         else {
+          if (a.herd) {
+            const herd = a.herd, n = herd.members.length;
+            const hx = herd.cx - g.position.x, hz = herd.cz - g.position.z;
+            const hd = Math.hypot(hx, hz) || 1;
+            if (hd > herd.profile.radius * 0.72) {
+              const pull = clamp((hd - herd.profile.radius * 0.72) / (herd.profile.radius * 0.28), 0, 1.7);
+              dx += hx / hd * dist * pull;
+              dz += hz / hd * dist * pull;
+            }
+            if (n > 1) {
+              const slotR = herd.profile.spacing * 1.75 / (2 * Math.sin(Math.PI / n));
+              const slotA = herd.phase + a.herdIndex * TAU / n;
+              const sx = herd.cx + Math.sin(slotA) * slotR - g.position.x;
+              const sz = herd.cz + Math.cos(slotA) * slotR - g.position.z;
+              const sd = Math.hypot(sx, sz) || 1;
+              const slotPull = clamp(sd / (herd.profile.spacing * 0.45), 0, 1.8);
+              dx += sx / sd * dist * slotPull;
+              dz += sz / sd * dist * slotPull;
+            }
+          }
           const want = Math.atan2(dx, dz);
-          let da = want - a.heading;
-          while (da > Math.PI) da -= Math.PI * 2;
-          while (da < -Math.PI) da += Math.PI * 2;
-          a.heading += clamp(da, -1.6 * dt, 1.6 * dt);
+          const da = angleDelta(a.heading, want);
+          a.heading += clamp(da, -a.turnRate * dt, a.turnRate * dt);
           g.rotation.y = a.heading;
-          const sp = a.speed * (a.shoulder ? a.shoulder * 0.8 : 1);
-          g.position.x += Math.sin(a.heading) * sp * dt;
-          g.position.z += Math.cos(a.heading) * sp * dt;
+          const maxSpeed = a.speed * (a.shoulder ? a.shoulder * 0.8 : 1) * (a.fleeing ? 2.15 : 1);
+          const arriveAt = Math.max(2.2, maxSpeed * 4);
+          const desiredSpeed = maxSpeed * clamp((dist - 0.65) / (arriveAt - 0.65), 0, 1);
+          const oldSpeed = a.moveSpeed;
+          const accelRate = a.fleeing ? 2.4 : 0.9;
+          a.moveSpeed += clamp(desiredSpeed - a.moveSpeed, -1.35 * dt, accelRate * dt);
+          g.position.x += Math.sin(a.heading) * a.moveSpeed * dt;
+          g.position.z += Math.cos(a.heading) * a.moveSpeed * dt;
+          const accel = (a.moveSpeed - oldSpeed) / Math.max(dt, 0.001);
+          const pitch = clamp(accel * 0.035, -0.055, 0.055);
+          g.rotation.x = lerp(g.rotation.x, pitch, clamp(dt * 7, 0, 1));
+          const stride = maxSpeed > 0 ? clamp(a.moveSpeed / maxSpeed, 0, 1) : 0;
+          a.gaitP += dt * (2.5 + stride * 5.5);
+          const swing = Math.sin(a.gaitP);
+          for (let i = 0; i < a.legs.length; i++) {
+            a.legs[i].rotation.x = swing * 0.45 * stride * (i % 2 === 0 ? 1 : -1) * (i < 2 ? 1 : -0.9);
+          }
+          if (a.neck) a.neck.rotation.x = swing * 0.04 * stride;
+          g.position.y = heightAt(g.position.x, g.position.z);
+          g.position.y += a.legs.length ? Math.abs(swing) * 0.015 * (a.shoulder || 0.3) * stride
+            : Math.abs(swing) * 0.03 * stride;
         }
-        g.position.y = heightAt(g.position.x, g.position.z);
-        const swing = Math.sin(t * 7 + a.phase);
-        a.legs.forEach((leg, i) => { leg.rotation.x = swing * 0.45 * (i % 2 === 0 ? 1 : -1) * (i < 2 ? 1 : -0.9); });
-        if (a.neck) a.neck.rotation.x = Math.sin(t * 7 + a.phase) * 0.04;
-        g.position.y += a.legs.length ? Math.abs(Math.sin(t * 7 + a.phase)) * 0.015 * (a.shoulder || 0.3) : Math.abs(Math.sin(t * 12 + a.phase)) * 0.03;
       } else {
-        a.legs.forEach((leg) => { leg.rotation.x *= 0.85; });
+        a.moveSpeed = Math.max(0, a.moveSpeed - 1.35 * dt);
+        g.rotation.x = lerp(g.rotation.x, 0, clamp(dt * 7, 0, 1));
+        for (let i = 0; i < a.legs.length; i++) a.legs[i].rotation.x *= 0.85;
         if (a.state === 'graze' && a.neck) {
           // head down, with little nibble movements (peck for fowl)
           const target = a.shoulder ? 0.95 : 1.1;

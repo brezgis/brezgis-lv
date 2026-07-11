@@ -7,11 +7,11 @@
 // moraine, birch and alder along water, oaks on the terrace, manor lindens.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, fieldAt, farmSiteKept, nearStagePOI, distToRoad, LOC } from './landuse.js';
+import { forestDensity, distToRiver, fieldAt, farmSiteKept, nearStagePOI, distToRoadEx, ROAD_HALF_W, LOC } from './landuse.js';
 import { RIVER_PTS } from './geodata.js';
-import { RIVER, STREAM_CHANNELS, LAKE_SHORES, vegExcluded, lakeAt, riverAt, bankCharAt, lakeShoreDistAt, waterLevelAt } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, vegExcluded, lakeAt, riverAt, bankCharAt, bankCharSideAt, lakeShoreDistAt, waterLevelAt } from './riverzone.js';
 import { buildingAt } from './footprints.js';
-import { DWELLINGS_OSM } from './geodata-osm.js';
+import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { makeNoise, clamp, smoothstep, canvasTexture, mulberry32 } from './util.js';
 import { SPECIES, buildTree, buildFern, buildLog, buildStump, buildBoulder } from './treegen.js';
@@ -272,6 +272,69 @@ function sideOf(x, z, nx, nz, dist, inside) {
   return null;
 }
 
+// distToRoadEx is signed from the rendered road edge. Callers deliberately
+// add the canonical class half-width again: that is the clipping audit's
+// conservative verge/crown band, shared by every placement family below.
+function roadClear(era, x, z, margin = 0) {
+  const road = distToRoadEx(era, x, z);
+  return road.d >= ROAD_HALF_W[road.c] + margin;
+}
+function unionRoadClear(x, z, margin = 0) {
+  for (const era of [3, 4, 5]) if (!roadClear(era, x, z, margin)) return false;
+  return true;
+}
+
+// Static vegetation is built before the era footprint registry is warm.
+// Query the canonical modern rectangles directly for those passes.
+function osmBuildingAt(x, z, margin = 0) {
+  for (const [bx, bz, w, d, rot] of BUILDINGS_OSM) {
+    if (Math.hypot(x - bx, z - bz) > Math.hypot(w, d) * 0.5 + margin) continue;
+    const dx = x - bx, dz = z - bz;
+    const c = Math.cos(-rot), s = Math.sin(-rot);
+    const u = dx * c - dz * s, v = dx * s + dz * c;
+    if (Math.abs(u) < w * 0.5 + margin && Math.abs(v) < d * 0.5 + margin) return true;
+  }
+  return false;
+}
+
+const CROWN_R = {
+  alder: 4.2, birch: 6.4, spruce: 8.5, pine: 7.7, oak: 9.6,
+  linden: 8.6, apple: 3.3, snag: 4.0, shrub: 1.2,
+};
+const CROWN_REF_H = {
+  alder: 8.2, birch: 13.3, spruce: 17.4, pine: 19.5, oak: 13.3,
+  linden: 15, apple: 4, snag: 10.3, shrub: 1.2,
+};
+function crownRadius(kind, h, tier = 'full') {
+  const scale = clamp(h / CROWN_REF_H[kind], 0.72, 1.35);
+  return CROWN_R[kind] * scale * (tier === 'far' ? 1.34 : 1);
+}
+
+function finalTreeGate(era, x, z, y, crownR, roadMargin = crownR) {
+  if (vegExcluded(x, z, y, era, crownR)) return false;
+  if (buildingAt(era, x, z, crownR)) return false;
+  if (era === 5 && osmBuildingAt(x, z, crownR)) return false;
+  return roadClear(era, x, z, roadMargin);
+}
+
+// Same Gaussian built-area signal as the land-use town suppression, sampled
+// directly here only to identify where its ornamental complement belongs.
+function settlementSignalAt(x, z) {
+  let built = 0;
+  for (const [bx, bz, w, d] of BUILDINGS_OSM) {
+    const dx = x - bx, dz = z - bz, d2 = dx * dx + dz * dz;
+    if (d2 > 150 * 150) continue;
+    built += Math.max(20, w * d) * Math.exp(-d2 / (2 * 60 * 60));
+  }
+  return smoothstep(0.008, 0.022, built / 11300);
+}
+
+function cellRng(ix, iz, salt) {
+  let h = Math.imul(ix, 374761393) ^ Math.imul(iz, 668265263) ^ Math.imul(salt, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return mulberry32((h ^ (h >>> 16)) >>> 0);
+}
+
 // species build order (also impostor atlas order)
 const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'linden', 'apple', 'shrub', 'snag'];
 // instance capacity per species: [full, far]. Two tiers only — real geometry
@@ -442,6 +505,7 @@ export function buildVegetation(scene, renderer) {
   const boulderMat = windifyVeg(new THREE.MeshLambertMaterial({ vertexColors: true }));
   const boulders = [makeInstanced(buildBoulder(41), boulderMat, 600, true),
                     makeInstanced(buildBoulder(43), boulderMat, 600, true)];
+  boulders.forEach((b, i) => { b.name = `boulders:${i}`; });
   // small mossy forest-floor rocks, refreshed per era
   const rocks = makeInstanced(buildBoulder(53), boulderMat, 6000, false);
   group.add(rocks);
@@ -579,7 +643,25 @@ export function buildVegetation(scene, renderer) {
         // old-growth snags in the primeval eras (near only — no far impostor)
         if ((era === 1 || era === 2) && tier === 'full' && d > 0.5 && rng() < 0.045) kind = 'snag';
         const h = { spruce: 17, pine: 19, birch: 13, oak: 13, alder: 8, snag: 10 }[kind] * (0.75 + rng() * 0.55);
-        lists[kind][tier].push([x, y, z, h, rng() * 6.3, 0.86 + rng() * 0.28]);
+        const rot = rng() * 6.3, tint = 0.86 + rng() * 0.28;
+        let leanX = 0, leanZ = 0;
+        if (kind === 'alder') {
+          const rv = riverAt(x, z);
+          if (rv && rv.d < rv.hw + 18) {
+            const dx = rv.x - x, dz = rv.z - z, dl = Math.hypot(dx, dz) || 1;
+            const lean = 0.035 + cellRng(Math.floor(x / 9), Math.floor(z / 9), 0xa1de)() * 0.045;
+            // A slight deterministic Euler tilt toward the water makes the
+            // bank alders follow the light/open-channel direction.
+            leanX = dz / dl * lean;
+            leanZ = -dx / dl * lean;
+          }
+        }
+        const crownR = crownRadius(kind, h, tier);
+        // 0.6 crown clearance prevents visible canopy clipping without
+        // cutting unnaturally broad treeless corridors through the forest.
+        // All placement draws above still happen when this final gate rejects.
+        const treeOK = roadClear(era, x, z, 0.6 * crownR);
+        if (treeOK) lists[kind][tier].push([x, y, z, h, rot, tint, leanX, leanZ]);
 
         // understory in closed forest, near tiers only: ferns, hazel-like
         // underbrush and bramble tangles — an old-growth floor is BUSY
@@ -681,7 +763,9 @@ export function buildVegetation(scene, renderer) {
           if (forestDensity(era, ox, oz, oy) > 0.12) continue;
           if (vegExcluded(ox, oz, oy, era, 4) || buildingAt(era, ox, oz, 0.8)) continue;
           if (era >= 2 && fieldAt(era, ox, oz)) continue;
-          lists.molehill.push([ox, oy, oz, 0.7 + rng() * 0.6, rng() * 6.3]);
+          const sc = 0.7 + rng() * 0.6, rot = rng() * 6.3;
+          if (!roadClear(era, ox, oz, 0.3)) continue;
+          lists.molehill.push([ox, oy, oz, sc, rot]);
         }
       }
     }
@@ -696,18 +780,20 @@ export function buildVegetation(scene, renderer) {
           const a = (k / n) * 6.28 + si;
           const ox = dx + Math.cos(a) * (14 + (si % 5)), oz = dz + Math.sin(a) * (13 + (k * 3) % 6);
           const oy = heightAt(ox, oz);
-          if (vegExcluded(ox, oz, oy, era, 1) || buildingAt(era, ox, oz, 1)) continue;
           const tier = dPOI(ox, oz) < FULL_R ? 'full' : 'far';
-          lists.apple[tier].push([ox, oy, oz, 3.4 + ((si + k) % 4) * 0.35, si + k, 1]);
+          const h = 3.4 + ((si + k) % 4) * 0.35;
+          const crownR = crownRadius('apple', h, tier);
+          if (!finalTreeGate(era, ox, oz, oy, crownR)) continue;
+          lists.apple[tier].push([ox, oy, oz, h, si + k, 1]);
         }
       });
       for (let i = 0; i < 12; i++) {
         const x = S.x - 26 + (i % 4) * 8 + rng() * 2;
         const z = S.z - 34 + Math.floor(i / 4) * 8 + rng() * 2;
         const y = heightAt(x, z);
-        if (!vegExcluded(x, z, y, era, 1)) {
-          lists.apple.full.push([x, y, z, 3.6 + rng(), rng() * 6.3, 1]);
-        }
+        const h = 3.6 + rng(), rot = rng() * 6.3;
+        const crownR = crownRadius('apple', h);
+        if (finalTreeGate(era, x, z, y, crownR)) lists.apple.full.push([x, y, z, h, rot, 1]);
       }
       const M = LOC.MANOR;
       for (let i = 0; i < 9; i++) {
@@ -715,7 +801,13 @@ export function buildVegetation(scene, renderer) {
         const ax = M.x - 60 + 54 * t, az = M.z + 60 - 48 * t;
         for (const off of [-7, 7]) {
           const ox = ax + off * 0.7, oz = az + off * 0.7 * (54 / -48);
-          lists.linden.full.push([ox, heightAt(ox, oz), oz, 13 + rng() * 4, rng() * 6.3, 1]);
+          const oy = heightAt(ox, oz), h = 13 + rng() * 4, rot = rng() * 6.3;
+          const crownR = crownRadius('linden', h);
+          // The paired manor avenue is intentional roadside planting: crowns
+          // may overhang, but trunks still clear the carriageway by 1.2m.
+          if (finalTreeGate(era, ox, oz, oy, crownR, 1.2)) {
+            lists.linden.full.push([ox, oy, oz, h, rot, 1]);
+          }
         }
       }
       for (let i = 0; i < 18; i++) {
@@ -723,7 +815,41 @@ export function buildVegetation(scene, renderer) {
         const x = M.x - 10 + Math.cos(a) * rr, z = M.z - 50 + Math.sin(a) * rr * 0.8;
         if (Math.abs(x - M.x) < 24 && Math.abs(z - M.z) < 16) continue;
         if (z > M.z + 6 && Math.abs(x - M.x) < 40) continue;
-        lists[rng() < 0.6 ? 'linden' : 'oak'].full.push([x, heightAt(x, z), z, 12 + rng() * 6, rng() * 6.3, 1]);
+        const kind = rng() < 0.6 ? 'linden' : 'oak';
+        const h = 12 + rng() * 6, rot = rng() * 6.3, y = heightAt(x, z);
+        const crownR = crownRadius(kind, h);
+        if (finalTreeGate(era, x, z, y, crownR)) lists[kind].full.push([x, y, z, h, rot, 1]);
+      }
+    }
+    // Modern town yards: a separate, world-cell-stable ornamental layer in
+    // the built-density zone suppressed by land use. A 42m lattice is 5.67
+    // candidates/ha before crown/road/building gates, landing in the requested
+    // sparse 2-6/ha range without turning yards back into forest.
+    if (era === 5) {
+      const CELL = 42, half = EXT * 0.5;
+      const ix0 = Math.floor((HM_OFF_X - half) / CELL), ix1 = Math.ceil((HM_OFF_X + half) / CELL);
+      const iz0 = Math.floor((HM_OFF_Z - half) / CELL), iz1 = Math.ceil((HM_OFF_Z + half) / CELL);
+      const yardCands = [];
+      for (let iz = iz0; iz <= iz1; iz++) {
+        for (let ix = ix0; ix <= ix1; ix++) {
+          const rngY = cellRng(ix, iz, 0x79a2d);
+          const x = (ix + 0.5) * CELL + (rngY() - 0.5) * CELL * 0.64;
+          const z = (iz + 0.5) * CELL + (rngY() - 0.5) * CELL * 0.64;
+          const pick = rngY(), hJ = rngY(), rot = rngY() * 6.3, priority = rngY();
+          // The saturated core is where land use applies its strongest
+          // suppression; weaker fringes remain ordinary woodland/farm edge.
+          if (settlementSignalAt(x, z) < 0.995) continue;
+          const kind = pick < 0.5 ? 'birch' : pick < 0.75 ? 'linden' : 'apple';
+          const h = kind === 'birch' ? 9 + hJ * 4 : kind === 'linden' ? 10 + hJ * 4 : 3.2 + hJ * 1.1;
+          const y = heightAt(x, z), tier = dPOI(x, z) < FULL_R ? 'full' : 'far';
+          const crownR = crownRadius(kind, h, tier);
+          if (fieldAt(era, x, z) || !finalTreeGate(era, x, z, y, crownR)) continue;
+          yardCands.push([priority, kind, tier, x, y, z, h, rot]);
+        }
+      }
+      yardCands.sort((a, b) => a[0] - b[0]);
+      for (const [, kind, tier, x, y, z, h, rot] of yardCands.slice(0, 600)) {
+        lists[kind][tier].push([x, y, z, h, rot, 1]);
       }
     }
     // the sacred oak by the stead, and the attested summit oak on Brežģa kalns
@@ -767,10 +893,10 @@ export function buildVegetation(scene, renderer) {
         const pair = tier.make(cell, cellList.length);
         tier.cells.set(cell, pair);
         for (let j = 0; j < cellList.length; j++) {
-          const [[x, y, z, h, rot, tint], i] = cellList[j];
+          const [[x, y, z, h, rot, tint, leanX = 0, leanZ = 0], i] = cellList[j];
           const s = h / hRef;
           dummy.position.set(x, y - 0.08 * s, z);
-          dummy.rotation.set(0, rot, 0);
+          dummy.rotation.set(leanX, rot, leanZ);
           dummy.scale.set(s * (0.92 + 0.16 * ((i * 7919) % 13) / 13), s, s * (0.92 + 0.16 * ((i * 104729) % 17) / 17));
           dummy.updateMatrix();
           pair.bark.setMatrixAt(j, dummy.matrix);
@@ -830,9 +956,9 @@ export function buildVegetation(scene, renderer) {
         const widen = Math.min(1.3, Math.sqrt(stride)) * (era <= 2 ? 1.18 : 1);
         const fp = { entries: new Array(n), byCell: new Map(), widen };
         for (let i = 0; i < n; i++) {
-          const [x, y, z, h, , tint] = arr[(i * stride) | 0];
+          const [x, y, z, h, , tint, leanX = 0, leanZ = 0] = arr[(i * stride) | 0];
           dummy.position.set(x, y - 0.4, z);
-          dummy.rotation.set(0, (i * 2.399) % 6.283, 0);
+          dummy.rotation.set(leanX, (i * 2.399) % 6.283, leanZ);
           dummy.scale.set(h * 1.12 * widen, h, h * 1.12 * widen); // crowns overlap -> closed canopy
           dummy.updateMatrix();
           farM.setMatrixAt(i, dummy.matrix);
@@ -841,7 +967,7 @@ export function buildVegetation(scene, renderer) {
           const fv = 0.7 + 0.14 * tint;
           col.setRGB(fv * 0.94, fv, fv * 0.9);
           farM.setColorAt(i, col);
-          fp.entries[i] = [x, y, z, h, tint];
+          fp.entries[i] = [x, y, z, h, tint, leanX, leanZ];
           const ck = Math.floor(x / PROM_CELL) + ':' + Math.floor(z / PROM_CELL);
           let ca = fp.byCell.get(ck);
           if (!ca) fp.byCell.set(ck, ca = []);
@@ -958,9 +1084,17 @@ export function buildVegetation(scene, renderer) {
       const which = rng() < 0.5 ? 0 : 1;
       if (bi[which] >= 600) continue;
       const s = 0.25 + Math.pow(rng(), 2.2) * 2.4;
+      const rx = rng() * 0.4, ry = rng() * 6.3, rz = rng() * 0.4;
+      const sx = s * (0.8 + rng() * 0.5), sy = s * (0.7 + rng() * 0.5), sz = s * (0.8 + rng() * 0.5);
+      const margin = Math.max(sx, sy, sz);
+      // Static erratics must survive every late road layout, but not occupy
+      // any of them (or a modern OSM footprint). Keep every legacy draw above
+      // the new final gate so the unchanged candidates retain their transforms.
+      if (!unionRoadClear(x, z, margin) || osmBuildingAt(x, z, margin)) continue;
+      if ([3, 4, 5].some((era) => vegExcluded(x, z, y, era, margin))) continue;
       dummy.position.set(x, y - s * 0.3, z);
-      dummy.rotation.set(rng() * 0.4, rng() * 6.3, rng() * 0.4);
-      dummy.scale.set(s * (0.8 + rng() * 0.5), s * (0.7 + rng() * 0.5), s * (0.8 + rng() * 0.5));
+      dummy.rotation.set(rx, ry, rz);
+      dummy.scale.set(sx, sy, sz);
       dummy.updateMatrix();
       boulders[which].setMatrixAt(bi[which]++, dummy.matrix);
       if (s > 0.55) boulderColliders.push([x, z, s * 0.95]);
@@ -999,19 +1133,26 @@ export function buildVegetation(scene, renderer) {
     })();
     const reedMat = windify(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
     const reeds = makeInstanced(reedG, reedMat, 6000, false);
+    reeds.name = 'reeds';
     const rng = makeNoise(2211).rng;
     let i = 0;
     for (const lake of LAKE_SHORES) {
-      const poly = lake.poly;   // smoothed — reeds hug the RENDERED waterline
+      const poly = lake.poly;   // canonical rendered shoreline + side oracle
       for (let e = 0; e < poly.length; e++) {
         const [ax, az] = poly[e], [bx, bz] = poly[(e + 1) % poly.length];
         const len = Math.hypot(bx - ax, bz - az);
         const n = Math.ceil(len / 6);
+        const nx = -(bz - az) / (len || 1), nz = (bx - ax) / (len || 1);
         for (let k = 0; k < n && i < 6000; k++) {
           const t = (k + rng()) / n;
-          const px = ax + (bx - ax) * t + (rng() - 0.5) * 10;
-          const pz = az + (bz - az) * t + (rng() - 0.5) * 10;
-          dummy.position.set(px, lake.level - 0.35, pz);
+          const mx = ax + (bx - ax) * t, mz = az + (bz - az) * t;
+          const wet = sideOf(mx, mz, nx, nz, 0.25 + rng() * 3.25, true);
+          if (!wet) continue;
+          const [px, pz] = wet;
+          if (lakeAt(px, pz) !== lake || lakeShoreDistAt(px, pz) > 4) continue;
+          if (!unionRoadClear(px, pz, 0.3) || osmBuildingAt(px, pz, 0.3)) continue;
+          const y = heightAt(px, pz);
+          dummy.position.set(px, y, pz); // roots follow carved terrain: no floating clumps
           dummy.rotation.y = rng() * 6.3;
           const s = 0.7 + rng() * 0.8;
           dummy.scale.set(s, s, s);
@@ -1031,6 +1172,7 @@ export function buildVegetation(scene, renderer) {
           const rv = riverAt(px, pz);
           if (!rv || rv.d < rv.hw - 0.6 || rv.d > rv.hw + 1.8) continue;
           if (y > rv.level + 1.0 || y < rv.level - 0.45) continue;
+          if (!unionRoadClear(px, pz, 0.3) || osmBuildingAt(px, pz, 0.3)) continue;
           // raw OSM points sit off the smoothed spline on bends; verify
           // against the rugged edge so reeds keep wet feet, not deep water
           dummy.position.set(px, y - 0.1, pz);
@@ -1069,9 +1211,9 @@ export function buildVegetation(scene, renderer) {
       for (let si = 0; si < samples.length; si++) {
         const [x, z, level, hw] = samples[si];
         const [nx, nz] = sampleNormal(samples, si);
-        const ch = bankCharAt(x, z);
-        const nExp = 1.4 * (0.35 + 2.4 * ch.bar) * (1 - 0.85 * ch.mud) * density;
         for (const side of [-1, 1]) {
+          const ch = bankCharSideAt(x, z, side, chan);
+          const nExp = 1.4 * (0.35 + 2.4 * ch.bar) * (1 - 0.85 * ch.mud) * density;
           const rngS = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
           const n = poissonish(rngS, nExp);
           for (let k = 0; k < n; k++) {
@@ -1119,18 +1261,54 @@ export function buildVegetation(scene, renderer) {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       refreshBounds(mesh);
     };
-    const pebbleList = [
+    // Preserve the established stone budgets while side-aware bend character
+    // redistributes them between inner bars and outer muddy toes.
+    const pebbleList = strideSubsample([
       ...strideSubsample(riverPebbles, RIVER_STONE_CAP),
       ...strideSubsample(streamPebbles, STREAM_STONE_CAP),
-    ];
-    const cobbleList = [
+    ], 3860);
+    const cobbleList = strideSubsample([
       ...strideSubsample(riverCobbles, RIVER_STONE_CAP),
       ...strideSubsample(streamCobbles, STREAM_STONE_CAP),
-    ];
+    ], 1878);
     placeStones(pebbles, pebbleList, 0.55);
     placeStones(cobbles, cobbleList, 0.6);
     group.add(pebbles);
     group.add(cobbles);
+
+    // Sparse flood debris at eroding outer-bend toes. Reuse the existing log
+    // assets and cap the whole static dressing at 150 instances.
+    const driftMeshes = logGeos.map((l) => makeInstanced(l.geometry, logMat, 50, true));
+    driftMeshes.forEach((mesh, mi) => { mesh.name = `driftwood:${mi}`; });
+    const driftCounts = [0, 0, 0];
+    const samples = RIVER.samples;
+    for (let si = 0; si < samples.length && driftCounts.reduce((a, b) => a + b, 0) < 150; si++) {
+      const [x, z, , hw] = samples[si];
+      const [nx, nz] = sampleNormal(samples, si), tx = -nz, tz = nx;
+      for (const side of [-1, 1]) {
+        const ch = bankCharSideAt(x, z, side, RIVER);
+        if (ch.outer < 0.35 || ch.erosion < 0.45) continue;
+        const rngD = mulberry32(0x64726966 + si * 2 + (side > 0 ? 1 : 0));
+        if (rngD() > 0.035 * ch.outer) continue;
+        const off = hw + 0.55 + rngD() * 1.8;
+        const px = x + nx * side * off, pz = z + nz * side * off;
+        const py = heightAt(px, pz), which = (rngD() * 3) | 0;
+        const sc = 0.65 + rngD() * 0.55;
+        if (driftCounts[which] >= 50 || lakeAt(px, pz) || waterLevelAt(px, pz, 5) > py + 0.08) continue;
+        if (!unionRoadClear(px, pz, sc) || osmBuildingAt(px, pz, sc)) continue;
+        dummy.position.set(px, py + 0.02, pz);
+        dummy.rotation.set(0, -Math.atan2(tz, tx) + (rngD() - 0.5) * 0.8, 0);
+        dummy.scale.setScalar(sc);
+        dummy.updateMatrix();
+        driftMeshes[which].setMatrixAt(driftCounts[which]++, dummy.matrix);
+      }
+    }
+    driftMeshes.forEach((mesh, mi) => {
+      mesh.count = driftCounts[mi];
+      mesh.instanceMatrix.needsUpdate = true;
+      refreshBounds(mesh);
+      group.add(mesh);
+    });
   }
 
   // ---- wet-margin colonies: sedge, cattail, yellow flag iris ---------------
@@ -1138,13 +1316,12 @@ export function buildVegetation(scene, renderer) {
   // as the stone scatter above (bankCharAt's mud/bar split); a colony-patch
   // fbm keeps sedge and iris clumped instead of a uniform sprinkle, and
   // cattail seeds discrete stands of 5-14 stalks rather than one per point.
-  // Static across every era, same as the reeds above — wetlands don't care
-  // what century it is, and buildingAt/distToRoad are checked against era 4
-  // (the fullest footprint + road network) as the one persistent reference.
+  // Static across every era, same as the reeds above — use the modern OSM
+  // footprints directly because this pass runs before the registry is warm.
   {
     const wetPatch = makeNoise(8181);
     const patchAt = (x, z) => smoothstep(0.26, 0.46, wetPatch.fbm(x * 0.028, z * 0.028, 2));
-    const blocked = (x, z) => buildingAt(4, x, z, 2) || distToRoad(4, x, z) < 2;
+    const blocked = (x, z) => osmBuildingAt(x, z, 2) || !roadClear(5, x, z, 2);
 
     // -- geometry: 12-blade arcing clump, darker/stiffer than a reed --------
     const sedgeGeom = (() => {
@@ -1241,10 +1418,15 @@ export function buildVegetation(scene, renderer) {
     })();
 
     const wetMat = windify(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
-    const SEDGE_CAP = 22000, CATTAIL_CAP = 9000, IRIS_CAP = 2500;
+    // Side-aware bank character can move colonies between banks, but must not
+    // inflate the established static flora budget.
+    const SEDGE_CAP = 8172, CATTAIL_CAP = 9000, IRIS_CAP = 374;
     const sedges = makeInstanced(sedgeGeom, wetMat, SEDGE_CAP, false);
     const cattails = makeInstanced(cattailGeom, wetMat, CATTAIL_CAP, false);
     const irises = makeInstanced(irisGeom, wetMat, IRIS_CAP, false);
+    sedges.name = 'sedges';
+    cattails.name = 'cattails';
+    irises.name = 'irises';
 
     const placeWet = (mesh, arr, cap) => {
       const list = strideSubsample(arr, cap);
@@ -1270,11 +1452,11 @@ export function buildVegetation(scene, renderer) {
         const [x, z, , hw] = samples[si];
         const [nx, nz] = sampleNormal(samples, si);
         const tx = -nz, tz = nx;
-        const ch = bankCharAt(x, z);
         const patch = patchAt(x, z);
         if (patch <= 0) continue;
-        const density = 0.5 * (0.4 + 1.6 * ch.mud) * patch;  // ~1/2m, mud-weighted, patch-gated
         for (const side of [-1, 1]) {
+          const ch = bankCharSideAt(x, z, side, chan);
+          const density = 0.5 * (0.4 + 1.6 * ch.mud) * patch; // ~1/2m, side-aware mud weighting
           const rng = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
           const n = poissonish(rng, density * 4);            // ~4m of arc per sample
           for (let k = 0; k < n; k++) {
@@ -1301,9 +1483,9 @@ export function buildVegetation(scene, renderer) {
         const [x, z, level, hw] = samples[si];
         const [nx, nz] = sampleNormal(samples, si);
         const tx = -nz, tz = nx;
-        const ch = bankCharAt(x, z);
-        if (ch.mud < 0.25) continue;                        // mud reaches only
         for (const side of [-1, 1]) {
+          const ch = bankCharSideAt(x, z, side, chan);
+          if (ch.mud < 0.25) continue;                      // mud reaches only
           const rng = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
           if (rng() > 0.22) continue;                        // sparse colony seeding
           const n = 5 + ((rng() * 10) | 0);                   // colonies of 5-14
@@ -1327,9 +1509,10 @@ export function buildVegetation(scene, renderer) {
         const [x, z, , hw] = samples[si];
         const [nx, nz] = sampleNormal(samples, si);
         const tx = -nz, tz = nx;
-        const ch = bankCharAt(x, z);
-        if (ch.mud < 0.3 || patchAt(x, z) <= 0) continue;    // muddy, in the sedge zone
+        if (patchAt(x, z) <= 0) continue;
         for (const side of [-1, 1]) {
+          const ch = bankCharSideAt(x, z, side, chan);
+          if (ch.mud < 0.3) continue;                        // muddy, in the sedge zone
           const rng = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
           const n = poissonish(rng, 4 / 25);                  // 1 clump per ~25m
           for (let k = 0; k < n; k++) {
@@ -1487,9 +1670,9 @@ export function buildVegetation(scene, renderer) {
       // demote: restore the impostor's real matrix, free the pool slot
       for (const [idx, slot] of [...pool.active]) {
         if (want.has(idx)) continue;
-        const [x, y, z, h] = fp.entries[idx];
+        const [x, y, z, h, , leanX = 0, leanZ = 0] = fp.entries[idx];
         dummy.position.set(x, y - 0.4, z);
-        dummy.rotation.set(0, (idx * 2.399) % 6.283, 0);
+        dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
         dummy.scale.set(h * 1.12 * fp.widen, h, h * 1.12 * fp.widen);
         dummy.updateMatrix();
         farM.setMatrixAt(idx, dummy.matrix);
@@ -1506,10 +1689,10 @@ export function buildVegetation(scene, renderer) {
         farM.setMatrixAt(idx, _pm);
         farM.instanceMatrix.addUpdateRange(idx * 16, 16);
         farDirty = true;
-        const [x, y, z, h, tint] = fp.entries[idx];
+        const [x, y, z, h, tint, leanX = 0, leanZ = 0] = fp.entries[idx];
         const s = h / pool.hRef;
         dummy.position.set(x, y - 0.08 * s, z);
-        dummy.rotation.set(0, (idx * 2.399) % 6.283, 0);
+        dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
         pool.bark.setMatrixAt(slot, dummy.matrix);

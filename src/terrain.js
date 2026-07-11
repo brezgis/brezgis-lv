@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
-import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, confluenceAt, lakeShoreSignedDistAt } from './riverzone.js';
 import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
@@ -27,9 +27,12 @@ for (const row of riverRows) {
   if (!riverRowBuckets.has(k)) riverRowBuckets.set(k, []);
   riverRowBuckets.get(k).push(row);
 }
-function riverRowFloor(x, z) {
+function riverRowFloor(x, z, h) {
+  // returns h lifted by the meander-pan floor. Per-row lifts FADE toward the
+  // row's along-limit — a hard cutoff snapped the floor on/off across one
+  // sample where reaches end (worst at confluences, ~1.8m walls).
   const bx = Math.floor(x / RIVER_ROW_BK), bz = Math.floor(z / RIVER_ROW_BK);
-  let floor = -Infinity;
+  let lifted = h;
   for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
     const arr = riverRowBuckets.get((bx + dx) * 8192 + (bz + dz));
     if (!arr) continue;
@@ -38,12 +41,17 @@ function riverRowFloor(x, z) {
       const along = Math.abs(rx * row.tx + rz * row.tz);
       if (along > 10) continue;              // lateral bank row, not along-channel distance
       const lateral = Math.abs(rx * row.nx + rz * row.nz);
-      if (lateral <= row.hw + 4.2 || lateral > row.hw + 15) continue;
-      const minH = row.level - 0.5 + 0.75 * smoothstep(row.hw + 4.2, row.hw + 15, lateral);
-      floor = Math.max(floor, Math.min(row.level - 0.55, minH));
+      if (lateral <= row.hw + 4.2 || lateral > row.hw + 24) continue;
+      const minH = row.level - 0.5 + 0.75 * smoothstep(row.hw + 4.2, row.hw + 15, Math.min(lateral, row.hw + 15));
+      const target = Math.min(row.level - 0.55, minH);
+      if (target <= h) continue;
+      // fade at the row's along-limit AND at the lateral outer edge — hard
+      // cutoffs snapped ~1.7m walls where compound mouth pans outran the window
+      const w = (1 - smoothstep(7, 10, along)) * (1 - smoothstep(row.hw + 15, row.hw + 24, lateral));
+      lifted = Math.max(lifted, h + w * (target - h));
     }
   }
-  return floor;
+  return lifted;
 }
 
 // ---- one-time sculpt of the base field ----------------------------------
@@ -287,28 +295,65 @@ export function heightAt(x, z) {
   } else {
     const inPond = Math.hypot((x - (LOC.POND.x + 4)) / 56, (z - LOC.POND.z) / 38) < 1.25;
     const rv = riverAt(x, z);
+    const st = streamAt(x, z);
+    // inside a mouth zone the bank LIPS would dam the receiving channel —
+    // feather them out instead of a hard cut (confluenceAt is non-null only
+    // for stream points near their receiver, so the cost stays off hot land)
+    const conf = st ? confluenceAt(x, z, 6) : null;
     if (rv) {
-      if (rv.d <= rv.hw * 0.72) h = Math.min(h, rv.level - 2.45);
-      else if (rv.d <= rv.hw + 4.2) h = Math.min(h, rv.level - 0.55);
-      else if (rv.d <= rv.hw + 15 && !inPond) {
+      if (rv.d <= rv.hw + 4.2) {
+        // bed → shelf used to be a hard cut at 0.72×hw (≈1.9m one-sample jumps)
+        const k = smoothstep(rv.hw * 0.65, rv.hw * 0.79, rv.d);
+        h = Math.min(h, rv.level - lerp(2.45, 0.55, k));
+        // the bench outer edge was a bare wall: shelf only CEILINGS terrain
+        // while the ramp beyond hw+4.2 floors it at level−0.5 — floor the
+        // bench too, fading inward, and open the floor where a tributary
+        // legitimately cuts through the bench on its way in
+        const rfl = smoothstep(rv.hw + 1.2, rv.hw + 4.2, rv.d) * (st ? smoothstep(0.4, 2.4, st.d - st.hw) : 1);
+        if (rfl > 0 && h < rv.level - 0.55) h += rfl * (rv.level - 0.55 - h);
+      } else if (rv.d <= rv.hw + 15 && !inPond) {
         h = Math.max(h, rv.level - 0.5 + 0.75 * smoothstep(rv.hw + 4.2, rv.hw + 15, rv.d));
       }
-      if (rv.d >= rv.hw - 1.35 && rv.d <= rv.hw + 2.7) h = Math.max(h, rv.level - 0.68);
+      if (rv.d >= rv.hw - 1.35 && rv.d <= rv.hw + 2.7) {
+        // river lip, suppressed across a tributary throat
+        const lipK = conf ? smoothstep(0.6, 3.6, conf.stream.d - conf.stream.hw) : 1;
+        if (h < rv.level - 0.68) h += lipK * (rv.level - 0.68 - h);
+      }
     }
-    const st = streamAt(x, z);
     if (st) {
-      if (st.d <= st.hw * 0.85) h = Math.min(h, st.level - 1.15);
-      else if (st.d <= st.hw + 1.6) h = Math.min(h, st.level - 0.4);
-      if (st.d >= st.hw - 1.35 && st.d <= st.hw + 2.7) h = Math.max(h, st.level - 0.68);
+      // mouth factor: 1 on an ordinary reach, →0 inside the receiving body
+      let lipK = 1;
+      if (conf) {
+        if (conf.type === 'lake') lipK = smoothstep(0, 4, lakeShoreSignedDistAt(x, z));
+        else lipK = rv ? smoothstep(1.5, 7.5, rv.d - rv.hw) : 1;
+      }
+      if (st.d <= st.hw + 1.6) {
+        const k = smoothstep(st.hw * 0.79, st.hw * 0.91, st.d);
+        h = Math.min(h, st.level - lerp(1.15, 0.4, k));
+        // bench floor as for the river, suppressed inside the mouth so the
+        // trench can hand over to the receiver's deeper bed
+        const sfl = smoothstep(st.hw + 0.3, st.hw + 1.6, st.d) * lipK;
+        if (sfl > 0 && h < st.level - 0.4) h += sfl * (st.level - 0.4 - h);
+      }
+      if (st.d >= st.hw - 1.35 && st.d <= st.hw + 2.7) {
+        // stream lip, suppressed inside the receiving river/lake mouth
+        if (h < st.level - 0.68) h += lipK * (st.level - 0.68 - h);
+      }
     }
-    if (!inPond && !(rv && rv.d < 0.35) && !(st && st.d <= st.hw * 0.85)) {
-      h = Math.max(h, riverRowFloor(x, z));
+    if (!inPond && !(rv && rv.d <= rv.hw + 4.2) && !(st && st.d <= st.hw + 1.6)) {
+      // the meander-pan floor is a LAND fix — the old rv.d<0.35 guard let
+      // cross-bend and tributary rows floor the bed itself at mouths/necks
+      h = riverRowFloor(x, z, h);
     }
     const dSh = lakeShoreWavyAt(x, z);
-    if (dSh < 9 && !(rv && rv.d < rv.hw + 4)) {
+    if (dSh < 14 && !(rv && rv.d < rv.hw + 4)) {
       for (const lake of LAKE_SHORES) {
         if (x < lake.minX - CELL || x > lake.maxX + CELL || z < lake.minZ - CELL || z > lake.maxZ + CELL) continue;
-        if (h > lake.level) h = Math.min(h, lake.level + 0.12 + (dSh / 9) * 1.1);
+        const cap = lake.level + 0.12 + (dSh / 9) * 1.1;
+        // the shelf clamp used to vanish at a hard dSh=9 (a step wherever the
+        // hinterland sits above the cap) — fade its strength out over 9-14m
+        const k = 1 - smoothstep(9, 14, dSh);
+        if (h > cap) h -= k * (h - cap);
         break;
       }
     }
@@ -450,7 +495,10 @@ export function paintEra(era) {
         'data:image/jpeg;base64,' + SAT_JPEG_B64,
         (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; }
       );
+      // the raw Sentinel composite reads darker than the painted eras under
+      // the same Lambert rig — lift it so era-5 noon matches their noon
       satMaterial = detailify(new THREE.MeshLambertMaterial({ map: tex }), 0.55);
+      satMaterial.color.setScalar(1.35);
     }
     terrainMesh.material = satMaterial;
     return;

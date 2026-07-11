@@ -8,8 +8,9 @@
 // reshuffles the sward — new growth only fades in at the feathered rim.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, distToRoad, fieldAt, PADS, ERA2_FARMS } from './landuse.js';
+import { forestDensity, distToRiver, distToRoad, distToRoadEx, ROAD_HALF_W, fieldAt, PADS, ERA2_FARMS } from './landuse.js';
 import { vegExcluded, lakeShoreWavyAt, lakeAt } from './riverzone.js';
+import { buildingAt } from './footprints.js';
 import { mulberry32, smoothstep as smoothstepJ } from './util.js';
 import { WIND } from './vegetation.js';
 
@@ -278,7 +279,12 @@ export function buildGrass(scene) {
           if (gate < smoothstepJ(R * 0.75, R, d)) continue;   // feathered rim
           const y = heightAt(x, z);
           if (forestDensity(era, x, z, y) > 0.3) continue;
-          if (era >= 2 && (fieldAt(era, x, z) || distToRoad(era, x, z) < 2)) continue;
+          if (buildingAt(era, x, z, 0.3)) continue;
+          if (era >= 2) {
+            if (fieldAt(era, x, z)) continue;
+            const road = distToRoadEx(era, x, z);
+            if (road.d < ROAD_HALF_W[road.c] + 0.3) continue;
+          }
           const dRiv = distToRiver(x, z);
           if (vegExcluded(x, z, y, era, 3.5)) continue;
           const kind = dRiv < 45 ? (pick < 0.7 ? 0 : 2) : (pick < 0.55 ? 1 : 2);

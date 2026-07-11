@@ -535,6 +535,7 @@ async function boot() {
     }
   }
   window.__gov = gov;
+  window.__renderer = renderer;
 
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);

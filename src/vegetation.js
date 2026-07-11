@@ -216,6 +216,11 @@ function makeInstanced(geo, mat, count, shadows) {
   return m;
 }
 
+function refreshBounds(m) {
+  m.computeBoundingSphere();
+  m.frustumCulled = true;
+}
+
 function strideSubsample(arr, cap) {
   const n = Math.min(arr.length, cap);
   const stride = n > 0 ? arr.length / n : 1;
@@ -360,23 +365,30 @@ export function buildVegetation(scene, renderer) {
   });
 
   // ---- near-tier instanced meshes ------------------------------------------
-  // meshes[key] = { full: [{bark, cards}] }
+  // meshes[key] = { full: [{cells: Map<gridCell, {bark, cards}>}] }
+  const NEAR_CELL = 256;
   const meshes = {};
   for (const key of SP_KEYS) {
     const S = species[key];
-    const mk = (variant, cap, shadows) => {
-      const bark = makeInstanced(variant.bark, S.bMat, cap, shadows);
+    const depthMat = S.cMat ? cardDepthMaterial(S.twigAtlas) : null;
+    const mk = (variant, cap, vi, cell) => {
+      const bark = makeInstanced(variant.bark, S.bMat, cap, true);
       let cards = null;
       if (S.cMat) {
-        cards = makeInstanced(variant.cards, S.cMat, cap, shadows);
-        cards.customDepthMaterial = cardDepthMaterial(S.twigAtlas);
+        cards = makeInstanced(variant.cards, S.cMat, cap, true);
+        cards.customDepthMaterial = depthMat;
       }
+      bark.name = `near:${key}:${vi}:${cell}:bark`;
+      if (cards) cards.name = `near:${key}:${vi}:${cell}:cards`;
       group.add(bark);
       if (cards) group.add(cards);
       return { bark, cards };
     };
     meshes[key] = {
-      full: S.full.map((v) => mk(v, Math.ceil(CAPS[key][0] / S.full.length), true)),
+      full: S.full.map((variant, vi) => ({
+        capacity: Math.ceil(CAPS[key][0] / S.full.length), cells: new Map(),
+        make: (cell, cap) => mk(variant, cap, vi, cell),
+      })),
       fullH: S.full.map((v) => v.skel.height),
     };
   }
@@ -726,38 +738,57 @@ export function buildVegetation(scene, renderer) {
     return lists;
   }
 
-  function fillTier(meshArr, heights, arr) {
+  function fillTier(tiers, heights, arr) {
     // round-robin across variants
-    const per = meshArr.map(() => []);
-    for (let i = 0; i < arr.length; i++) per[i % meshArr.length].push(arr[i]);
-    meshArr.forEach((pair, vi) => {
+    const per = tiers.map(() => []);
+    for (let i = 0; i < arr.length; i++) per[i % tiers.length].push(arr[i]);
+    tiers.forEach((tier, vi) => {
       const list = per[vi];
-      const capacity = pair.bark.instanceMatrix.count;
-      const n = Math.min(list.length, capacity);
+      const n = Math.min(list.length, tier.capacity);
       // over cap: stride-subsample — first-n would drop everything north of
       // some grid row (the lists come from a south-to-north scan)
       const stride = n > 0 ? list.length / n : 1;
       const hRef = heights[vi];
+      const byCell = new Map();
       for (let i = 0; i < n; i++) {
-        const [x, y, z, h, rot, tint] = list[(i * stride) | 0];
-        const s = h / hRef;
-        dummy.position.set(x, y - 0.08 * s, z);
-        dummy.rotation.set(0, rot, 0);
-        dummy.scale.set(s * (0.92 + 0.16 * ((i * 7919) % 13) / 13), s, s * (0.92 + 0.16 * ((i * 104729) % 17) / 17));
-        dummy.updateMatrix();
-        pair.bark.setMatrixAt(i, dummy.matrix);
-        if (pair.cards) pair.cards.setMatrixAt(i, dummy.matrix);
-        col.setScalar(tint);
-        pair.bark.setColorAt(i, col);
-        if (pair.cards) pair.cards.setColorAt(i, col);
+        const e = list[(i * stride) | 0];
+        const cell = Math.floor(e[0] / NEAR_CELL) + ':' + Math.floor(e[2] / NEAR_CELL);
+        let cellList = byCell.get(cell);
+        if (!cellList) byCell.set(cell, cellList = []);
+        cellList.push([e, i]);
       }
-      pair.bark.count = n;
-      pair.bark.instanceMatrix.needsUpdate = true;
-      if (pair.bark.instanceColor) pair.bark.instanceColor.needsUpdate = true;
-      if (pair.cards) {
-        pair.cards.count = n;
-        pair.cards.instanceMatrix.needsUpdate = true;
-        if (pair.cards.instanceColor) pair.cards.instanceColor.needsUpdate = true;
+      for (const pair of tier.cells.values()) {
+        group.remove(pair.bark);
+        pair.bark.dispose(); // frees instance attributes only — geometry/material are shared per variant
+        if (pair.cards) { group.remove(pair.cards); pair.cards.dispose(); }
+      }
+      tier.cells.clear();
+      for (const [cell, cellList] of byCell) {
+        const pair = tier.make(cell, cellList.length);
+        tier.cells.set(cell, pair);
+        for (let j = 0; j < cellList.length; j++) {
+          const [[x, y, z, h, rot, tint], i] = cellList[j];
+          const s = h / hRef;
+          dummy.position.set(x, y - 0.08 * s, z);
+          dummy.rotation.set(0, rot, 0);
+          dummy.scale.set(s * (0.92 + 0.16 * ((i * 7919) % 13) / 13), s, s * (0.92 + 0.16 * ((i * 104729) % 17) / 17));
+          dummy.updateMatrix();
+          pair.bark.setMatrixAt(j, dummy.matrix);
+          if (pair.cards) pair.cards.setMatrixAt(j, dummy.matrix);
+          col.setScalar(tint);
+          pair.bark.setColorAt(j, col);
+          if (pair.cards) pair.cards.setColorAt(j, col);
+        }
+        pair.bark.count = cellList.length;
+        pair.bark.instanceMatrix.needsUpdate = true;
+        if (pair.bark.instanceColor) pair.bark.instanceColor.needsUpdate = true;
+        refreshBounds(pair.bark);
+        if (pair.cards) {
+          pair.cards.count = cellList.length;
+          pair.cards.instanceMatrix.needsUpdate = true;
+          if (pair.cards.instanceColor) pair.cards.instanceColor.needsUpdate = true;
+          refreshBounds(pair.cards);
+        }
       }
     });
   }
@@ -838,6 +869,7 @@ export function buildVegetation(scene, renderer) {
       }
       rocks.count = n;
       rocks.instanceMatrix.needsUpdate = true;
+      refreshBounds(rocks);
     }
     // forest-floor still life
     for (const [key, mesh, place] of microProps) {
@@ -851,6 +883,7 @@ export function buildVegetation(scene, renderer) {
       }
       mesh.count = n;
       mesh.instanceMatrix.needsUpdate = true;
+      if (key !== 'molehill' && key !== 'litter') refreshBounds(mesh);
     }
     // ferns
     {
@@ -867,6 +900,7 @@ export function buildVegetation(scene, renderer) {
       }
       ferns.count = n;
       ferns.instanceMatrix.needsUpdate = true;
+      refreshBounds(ferns);
     }
     // deadfall
     logs.forEach((mesh, mi) => {
@@ -881,6 +915,7 @@ export function buildVegetation(scene, renderer) {
       }
       mesh.count = n;
       mesh.instanceMatrix.needsUpdate = true;
+      refreshBounds(mesh);
     });
     {
       let n = 0;
@@ -894,6 +929,7 @@ export function buildVegetation(scene, renderer) {
       }
       stumps.count = n;
       stumps.instanceMatrix.needsUpdate = true;
+      refreshBounds(stumps);
     }
   }
 
@@ -929,7 +965,7 @@ export function buildVegetation(scene, renderer) {
       boulders[which].setMatrixAt(bi[which]++, dummy.matrix);
       if (s > 0.55) boulderColliders.push([x, z, s * 0.95]);
     }
-    boulders.forEach((b, i) => { b.count = bi[i]; b.instanceMatrix.needsUpdate = true; });
+    boulders.forEach((b, i) => { b.count = bi[i]; b.instanceMatrix.needsUpdate = true; refreshBounds(b); });
   }
   {
     // reed clumps along the real lake shorelines and slack river reaches
@@ -1008,6 +1044,7 @@ export function buildVegetation(scene, renderer) {
     }
     reeds.count = i;
     reeds.instanceMatrix.needsUpdate = true;
+    refreshBounds(reeds);
     group.add(reeds);
 
     // washed gravel bars: the stones follow the SAME rugged riverzone rows as
@@ -1080,6 +1117,7 @@ export function buildVegetation(scene, renderer) {
       mesh.count = i;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      refreshBounds(mesh);
     };
     const pebbleList = [
       ...strideSubsample(riverPebbles, RIVER_STONE_CAP),
@@ -1220,6 +1258,7 @@ export function buildVegetation(scene, renderer) {
       }
       mesh.count = list.length;
       mesh.instanceMatrix.needsUpdate = true;
+      refreshBounds(mesh);
     };
 
     const sedgeCands = [], cattailCands = [], irisCands = [];

@@ -5,12 +5,46 @@ import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
-import { makeNoise, clamp, lerp, smoothstep, pointInPoly, sampleSpline, sampleSplineEven, chaikinPoly } from './util.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt } from './riverzone.js';
+import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
 const noise = makeNoise(1907);
 const G = HM_GRID, SPAN = HM_SPAN, OX = HM_OFF_X, OZ = HM_OFF_Z;
 const field = decodeHeightmap(); // Float32, row-major, north = row 0
+
+const RIVER_ROW_BK = 32;
+const riverRowBuckets = new Map();
+const riverRows = RIVER.samples.map((p, i) => {
+  const a = RIVER.samples[Math.max(0, i - 1)], b = RIVER.samples[Math.min(RIVER.samples.length - 1, i + 1)];
+  let tx = b[0] - a[0], tz = b[1] - a[1];
+  const len = Math.hypot(tx, tz) || 1;
+  tx /= len; tz /= len;
+  return { x: p[0], z: p[1], level: p[2], hw: p[3], tx, tz, nx: -tz, nz: tx };
+});
+for (const row of riverRows) {
+  const k = Math.floor(row.x / RIVER_ROW_BK) * 8192 + Math.floor(row.z / RIVER_ROW_BK);
+  if (!riverRowBuckets.has(k)) riverRowBuckets.set(k, []);
+  riverRowBuckets.get(k).push(row);
+}
+function riverRowFloor(x, z) {
+  const bx = Math.floor(x / RIVER_ROW_BK), bz = Math.floor(z / RIVER_ROW_BK);
+  let floor = -Infinity;
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    const arr = riverRowBuckets.get((bx + dx) * 8192 + (bz + dz));
+    if (!arr) continue;
+    for (const row of arr) {
+      const rx = x - row.x, rz = z - row.z;
+      const along = Math.abs(rx * row.tx + rz * row.tz);
+      if (along > 10) continue;              // lateral bank row, not along-channel distance
+      const lateral = Math.abs(rx * row.nx + rz * row.nz);
+      if (lateral <= row.hw + 4.2 || lateral > row.hw + 15) continue;
+      const minH = row.level - 0.5 + 0.75 * smoothstep(row.hw + 4.2, row.hw + 15, lateral);
+      floor = Math.max(floor, Math.min(row.level - 0.55, minH));
+    }
+  }
+  return floor;
+}
 
 // ---- one-time sculpt of the base field ----------------------------------
 function cellToWorld(gx, gy) {
@@ -39,6 +73,37 @@ function cellToWorld(gx, gy) {
       if (cand < field[i]) field[i] = cand;
     }
   }
+  function pin(px, pz, target) {
+    const [cx, cy] = worldToCell(px, pz);
+    const gx0 = Math.floor(cx), gy0 = Math.floor(cy);
+    for (let dy = 0; dy <= 1; dy++) for (let dx = 0; dx <= 1; dx++) {
+      const gx = Math.min(G - 1, Math.max(0, gx0 + dx));
+      const gy = Math.min(G - 1, Math.max(0, gy0 + dy));
+      const i = gy * G + gx;
+      if (target < field[i]) field[i] = target;
+    }
+  }
+  function normalAt(samples, i) {
+    const a = samples[Math.max(0, i - 1)], b = samples[Math.min(samples.length - 1, i + 1)];
+    let dx = b[0] - a[0], dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len; dz /= len;
+    return [-dz, dx];
+  }
+  function pinWaterRows() {
+    // final pins: the DEM grid is 27.6m, water rows are ~4m — without
+    // four-corner anchors heightAt() can interpolate back above the bed
+    for (let i = 0; i < RIVER.samples.length; i++) {
+      const [x, z, y, hw] = RIVER.samples[i];
+      const [nx, nz] = normalAt(RIVER.samples, i);
+      pin(x, z, y - 2.45);
+      pin(x + nx * hw * 0.6, z + nz * hw * 0.6, y - 0.55);
+      pin(x - nx * hw * 0.6, z - nz * hw * 0.6, y - 0.55);
+    }
+    for (const chan of STREAM_CHANNELS) {
+      for (const [x, z, y] of chan.samples) pin(x, z, y - 1.15);
+    }
+  }
   // soft valley profile — kept narrow: the old 50m radius carved whole
   // floodplains a metre below the waterline and the river read as an
   // elevated canal crossing a sunken pan
@@ -47,24 +112,26 @@ function cellToWorld(gx, gy) {
   // mesh follows the Catmull-Rom curve between the OSM points, which bulges
   // off the point-stamped corridor on bends and left the river beheaded by
   // untouched ground in places
-  const waterSamples = [];   // [x, z, level] along every carved spline
-  // ARC-LENGTH-EVEN stamping every ~5m: parametric sampling clustered where
-  // the OSM points cluster and left 25-80m unstamped gaps on long segments
-  // (the river read as disconnected pools in exactly those reaches)
-  for (const [x, z, y] of sampleSplineEven(RIVER_PTS, 5)) {
-    stamp(x, z, 26, 9, y - 1.9);
-    // shallow SHELF to 16m: guarantees no 17m-cell terrain triangle can
-    // bulge up through the bank apron mid-collar (the black-wedge bug)
-    stamp(x, z, 30, 16, y - 0.55);
-    waterSamples.push([x, z, y]);
+  const waterSamples = [];   // [x, z, level, halfWidth] along every carved channel
+  // riverzone owns the RUGGED water edge, so the carve follows the same
+  // width the ribbon and skirt render instead of a fixed centerline collar
+  for (const [x, z, y, hw] of RIVER.samples) {
+    stamp(x, z, hw * 2.0, hw * 0.72, y - 2.45);
+    // shallow SHELF beyond the rendered edge: guarantees no 17m-cell
+    // terrain triangle can bulge up through the ribbon or skirt
+    stamp(x, z, hw + 5.5, hw + 3.5, y - 0.55);
+    waterSamples.push([x, z, y, hw]);
   }
-  for (const s of STREAMS) {
+  for (let si = 0; si < STREAMS.length; si++) {
+    const s = STREAMS[si];
     for (const p of s.pts) stamp(p[0], p[1], 24, 6, p[2] - 0.8);
-    for (const [x, z, y] of sampleSplineEven(s.pts, 4)) {
-      stamp(x, z, 10, 3.5, y - 0.75);
-      waterSamples.push([x, z, y]);
+    for (const [x, z, y, hw] of STREAM_CHANNELS[si].samples) {
+      stamp(x, z, hw * 3.2, hw * 0.85, y - 1.15);
+      stamp(x, z, hw + 3.0, hw + 1.6, y - 0.4);
+      waterSamples.push([x, z, y, hw]);
     }
   }
+  pinWaterRows();
   // FLOOR CLAMP: land beyond the shore shelf can never sit below its local
   // waterline — a river keeps its floodplain flooded, not sunken. Overlapping
   // meander stamps compounded into pans carved ~1.9m below river level (the
@@ -78,17 +145,10 @@ function cellToWorld(gx, gy) {
       buckets.get(k).push(s);
     }
     const R = 84;
-    // the clamp must respect the SMOOTHED shoreline (same as the water mesh
-    // and bed carve) so the strip outside it gets raised like any other bank
-    const shores = LAKES.map((lake) => chaikinPoly(lake.poly));
-    const inAnyLake = (x, z) => {
-      for (const shore of shores) { if (pointInPoly(x, z, shore)) return true; }
-      return false;
-    };
     const P = LOC.POND;
     for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
       const [x, z] = cellToWorld(gx, gy);
-      let dmin = 1e9, lvl = 0;
+      let dmin = 1e9, lvl = 0, hwN = 0;
       const bx = Math.floor(x / BK), bz = Math.floor(z / BK);
       // ±4 buckets: ±3 only guaranteed ~56m of the 84m clamp radius, leaving
       // unclamped sunken pans in the 56-84m ring
@@ -97,13 +157,13 @@ function cellToWorld(gx, gy) {
         if (!arr) continue;
         for (const s of arr) {
           const d = Math.hypot(x - s[0], z - s[1]);
-          if (d < dmin) { dmin = d; lvl = s[2]; }
+          if (d < dmin) { dmin = d; lvl = s[2]; hwN = s[3]; }
         }
       }
-      if (dmin > R || dmin <= 16.2) continue;                 // bed+shelf stay carved
+      if (dmin > R || dmin <= hwN + 4.2) continue;             // bed+shelf stay carved
       if (Math.hypot((x - (P.x + 4)) / 56, (z - P.z) / 38) < 1.25) continue; // pond basin
-      if (inAnyLake(x, z)) continue;
-      const minH = lvl - 0.5 + 0.75 * smoothstep(16.2, 27, dmin); // → lvl+0.25 past 27m
+      if (lakeAt(x, z)) continue;
+      const minH = lvl - 0.5 + 0.75 * smoothstep(hwN + 4.2, hwN + 15, dmin); // → lvl+0.25 past outer ring
       const i = gy * G + gx;
       if (field[i] < minH) field[i] = minH;
     }
@@ -149,19 +209,22 @@ function cellToWorld(gx, gy) {
   // mesh renders — carving the raw OSM polygon left a sunken bare strip
   // between the smoothed water edge and the coarse poly (the "pan" where
   // the Gauja meets Taurenes ezers)
-  for (const lake of LAKES) {
-    const shore = chaikinPoly(lake.poly);
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const [x, z] of shore) {
-      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
-    }
+  for (const lake of LAKE_SHORES) {
+    const shore = lake.poly;
+    const { minX, maxX, minZ, maxZ } = lake;
     for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
       const [x, z] = cellToWorld(gx, gy);
       if (x < minX - CELL || x > maxX + CELL || z < minZ - CELL || z > maxZ + CELL) continue;
+      const i = gy * G + gx;
+      const dSh = lakeShoreWavyAt(x, z);
       if (pointInPoly(x, z, shore)) {
-        const i = gy * G + gx;
-        field[i] = Math.min(field[i], lake.level - 1.3);
+        const bed = lake.level - lerp(0.18, 1.7, smoothstep(0, 30, dSh));
+        field[i] = Math.min(field[i], bed);
+      } else if (dSh < 9 && field[i] > lake.level && !lakeAt(x, z)) {
+        const rv = riverAt(x, z);
+        if (!(rv && rv.d < rv.hw + 4)) {
+          field[i] = Math.min(field[i], lake.level + 0.12 + (dSh / 9) * 1.1);
+        }
       }
     }
   }
@@ -203,7 +266,8 @@ function baseHeight(x, z) {
 function microDamp(x, z) {
   let damp = 1;
   for (const p of PADS) damp = Math.min(damp, smoothstep(p.r * 0.6, p.r + 10, Math.hypot(x - p.x, z - p.z)));
-  damp = Math.min(damp, smoothstep(14, 26, distToRiver(x, z))); // micro noise must not breach the shore
+  const rv = riverAt(x, z);
+  if (rv) damp = Math.min(damp, smoothstep(3, 12, rv.d - rv.hw)); // micro noise must not breach the shore
   // main-road corridors ride a draped ribbon: micro bumps bigger than its
   // crown swallowed the carriageway in stretches
   const ri = distToRoadEx(5, x, z);
@@ -212,7 +276,44 @@ function microDamp(x, z) {
 }
 export function heightAt(x, z) {
   const micro = (noise.fbm(x * 0.045, z * 0.045, 2) - 0.5) * 0.7 * microDamp(x, z);
-  return baseHeight(x, z) + micro;
+  let h = baseHeight(x, z) + micro;
+  const lk = lakeAt(x, z);
+  if (lk) {
+    const dSh = lakeShoreWavyAt(x, z);
+    const bed = lk.level - lerp(0.18, 1.7, smoothstep(0, 30, dSh));
+    h = Math.min(h, bed);
+    const rv = riverAt(x, z);
+    if (!(rv && rv.d < Math.max(rv.hw * 2.0, 34))) h = Math.max(h, bed - 0.18);
+  } else {
+    const inPond = Math.hypot((x - (LOC.POND.x + 4)) / 56, (z - LOC.POND.z) / 38) < 1.25;
+    const rv = riverAt(x, z);
+    if (rv) {
+      if (rv.d <= rv.hw * 0.72) h = Math.min(h, rv.level - 2.45);
+      else if (rv.d <= rv.hw + 4.2) h = Math.min(h, rv.level - 0.55);
+      else if (rv.d <= rv.hw + 15 && !inPond) {
+        h = Math.max(h, rv.level - 0.5 + 0.75 * smoothstep(rv.hw + 4.2, rv.hw + 15, rv.d));
+      }
+      if (rv.d >= rv.hw - 1.35 && rv.d <= rv.hw + 2.7) h = Math.max(h, rv.level - 0.68);
+    }
+    const st = streamAt(x, z);
+    if (st) {
+      if (st.d <= st.hw * 0.85) h = Math.min(h, st.level - 1.15);
+      else if (st.d <= st.hw + 1.6) h = Math.min(h, st.level - 0.4);
+      if (st.d >= st.hw - 1.35 && st.d <= st.hw + 2.7) h = Math.max(h, st.level - 0.68);
+    }
+    if (!inPond && !(rv && rv.d < 0.35) && !(st && st.d <= st.hw * 0.85)) {
+      h = Math.max(h, riverRowFloor(x, z));
+    }
+    const dSh = lakeShoreWavyAt(x, z);
+    if (dSh < 9 && !(rv && rv.d < rv.hw + 4)) {
+      for (const lake of LAKE_SHORES) {
+        if (x < lake.minX - CELL || x > lake.maxX + CELL || z < lake.minZ - CELL || z > lake.maxZ + CELL) continue;
+        if (h > lake.level) h = Math.min(h, lake.level + 0.12 + (dSh / 9) * 1.1);
+        break;
+      }
+    }
+  }
+  return h;
 }
 export function slopeAt(x, z) {
   const e = 2;
@@ -363,7 +464,23 @@ export function paintEra(era) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
       const n1 = noise.fbm(x * 0.006, z * 0.006, 3);
       const n2 = noise.noise2(x * 0.07, z * 0.07);
+      const lk = lakeAt(x, z);
+      if (lk && y < lk.level + 0.15) {
+        const depth = clamp((lk.level - y) / 2.2, 0, 1);
+        const dSh = lakeShoreWavyAt(x, z);
+        const shallowK = 1 - smoothstep(2, 22, dSh);
+        const ch = bankCharAt(x, z);
+        const speck = (n2 - 0.5) * 0.06;
+        let r = lerp(0.34, 0.18, depth) + speck;
+        let g = lerp(0.33, 0.19, depth) + speck;
+        let b = lerp(0.27, 0.16, depth) + speck;
+        const sand = shallowK * (0.55 + 0.35 * ch.bar);
+        r = lerp(r, 0.52, sand); g = lerp(g, 0.47, sand); b = lerp(b, 0.36, sand);
+        col.setXYZ(i, r, g, b);
+        continue;
+      }
       const dRiv = distToRiver(x, z);
+      const rv = riverAt(x, z);
       let r = 0.36 + n1 * 0.13;
       let g = 0.33 + n1 * 0.10 + n2 * 0.04;
       let b = 0.23 + n2 * 0.04;
@@ -374,8 +491,14 @@ export function paintEra(era) {
       if (n3 > 0.72) { r -= 0.05; g += 0.03; b -= 0.02; }        // sedge green flushes
       // gravel outwash near water
       if (dRiv < 26) {
+        const ch = rv ? bankCharAt(x, z) : { mud: 0, bar: 0 };
         const t = smoothstep(26, 7, dRiv);
-        r = lerp(r, 0.47, t); g = lerp(g, 0.43, t); b = lerp(b, 0.37, t);
+        const speck = (n2 - 0.5) * 0.05 * (1 + 0.8 * ch.bar);
+        const light = 0.04 * ch.bar;
+        let br = 0.47 + light + speck, bg = 0.43 + light + speck * 0.8, bb = 0.37 + light + speck * 0.6;
+        const mudK = ch.mud * 0.45;
+        br = lerp(br, 0.26, mudK); bg = lerp(bg, 0.235, mudK); bb = lerp(bb, 0.16, mudK);
+        r = lerp(r, br, t); g = lerp(g, bg, t); b = lerp(b, bb, t);
       }
       // high till ridges paler
       const high = smoothstep(210, 250, y);
@@ -390,7 +513,24 @@ export function paintEra(era) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
     const n1 = noise.fbm(x * 0.008, z * 0.008, 3);
     const n2 = noise.noise2(x * 0.09, z * 0.09);
+    const lk = lakeAt(x, z);
+    if (lk && y < lk.level + 0.15) {
+      const depth = clamp((lk.level - y) / 2.2, 0, 1);
+      const dSh = lakeShoreWavyAt(x, z);
+      const shallowK = 1 - smoothstep(2, 22, dSh);
+      const ch = bankCharAt(x, z);
+      const speck = (n2 - 0.5) * 0.06;
+      let r = lerp(0.30, 0.15, depth) + speck;
+      let g = lerp(0.29, 0.16, depth) + speck;
+      let b = lerp(0.185, 0.105, depth) + speck;
+      const sand = shallowK * (0.55 + 0.35 * ch.bar);
+      r = lerp(r, 0.52, sand); g = lerp(g, 0.47, sand); b = lerp(b, 0.36, sand);
+      col.setXYZ(i, r, g, b);
+      continue;
+    }
     const dRiv = distToRiver(x, z);
+    const rv = riverAt(x, z);
+    const riverCh = rv ? bankCharAt(x, z) : null;
 
     // base meadow green, dryer on heights, lusher near water
     let r = 0.275 + n1 * 0.14 + smoothstep(200, 245, y) * 0.10;
@@ -450,37 +590,74 @@ export function paintEra(era) {
       }
     }
 
-    // water margins, outside-in: moist grass -> sandy bank -> gravel -> mud
-    if (dRiv < 30) {
-      const moist = smoothstep(30, 15, dRiv);
-      g += moist * 0.05; r -= moist * 0.03;                     // damp grass greens up
+    // water margins, edge-relative: bed -> wet edge -> bank -> damp grass
+    let wet = 0, riverBed = false;
+    if (rv) {
+      const hw = rv.hw;
+      if (rv.d < hw - 0.5) {
+        riverBed = true;
+        const t = clamp((rv.level - y) / 2.4, 0, 1);
+        r = lerp(0.40, 0.13, t);
+        g = lerp(0.36, 0.14, t);
+        b = lerp(0.26, 0.10, t);
+        if (rv.d > hw - 3) {
+          const grit = smoothstep(hw - 3, hw - 0.5, rv.d) * 0.45;
+          const gravel = 0.36 + n2 * 0.14 * (1 + 0.8 * riverCh.bar);
+          r = lerp(r, gravel + 0.05, grit); g = lerp(g, gravel, grit); b = lerp(b, gravel * 0.8, grit);
+        }
+      } else if (rv.d < hw + 1.5) {
+        wet = Math.max(wet, smoothstep(hw + 1.5, hw - 0.5, rv.d));
+      } else if (rv.d < hw + 6) {
+        // the bank itself: bare sandy earth, distinct from the meadow
+        const bank = smoothstep(hw + 6, hw + 2.5, rv.d);
+        const light = 0.04 * riverCh.bar;
+        r = lerp(r, 0.42 + light + n2 * 0.08, bank);
+        g = lerp(g, 0.36 + light + n2 * 0.05, bank);
+        b = lerp(b, 0.25 + light, bank);
+      } else if (rv.d < hw + 20) {
+        const moist = smoothstep(hw + 20, hw + 5, rv.d);
+        g += moist * 0.05; r -= moist * 0.03;                   // damp grass greens up
+      }
     }
-    if (dRiv < 16 && dRiv > 5.5) {
-      // the bank itself: bare sandy earth, distinct from the meadow
-      const bank = smoothstep(16, 11, dRiv);
-      r = lerp(r, 0.42 + n2 * 0.08, bank);
-      g = lerp(g, 0.36 + n2 * 0.05, bank);
-      b = lerp(b, 0.25, bank);
-    }
-    let wet = dRiv < 9 ? smoothstep(9, 3.5, dRiv) : 0;
     const dStr = distToStreams(x, z);
     if (dStr < 5) wet = Math.max(wet, smoothstep(5, 1.5, dStr));
+    let lakeCh = null, lakeSand = 0, lakeWet = 0;
     for (const lake of LAKES) {
       if (y < lake.level + 0.22 && Math.abs(x - lake.cx) < lake.hx && Math.abs(z - lake.cz) < lake.hz) {
         // NARROW marshy waterline band — the old +0.5m onset painted a wide
         // tan beach around the whole lake
-        wet = Math.max(wet, smoothstep(lake.level + 0.22, lake.level - 0.45, y) * 0.8);
+        const w = smoothstep(lake.level + 0.22, lake.level - 0.45, y) * 0.8;
+        wet = Math.max(wet, w);
+        if (w > lakeWet) {
+          lakeWet = w;
+          lakeCh = bankCharAt(x, z);
+        }
+        const dSh = lakeShoreWavyAt(x, z);
+        lakeSand = Math.max(lakeSand, smoothstep(1.5, 0, dSh)
+          * smoothstep(lake.level + 0.22, lake.level + 0.02, y) * bankCharAt(x, z).bar);
       }
     }
-    if (wet > 0) {
+    if (!riverBed && wet > 0) {
       // wet ground reads marsh-green-brown, not bare mud
-      r = lerp(r, 0.24, wet); g = lerp(g, 0.26, wet); b = lerp(b, 0.13, wet);
-      // sand & pebble bars right at the waterline (speckled by n2)
-      const bar = dRiv < 6.5 ? smoothstep(6.5, 1.5, dRiv) : 0;
-      if (bar > 0) {
-        const gravel = 0.36 + n2 * 0.14;
-        r = lerp(r, gravel + 0.05, bar); g = lerp(g, gravel, bar); b = lerp(b, gravel * 0.8, bar);
+      let wr = 0.24, wg = 0.26, wb = 0.13;
+      if (riverCh && rv.d < rv.hw + 1.5) {
+        const mudK = riverCh.mud * 0.8;
+        wr = lerp(wr, 0.26, mudK); wg = lerp(wg, 0.235, mudK); wb = lerp(wb, 0.16, mudK);
       }
+      if (lakeCh) {
+        const mudK = lakeCh.mud * 0.45;
+        wr = lerp(wr, 0.20, mudK); wg = lerp(wg, 0.22, mudK); wb = lerp(wb, 0.11, mudK);
+        wr = lerp(wr, 0.56 + n2 * 0.03, lakeSand);
+        wg = lerp(wg, 0.50 + n2 * 0.02, lakeSand);
+        wb = lerp(wb, 0.38, lakeSand);
+      }
+      r = lerp(r, wr, wet); g = lerp(g, wg, wet); b = lerp(b, wb, wet);
+    }
+    if (rv && rv.d >= rv.hw - 1 && rv.d <= rv.hw + 1) {
+      // sand & pebble bars right at the rugged waterline (speckled by n2)
+      const bar = smoothstep(1, 0, Math.abs(rv.d - rv.hw));
+      const gravel = 0.36 + n2 * 0.14 * (1 + 0.8 * riverCh.bar);
+      r = lerp(r, gravel + 0.05, bar); g = lerp(g, gravel, bar); b = lerp(b, gravel * 0.8, bar);
     }
 
     col.setXYZ(i, c.set(r, g, b).r, c.g, c.b);

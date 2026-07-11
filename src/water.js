@@ -2,10 +2,11 @@
 // Taurenes ezers (OSM outline), the Dzērbe and a nameless brook, and the
 // mill pond that exists only while the manor's watermill does (eras 2-3).
 import * as THREE from 'three';
-import { RIVER_PTS, STREAMS, LAKES } from './geodata.js';
+import { STREAMS, LAKES } from './geodata.js';
+import { RIVER, STREAM_CHANNELS, channelRows, bankCharAt, LAKE_SHORES, lakeAt, riverAt } from './riverzone.js';
 import { LOC } from './landuse.js';
-import { sampleSpline, canvasTexture, makeNoise, chaikinPoly } from './util.js';
-import { heightAt, meshHeightAt } from './terrain.js';
+import { canvasTexture, makeNoise, chaikinPoly, lerp } from './util.js';
+import { meshHeightAt } from './terrain.js';
 
 function waterNormalTex() {
   const n = makeNoise(777);
@@ -55,14 +56,13 @@ function makeWaterMaterial(color, opacity) {
   return m;
 }
 
+const channelSeg = (chan) => Math.min(2600, chan.pts.length * 7);
+
 // Water ribbon, LAAS-shore rules: high tessellation so bends are CURVES
 // (the old 63m segments read as rectangles), and a FLAT surface — the
 // shoreline comes from the carved bank rising through the plane.
-function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 0.85) {
-  // SEG and the tangent window MUST match the bank skirt exactly — the
-  // skirt's inner verts are meant to be vertex-for-vertex identical with
-  // these edges; any tessellation drift opens black slivers into the trench
-  const SEG = Math.min(2000, pts.length * 6);
+function ribbon(rows, mat, uvScale = 60, edgeDrop = 0.85) {
+  const SEG = rows.length - 1;
   // LAAS shore rule: the water surface is FLAT (a sloped surface reads as a
   // convex hump from the bank) — only a slight edge tuck hides the seam.
   // The shoreline itself comes from the bank rising THROUGH the plane, so
@@ -74,14 +74,9 @@ function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 0.85) {
   const positions = [], uvs = [], indices = [];
   for (let i = 0; i <= SEG; i++) {
     const t = i / SEG;
-    const [x, z, y] = sampleSpline(pts, t);
-    const [xa, za] = sampleSpline(pts, Math.max(0, t - 0.004));
-    const [x2, z2] = sampleSpline(pts, Math.min(1, t + 0.004));
-    let dx = x2 - xa, dz = z2 - za;
-    const len = Math.hypot(dx, dz) || 1;
-    dx /= len; dz /= len;
-    const w = widthFn(t) + 1.6; // overshoot into the banks
-    const wf = w - 0.5;         // flat out to here
+    const { x, z, y, dx, dz, hw } = rows[i];
+    const w = hw + 1.6; // overshoot into the banks
+    const wf = w - 0.5; // flat out to here
     positions.push(
       x - dz * w, y - EDGE_DROP, z + dx * w,
       x - dz * wf, y, z + dx * wf,
@@ -104,13 +99,62 @@ function ribbon(pts, widthFn, mat, uvScale = 60, edgeDrop = 0.85) {
   return new THREE.Mesh(geo, mat);
 }
 
+export function skirtRows(rows) {
+  if (!rows.length) return [];
+  const SEG = Math.max(1, rows.length - 1);
+  const bankNoise = makeNoise(881);
+  const out = [];
+  let pdx = 0, pdz = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const t = i / SEG;
+    const row = rows[i];
+    const ch = bankCharAt(row.x, row.z);
+    const W_IN = row.hw + 1.6;
+    // organic shoreline: the sand band waxes and wanes (~45m wavelength)
+    let wOut = W_IN + (1.1 + bankNoise.fbm(t * 380, 3.7, 3) * 4.4)
+      * (1 - 0.28 * ch.mud) * (1 + 0.35 * ch.bar);
+    if (i > 0) {
+      const dTheta = Math.acos(Math.min(1, Math.max(-1, row.dx * pdx + row.dz * pdz)));
+      const radius = dTheta > 1e-4 ? (RIVER.length / SEG) / dTheta : 1e9;
+      wOut = Math.min(wOut, Math.max(W_IN + 0.4, radius * 0.85));
+    }
+    pdx = row.dx; pdz = row.dz;
+    out.push({ W_IN, wOut, ch });
+  }
+  // smooth the clamp: abrupt width changes twist the quads
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 1; i < out.length - 1; i++) {
+      const avg = (out[i - 1].wOut + out[i].wOut + out[i + 1].wOut) / 3;
+      out[i].wOut = Math.max(out[i].W_IN + 0.4, Math.min(out[i].wOut, avg));
+    }
+  }
+  let lakeK = rows.map((row) => (row.lake ? 1 : 0));
+  for (let pass = 0; pass < 2; pass++) {
+    const next = new Array(lakeK.length);
+    for (let i = 0; i < lakeK.length; i++) {
+      let sum = 0, n = 0;
+      for (let j = Math.max(0, i - 2); j <= Math.min(lakeK.length - 1, i + 2); j++) {
+        sum += lakeK[j]; n++;
+      }
+      next[i] = sum / n;
+    }
+    lakeK = next;
+  }
+  for (let i = 0; i < out.length; i++) {
+    if (rows[i].lake) out[i].wOut = out[i].W_IN;
+    else out[i].wOut = out[i].W_IN + (out[i].wOut - out[i].W_IN) * (1 - lakeK[i]);
+  }
+  return out;
+}
+
 export function buildWater() {
   const group = new THREE.Group();
   group.name = 'water';
   const mats = [];
+  let sandTex = null;                    // baked in the river-skirt block, reused by lake collars
 
   // --- lakes from OSM polygons
-  const lakeMat = makeWaterMaterial(0x2f4c58, 0.94);
+  const lakeMat = makeWaterMaterial(0x2f4c58, 0.90);
   mats.push(lakeMat);
   // OSM lake outlines are sparse polygons — Chaikin-smooth the shoreline
   // or the basins read as blocky cut gems
@@ -130,13 +174,12 @@ export function buildWater() {
   }
 
   // --- the Gauja
-  const riverMat = makeWaterMaterial(0x2c4852, 0.93);
+  const riverMat = makeWaterMaterial(0x2e4a55, 0.90);
   mats.push(riverMat);
-  // constant width: the old sinusoidal wobble made the shore seams
-  // unpredictable — every downstream fix has to know where the edge is
   // rim 0.35: the 0.5m dark wall showed through the transparent surface
   // from the far bank as a black outline around every reach
-  const river = ribbon(RIVER_PTS, () => 10.2, riverMat, 70, 0.35);
+  const riverRows = channelRows(RIVER, channelSeg(RIVER));
+  const river = ribbon(riverRows, riverMat, 70, 0.35);
   river.renderOrder = 1;
   river.name = 'gauja';
   group.add(river);
@@ -146,43 +189,14 @@ export function buildWater() {
   // terrain when it rises above the water and hold a low berm (+0.3) where
   // the 17m-cell heightfield dips — the mesh solves what sculpting cannot.
   {
-    const SEG = Math.min(2000, RIVER_PTS.length * 6);
-    const W_IN = 10.2 + 1.6, W_OUT = 14.5;
-    const bankNoise = makeNoise(881);
-    // pass 1: rows with curvature-clamped collar width (a bend tighter than
-    // the offset would fold the outer edge back over itself)
-    const rows = [];
-    let pdx = 0, pdz = 0;
-    for (let i = 0; i <= SEG; i++) {
-      const t = i / SEG;
-      const [x, z, y] = sampleSpline(RIVER_PTS, t);
-      const [xa, za] = sampleSpline(RIVER_PTS, Math.max(0, t - 0.004));
-      const [x2, z2] = sampleSpline(RIVER_PTS, Math.min(1, t + 0.004));
-      let dx = x2 - xa, dz = z2 - za;
-      const len = Math.hypot(dx, dz) || 1;
-      dx /= len; dz /= len;
-      // organic shoreline: the sand band waxes and wanes (~45m wavelength)
-      let wOut = W_OUT - 1.6 + bankNoise.fbm(t * 380, 3.7, 3) * 4.4;
-      if (i > 0) {
-        const dTheta = Math.acos(Math.min(1, Math.max(-1, dx * pdx + dz * pdz)));
-        const radius = dTheta > 1e-4 ? (16581 / SEG) / dTheta : 1e9;
-        wOut = Math.min(wOut, Math.max(W_IN + 0.4, radius * 0.85));
-      }
-      pdx = dx; pdz = dz;
-      rows.push([x, z, y, dx, dz, wOut]);
-    }
-    // smooth the clamp: abrupt width changes twist the quads
-    for (let pass = 0; pass < 3; pass++) {
-      for (let i = 1; i < rows.length - 1; i++) {
-        rows[i][5] = Math.min(rows[i][5], (rows[i - 1][5] + rows[i][5] + rows[i + 1][5]) / 3);
-      }
-    }
+    const widths = skirtRows(riverRows);
     // resolve the two edge polylines first, then FORBID the outer edge from
     // reversing against the inner edge's direction of travel (tight apexes
     // otherwise fold the strip and its backfaces render black)
     const inner = [[], []], outer = [[], []];
-    for (let i = 0; i < rows.length; i++) {
-      const [x, z, y, dx, dz, wOut] = rows[i];
+    for (let i = 0; i < riverRows.length; i++) {
+      const { x, z, y, dx, dz } = riverRows[i];
+      const { W_IN, wOut } = widths[i];
       [-1, 1].forEach((side, si) => {
         const nx = -dz * side, nz = dx * side;
         inner[si].push([x + nx * W_IN, y, z + nz * W_IN]);
@@ -190,7 +204,8 @@ export function buildWater() {
       });
     }
     for (let si = 0; si < 2; si++) {
-      for (let i = 1; i < rows.length; i++) {
+      for (let i = 1; i < riverRows.length; i++) {
+        if (widths[i].wOut === widths[i].W_IN || widths[i - 1].wOut === widths[i - 1].W_IN) continue;
         const idx2 = (inner[si][i][0] - inner[si][i - 1][0]);
         const idz2 = (inner[si][i][2] - inner[si][i - 1][2]);
         const odx = (outer[si][i][0] - outer[si][i - 1][0]);
@@ -212,8 +227,23 @@ export function buildWater() {
       [0.78, 0.70, 0.53],   // dry sand
       [0.60, 0.65, 0.42],   // fringe blending to meadow
     ];
-    for (let i = 0; i < rows.length; i++) {
-      const y = rows[i][2];
+    const colorNoise = makeNoise(884);
+    const mixC = (a, b, t) => [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t,
+    ];
+    for (let i = 0; i < riverRows.length; i++) {
+      const t = i / Math.max(1, riverRows.length - 1);
+      const ch = widths[i].ch;
+      const jitter = (colorNoise.fbm(t * 590, 7, 2) / 0.75 - 0.5) * 0.08;
+      const wetC = mixC(mixC(bandC[0], [0.30, 0.27, 0.19], ch.mud), [0.58, 0.55, 0.47], ch.bar * 0.7);
+      const dryC = mixC(mixC(bandC[1], [0.62, 0.58, 0.50], ch.bar), [0.52, 0.46, 0.34], ch.mud * 0.6);
+      const fringeC = mixC(bandC[2], [0.45, 0.52, 0.30], 0.45 + 0.3 * ch.mud);
+      const rowC = [wetC, dryC, fringeC];
+      const y = riverRows[i].y;
+      const rimY = y - 0.35;
+      const collapsed = widths[i].wOut === widths[i].W_IN;
       for (const si of [0, 1]) {
         const inn = inner[si][i], out = outer[si][i];
         const mx = inn[0] + (out[0] - inn[0]) * 0.3;
@@ -221,14 +251,14 @@ export function buildWater() {
         // outer edge DRAPES onto the rendered terrain (clamped so it neither
         // dives into a carved dip nor flies up a bank) — a fixed +0.07 rim
         // floated a tan wall over the shore shelf and read as a dyke
-        const gOut = Math.min(Math.max(meshHeightAt(out[0], out[2]) + 0.03, y - 0.33), y + 0.5);
-        const gMid = Math.min(Math.max(meshHeightAt(mx, mz) + 0.03, y + 0.03), y + 0.3);
+        const gOut = collapsed ? rimY : Math.min(Math.max(meshHeightAt(out[0], out[2]) + 0.03, y - 0.33), y + 0.5);
+        const gMid = collapsed ? rimY : Math.min(Math.max(meshHeightAt(mx, mz) + 0.03, y + 0.03), y + 0.3);
         positions.push(
-          inn[0], y - 0.35, inn[2],   // MUST equal the ribbon edgeDrop
+          inn[0], rimY, inn[2],       // MUST equal the ribbon edgeDrop
           mx, gMid, mz,
           out[0], gOut, out[2]);
         for (let bI = 0; bI < 3; bI++) {
-          colors.push(bandC[bI][0], bandC[bI][1], bandC[bI][2]);
+          colors.push(rowC[bI][0] + jitter, rowC[bI][1] + jitter, rowC[bI][2] + jitter);
         }
         uvsA.push(inn[0] * 0.18, inn[2] * 0.18, mx * 0.18, mz * 0.18, out[0] * 0.18, out[2] * 0.18);
       }
@@ -264,8 +294,8 @@ export function buildWater() {
     const nrm = new Float32Array(positions.length);
     for (let i = 0; i < nrm.length; i += 3) { nrm[i + 1] = 1; }
     geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-    // grainy wet-sand texture, world-space UVs
-    const sandTex = canvasTexture(128, 128, (ctx, w, h) => {
+    // grainy wet-sand texture, world-space UVs (shared with the lake collars)
+    sandTex = canvasTexture(128, 128, (ctx, w, h) => {
       ctx.fillStyle = '#a4977c';
       ctx.fillRect(0, 0, w, h);
       const sr = makeNoise(883).rng;
@@ -299,10 +329,91 @@ export function buildWater() {
   // --- streams
   const streamMat = makeWaterMaterial(0x314f58, 0.92);
   mats.push(streamMat);
-  for (const s of STREAMS) {
-    const st = ribbon(s.pts, () => 2.1, streamMat, 90, 0.5);
-    st.name = s.name || 'stream';
+  for (let i = 0; i < STREAM_CHANNELS.length; i++) {
+    const chan = STREAM_CHANNELS[i];
+    const rows = channelRows(chan, channelSeg(chan));
+    const st = ribbon(rows, streamMat, 90, 0.5);
+    st.name = STREAMS[i].name || 'stream';
     group.add(st);
+  }
+
+  // --- LAKE BANK COLLARS: the wet-sand shore band the river always had.
+  // One strip per lake along the Chaikin shoreline: inner rim tucked under
+  // the water sheet, outer edge draped on the terrain with a noise- and
+  // character-driven width (mud reaches narrow, gravel bars wide), fringe
+  // colours pulled toward the meadow so the band DISSOLVES into grass.
+  {
+    const collarNoise = makeNoise(1213);
+    const collarMat = new THREE.MeshLambertMaterial({
+      map: sandTex, vertexColors: true, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    });
+    const mix3 = (a, b, k) => [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)];
+    for (const lake of LAKE_SHORES) {
+      const poly = lake.poly, N = poly.length;
+      // outward = the side lakeAt says is dry (empirical beats winding math)
+      let nxs = -(poly[1][1] - poly[N - 1][1]), nzs = poly[1][0] - poly[N - 1][0];
+      const nl0 = Math.hypot(nxs, nzs) || 1;
+      const outSign = lakeAt(poly[0][0] + (nxs / nl0) * 3, poly[0][1] + (nzs / nl0) * 3) ? -1 : 1;
+      const positions = [], colors = [], uvsA = [], indices = [];
+      let s = 0;
+      for (let i = 0; i <= N; i++) {
+        const i0 = i % N;
+        const prev = poly[(i0 - 1 + N) % N], cur = poly[i0], next = poly[(i0 + 1) % N];
+        let tx = next[0] - prev[0], tz = next[1] - prev[1];
+        const tl = Math.hypot(tx, tz) || 1;
+        tx /= tl; tz /= tl;
+        const nx = -tz * outSign, nz = tx * outSign;
+        s += Math.hypot(cur[0] - prev[0], cur[1] - prev[1]) * 0.5;
+        const ch = bankCharAt(cur[0], cur[1]);
+        let w = (2.1 + collarNoise.fbm(s * 0.045, lake.level * 0.13, 3) * 3.4)
+          * (1 - 0.35 * ch.mud) * (1 + 0.45 * ch.bar);
+        // a river mouth brings its own treatment — collapse the collar there
+        const rv = riverAt(cur[0], cur[1]);
+        if (rv && rv.d < rv.hw + 4) w = 0.02;
+        const midX = cur[0] + nx * w * 0.35, midZ = cur[1] + nz * w * 0.35;
+        const outX = cur[0] + nx * w, outZ = cur[1] + nz * w;
+        const gMid = Math.min(Math.max(meshHeightAt(midX, midZ) + 0.03, lake.level + 0.02), lake.level + 0.35);
+        const gOut = Math.min(Math.max(meshHeightAt(outX, outZ) + 0.03, lake.level - 0.25), lake.level + 0.7);
+        positions.push(
+          cur[0], lake.level - 0.3, cur[1],
+          midX, gMid, midZ,
+          outX, gOut, outZ);
+        const wet = mix3(mix3([0.62, 0.55, 0.42], [0.30, 0.27, 0.19], ch.mud), [0.58, 0.55, 0.47], ch.bar * 0.7);
+        const dry = mix3(mix3([0.78, 0.70, 0.53], [0.52, 0.46, 0.34], ch.mud * 0.6), [0.62, 0.58, 0.50], ch.bar);
+        const fringe = mix3([0.60, 0.65, 0.42], [0.45, 0.52, 0.30], 0.55 + 0.3 * ch.mud);
+        colors.push(...wet, ...dry, ...fringe);
+        uvsA.push(cur[0] * 0.18, cur[1] * 0.18, midX * 0.18, midZ * 0.18, outX * 0.18, outZ * 0.18);
+        if (i > 0) {
+          const a2 = (i - 1) * 3;
+          for (const [o0, o1] of [[0, 1], [1, 2]]) {
+            indices.push(a2 + o0, a2 + o1, a2 + o1 + 3, a2 + o0, a2 + o1 + 3, a2 + o0 + 3);
+          }
+        }
+      }
+      // force CCW seen from above — the river skirt's hard-won rule: with
+      // DoubleSide, downward-wound quads light from below and render black
+      for (let i = 0; i < indices.length; i += 3) {
+        const a = indices[i] * 3, b = indices[i + 1] * 3, c = indices[i + 2] * 3;
+        const abx = positions[b] - positions[a], abz = positions[b + 2] - positions[a + 2];
+        const acx = positions[c] - positions[a], acz = positions[c + 2] - positions[a + 2];
+        if (abz * acx - abx * acz < 0) {
+          const t = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = t;
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvsA, 2));
+      geo.setIndex(indices);
+      const nrm = new Float32Array(positions.length);
+      for (let i = 0; i < nrm.length; i += 3) nrm[i + 1] = 1;   // ground lights as ground
+      geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+      const collar = new THREE.Mesh(geo, collarMat);
+      collar.receiveShadow = true;
+      collar.name = 'lakebank';
+      group.add(collar);
+    }
   }
 
   // --- mill pond on the Gauja bend (added/removed by era manager; eras 2-3)

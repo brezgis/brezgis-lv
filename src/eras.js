@@ -16,6 +16,8 @@ import {
 import { MAT } from './textures.js';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI } from './landuse.js';
+import { riverAt, streamAt, lakeAt, pondAt } from './riverzone.js';
+import { registerFootprints } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM, ROADS_OSM } from './geodata-osm.js';
 import { mulberry32, pointInPoly, chaikinPoly } from './util.js';
@@ -160,66 +162,256 @@ function utilityPoles(group, modern) {
 
 // ---------------------------------------------------------------------------
 // The main roads as real draped ribbons: paint alone lands on 17m-spaced
-// terrain vertices, so a 5m carriageway all but vanished. The P30 is a
-// paved regional highway today; gravel before the war.
+// terrain vertices, so narrow lanes all but vanished. The P30 is paved
+// today; the V-roads, lanes and tracks keep their gravel or dirt skin.
 function roadRibbons(group, era) {
-  // 2025: only the P30 (class 0) is asphalt — the V-roads are still gravel.
-  // Before the war everything is gravel.
-  const mkMat = (color) => new THREE.MeshLambertMaterial({
-    color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  if (era < 3) return;
+  const mkMat = (color, offset) => new THREE.MeshLambertMaterial({
+    color, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset,
   });
   const surf = {
-    asphalt: { mat: mkMat(0x393c40), positions: [], indices: [] },
-    gravel: { mat: mkMat(0x8d7c5f), positions: [], indices: [] },
+    asphalt: { mat: mkMat(0x393c40, -2), positions: [], indices: [] },
+    gravel: { mat: mkMat(0x8d7c5f, -1), positions: [], indices: [] },
+    darkGravel: { mat: mkMat(0x7d6f56, -1), positions: [], indices: [] },
+    dirt: {
+      mat: new THREE.MeshLambertMaterial({
+        color: 0xffffff, vertexColors: true,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      }),
+      positions: [], colors: [], indices: [],
+    },
   };
+  const bridgeMat = era === 5 ? new THREE.MeshLambertMaterial({ color: 0x9a9a94 }) : MAT.darkWood;
+  const bridgeFixtures = [];
   const dashPos = [], dashIdx = [];   // painted centreline on today's P30
-  for (const r of ROADS_OSM) {
-    if (r.c > 1) continue;
-    const { positions, indices } = era === 5 && r.c === 0 ? surf.asphalt : surf.gravel;
-    const half = r.c === 0 ? 3.2 : 2.4;
+  const roadRows = (r) => {
     const pts = [];
     for (let i = 0; i < r.pts.length - 1; i++) {
       const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1];
-      const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 9));
+      const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 4.5));
       for (let k = 0; k < n; k++) pts.push([ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n]);
     }
     pts.push(r.pts[r.pts.length - 1]);
+    return pts;
+  };
+  const roadDists = (pts) => {
+    const d = [0];
+    for (let i = 1; i < pts.length; i++) d[i] = d[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    return d;
+  };
+  const addIndices = (indices, base, row, n, spans = null) => {
+    const prev = base + (row - 1) * n;
+    const use = spans || [...Array(n - 1).keys()];
+    for (const j of use) {
+      const a = prev + j;
+      // wind CCW seen from +y or the whole ribbon back-face culls from above
+      indices.push(a, a + n + 1, a + 1, a, a + n, a + n + 1);
+    }
+  };
+  const tangentAt = (pts, i) => {
+    const j = Math.min(i + 1, pts.length - 1);
+    let dx = pts[j][0] - pts[Math.max(0, i - 1)][0];
+    let dz = pts[j][1] - pts[Math.max(0, i - 1)][1];
+    const l = Math.hypot(dx, dz) || 1;
+    return [dx / l, dz / l];
+  };
+  const crossingAt = (x, z) => {
+    const rv = riverAt(x, z);
+    const st = streamAt(x, z);
+    let level = -Infinity;
+    if (rv && rv.d < rv.hw + 7) level = Math.max(level, rv.level);
+    if (st && st.d < st.hw + 4) level = Math.max(level, st.level);
+    return level > -Infinity ? level : null;
+  };
+  const bridgeRuns = (pts, dists) => {
+    const hits = pts.map(([x, z]) => crossingAt(x, z));
+    const raw = [];
+    for (let i = 0; i < hits.length; i++) {
+      if (hits[i] === null) continue;
+      const start = i;
+      let water = hits[i];
+      while (i + 1 < hits.length && hits[i + 1] !== null) water = Math.max(water, hits[++i]);
+      raw.push({
+        from: Math.max(0, start - 1),
+        to: Math.min(pts.length - 1, i + 1),
+        water,
+      });
+    }
+    const merged = [];
+    for (const run of raw) {
+      const last = merged[merged.length - 1];
+      if (last && run.from <= last.to + 1) {
+        last.to = Math.max(last.to, run.to);
+        last.water = Math.max(last.water, run.water);
+      } else {
+        merged.push({ ...run });
+      }
+    }
+    for (const run of merged) {
+      while (dists[run.to] - dists[run.from] < 8 && (run.from > 0 || run.to < pts.length - 1)) {
+        if (run.from > 0) run.from--;
+        if (dists[run.to] - dists[run.from] >= 8) break;
+        if (run.to < pts.length - 1) run.to++;
+      }
+      const [x0, z0] = pts[run.from], [x1, z1] = pts[run.to];
+      const minY = run.water + 1.9;
+      run.y0 = Math.max(meshHeightAt(x0, z0) + 0.14, minY);
+      run.y1 = Math.max(meshHeightAt(x1, z1) + 0.14, minY);
+      run.len = Math.max(0.001, dists[run.to] - dists[run.from]);
+    }
+    return merged;
+  };
+  const bridgeAt = (runs, i) => runs.find((run) => i >= run.from && i <= run.to) || null;
+  const bridgeYAt = (run, dists, i) => {
+    const t = (dists[i] - dists[run.from]) / run.len;
+    return run.y0 + (run.y1 - run.y0) * t;
+  };
+  const rowYAt = (pts, runs, dists, i) => {
+    const run = bridgeAt(runs, i);
+    if (run) return bridgeYAt(run, dists, i);
+    const [x, z] = pts[i];
+    return meshHeightAt(x, z) + 0.2;
+  };
+  const addBridgeFixtures = (runs, pts, dists, half) => {
+    for (const run of runs) {
+      const [x0, z0] = pts[run.from], [x1, z1] = pts[run.to];
+      const len = Math.max(1, Math.hypot(x1 - x0, z1 - z0));
+      const dx = (x1 - x0) / len, dz = (z1 - z0) / len;
+      const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+      const y0 = bridgeYAt(run, dists, run.from), y1 = bridgeYAt(run, dists, run.to);
+      const yMid = (y0 + y1) / 2;
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.35, 0.25), bridgeMat);
+        rail.position.set(mx - dz * side * (half + 0.18), yMid + 0.18, mz + dx * side * (half + 0.18));
+        rail.rotation.y = -Math.atan2(dz, dx);
+        rail.castShadow = rail.receiveShadow = true;
+        bridgeFixtures.push(rail);
+      }
+      for (const [x, z, y] of [[x0, z0, y0], [x1, z1, y1]]) {
+        const ab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.1, half * 2 + 0.9), bridgeMat);
+        ab.position.set(x, y - 0.52, z);
+        ab.rotation.y = -Math.atan2(dz, dx);
+        ab.castShadow = ab.receiveShadow = true;
+        bridgeFixtures.push(ab);
+      }
+    }
+  };
+  const pushCamberedRow = (positions, x, z, dx, dz, half, deckY = null) => {
+    if (deckY !== null) {
+      positions.push(
+        x - dz * half, deckY, z + dx * half,
+        x, deckY, z,
+        x + dz * half, deckY, z - dx * half);
+      return;
+    }
+    positions.push(
+      x - dz * half, meshHeightAt(x - dz * half, z + dx * half) - 0.42, z + dx * half,
+      x, meshHeightAt(x, z) + 0.2, z,
+      x + dz * half, meshHeightAt(x + dz * half, z - dx * half) - 0.42, z - dx * half);
+  };
+  const pushShoulderRow = (positions, x, z, dx, dz, half, deckY = null) => {
+    const out = half + 0.9;
+    for (const off of [-out, -half, 0, half, out]) {
+      const crown = off === 0;
+      const edge = Math.abs(off) >= half;
+      const y = deckY !== null
+        ? deckY
+        : meshHeightAt(x + dz * off, z - dx * off) + (crown ? 0.2 : edge ? -0.42 : -0.1);
+      positions.push(
+        x + dz * off,
+        y,
+        z - dx * off);
+    }
+  };
+  const pushDirtRow = (positions, colors, x, z, dx, dz, half, deckY = null) => {
+    const rut = half * 0.45;
+    const rows = [
+      [-half, -0.42, [0.45, 0.42, 0.28]],
+      [-rut, 0.06, [0.36, 0.30, 0.22]],
+      [0, 0.2, [0.45, 0.42, 0.28]],
+      [rut, 0.06, [0.36, 0.30, 0.22]],
+      [half, -0.42, [0.45, 0.42, 0.28]],
+    ];
+    for (const [off, lift, rgb] of rows) {
+      const y = deckY !== null ? deckY : meshHeightAt(x + dz * off, z - dx * off) + lift;
+      positions.push(x + dz * off, y, z - dx * off);
+      colors.push(...rgb);
+    }
+  };
+  for (const r of ROADS_OSM) {
+    if (era === 3 && r.c === 2) continue;
+    const half = [3.6, 3.0, 2.3, 1.7][r.c] || 1.7;
+    const pts = roadRows(r);
     if (pts.length < 2) continue;
+    const dists = roadDists(pts);
+    const runs = bridgeRuns(pts, dists);
+    if (r.c <= 1) addBridgeFixtures(runs, pts, dists, half);
+    if (r.c === 3) {
+      const { positions, colors, indices } = surf.dirt;
+      const base = positions.length / 3;
+      for (let i = 0; i < pts.length; i++) {
+        const [x, z] = pts[i];
+        const [dx, dz] = tangentAt(pts, i);
+        const run = bridgeAt(runs, i);
+        pushDirtRow(positions, colors, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
+        if (i > 0) addIndices(indices, base, i, 5);
+      }
+      continue;
+    }
+    if (era === 5 && r.c === 0) {
+      {
+        const { positions, indices } = surf.gravel;
+        const base = positions.length / 3;
+        for (let i = 0; i < pts.length; i++) {
+          const [x, z] = pts[i];
+          const [dx, dz] = tangentAt(pts, i);
+          const run = bridgeAt(runs, i);
+          pushShoulderRow(positions, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
+          if (i > 0) addIndices(indices, base, i, 5);
+        }
+      }
+      {
+        const { positions, indices } = surf.asphalt;
+        const base = positions.length / 3;
+        for (let i = 0; i < pts.length; i++) {
+          const [x, z] = pts[i];
+          const [dx, dz] = tangentAt(pts, i);
+          const run = bridgeAt(runs, i);
+          pushCamberedRow(positions, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
+          if (i > 0) {
+            addIndices(indices, base, i, 3);
+            // dashed centreline on the paved P30: ~3.4m of paint per 18m cycle
+            // (the full-span 9m dashes read like runway markings from the air)
+            if (i % 2 === 0) {
+              const b2 = dashPos.length / 3;
+              const px = pts[i - 1][0], pz = pts[i - 1][1];
+              const sx = px + (x - px) * 0.31, sz = pz + (z - pz) * 0.31;
+              const ex = px + (x - px) * 0.69, ez = pz + (z - pz) * 0.69;
+              const yPrev = rowYAt(pts, runs, dists, i - 1), yNow = rowYAt(pts, runs, dists, i);
+              const sy = yPrev + (yNow - yPrev) * 0.31 + 0.03;
+              const ey = yPrev + (yNow - yPrev) * 0.69 + 0.03;
+              dashPos.push(
+                sx - dz * 0.09, sy, sz + dx * 0.09, sx + dz * 0.09, sy, sz - dx * 0.09,
+                ex + dz * 0.09, ey, ez - dx * 0.09, ex - dz * 0.09, ey, ez + dx * 0.09);
+              dashIdx.push(b2, b2 + 2, b2 + 1, b2, b2 + 3, b2 + 2);
+            }
+          }
+        }
+      }
+      continue;
+    }
+    const s = r.c === 2 ? surf.darkGravel : surf.gravel;
+    const { positions, indices } = s;
     const base = positions.length / 3;
     for (let i = 0; i < pts.length; i++) {
       const [x, z] = pts[i];
-      const j = Math.min(i + 1, pts.length - 1);
-      let dx = pts[j][0] - pts[Math.max(0, i - 1)][0];
-      let dz = pts[j][1] - pts[Math.max(0, i - 1)][1];
-      const l = Math.hypot(dx, dz) || 1;
-      dx /= l; dz /= l;
-      const y = meshHeightAt(x, z);
-      // cambered profile on the RENDERED surface, edges tucked
-      positions.push(
-        x - dz * half, meshHeightAt(x - dz * half, z + dx * half) - 0.35, z + dx * half,
-        x, y + 0.14, z,
-        x + dz * half, meshHeightAt(x + dz * half, z - dx * half) - 0.35, z - dx * half);
-      if (i > 0) {
-        const a2 = base + (i - 1) * 3;
-        // wind CCW seen from +y or the whole ribbon back-face culls from above
-        indices.push(a2, a2 + 4, a2 + 1, a2, a2 + 3, a2 + 4);
-        indices.push(a2 + 1, a2 + 5, a2 + 2, a2 + 1, a2 + 4, a2 + 5);
-        // dashed centreline on the paved P30: ~3.4m of paint per 18m cycle
-        // (the full-span 9m dashes read like runway markings from the air)
-        if (era === 5 && r.c === 0 && i % 2 === 0) {
-          const b2 = dashPos.length / 3;
-          const px = pts[i - 1][0], pz = pts[i - 1][1];
-          const sx = px + (x - px) * 0.31, sz = pz + (z - pz) * 0.31;
-          const ex = px + (x - px) * 0.69, ez = pz + (z - pz) * 0.69;
-          const sy = meshHeightAt(sx, sz) + 0.17, ey = meshHeightAt(ex, ez) + 0.17;
-          dashPos.push(
-            sx - dz * 0.09, sy, sz + dx * 0.09, sx + dz * 0.09, sy, sz - dx * 0.09,
-            ex + dz * 0.09, ey, ez - dx * 0.09, ex - dz * 0.09, ey, ez + dx * 0.09);
-          dashIdx.push(b2, b2 + 2, b2 + 1, b2, b2 + 3, b2 + 2);
-        }
-      }
+      const [dx, dz] = tangentAt(pts, i);
+      const run = bridgeAt(runs, i);
+      pushCamberedRow(positions, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
+      if (i > 0) addIndices(indices, base, i, 3);
     }
   }
+  for (const fixture of bridgeFixtures) group.add(fixture);
   if (dashPos.length) {
     const dg = new THREE.BufferGeometry();
     dg.setAttribute('position', new THREE.Float32BufferAttribute(dashPos, 3));
@@ -228,13 +420,15 @@ function roadRibbons(group, era) {
     const dashes = new THREE.Mesh(dg, new THREE.MeshLambertMaterial({
       color: 0xc9cdd1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
     }));
+    dashes.receiveShadow = true;
     group.add(dashes);
   }
-  for (const key of ['asphalt', 'gravel']) {
-    const { mat, positions, indices } = surf[key];
+  for (const key of ['asphalt', 'gravel', 'darkGravel', 'dirt']) {
+    const { mat, positions, colors, indices } = surf[key];
     if (!positions.length) continue;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    if (colors) geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.setIndex(indices);
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
@@ -255,6 +449,13 @@ function bgAssets() {
   if (bgGeos) return bgGeos;
   const wall = new THREE.BoxGeometry(1, 1, 1);
   wall.translate(0, 0.5, 0);
+  const wallCols = [];
+  const wp = wall.getAttribute('position');
+  for (let i = 0; i < wp.count; i++) {
+    const shade = wp.getY(i) < 0.001 ? 0.62 : 1.0;
+    wallCols.push(shade, shade, shade);
+  }
+  wall.setAttribute('color', new THREE.Float32BufferAttribute(wallCols, 3));
   // unit gable roof: 1×1 base, ridge along x at y=1
   const A = [-0.5, 0, -0.5], Bc = [0.5, 0, -0.5], Cc = [0.5, 0, 0.5], D = [-0.5, 0, 0.5];
   const R1 = [-0.5, 1, 0], R2 = [0.5, 1, 0];
@@ -271,74 +472,268 @@ function bgAssets() {
   return bgGeos;
 }
 
+let grazerGeos = null;
+function grazerAssets() {
+  if (grazerGeos) return grazerGeos;
+  const part = (geo, x, y, z, rz = 0) => {
+    const g = geo.clone();
+    const m = new THREE.Matrix4();
+    m.compose(
+      new THREE.Vector3(x, y, z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, rz)),
+      new THREE.Vector3(1, 1, 1)
+    );
+    g.applyMatrix4(m);
+    return g;
+  };
+  const box = (w, h, d, x, y, z, rz = 0) => part(new THREE.BoxGeometry(w, h, d), x, y, z, rz);
+  const merge = (parts) => {
+    const pos = [];
+    for (const src of parts) {
+      const g = src.toNonIndexed();
+      const p = g.getAttribute('position');
+      for (let i = 0; i < p.count; i++) pos.push(p.getX(i), p.getY(i), p.getZ(i));
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    return geo;
+  };
+  const legs = (h, spreadX, spreadZ, w = 0.1) => [
+    box(w, h, w, -spreadX, h / 2, -spreadZ),
+    box(w, h, w, spreadX, h / 2, -spreadZ),
+    box(w, h, w, -spreadX, h / 2, spreadZ),
+    box(w, h, w, spreadX, h / 2, spreadZ),
+  ];
+  grazerGeos = {
+    cow: merge([
+      box(1.35, 0.54, 0.5, 0, 0.78, 0),
+      ...legs(0.62, 0.43, 0.18, 0.11),
+      box(0.36, 0.16, 0.18, 0.72, 0.57, 0, -0.62),
+      box(0.32, 0.24, 0.24, 0.96, 0.39, 0, -0.18),
+      box(0.08, 0.16, 0.04, 1.03, 0.52, -0.1, -0.55),
+      box(0.08, 0.16, 0.04, 1.03, 0.52, 0.1, -0.55),
+    ]),
+    sheep: merge([
+      box(0.92, 0.42, 0.42, 0, 0.56, 0),
+      ...legs(0.42, 0.3, 0.15, 0.07),
+      box(0.24, 0.13, 0.14, 0.5, 0.44, 0, -0.55),
+      box(0.22, 0.18, 0.18, 0.68, 0.29, 0, -0.16),
+      box(0.06, 0.1, 0.035, 0.74, 0.39, -0.08, -0.45),
+      box(0.06, 0.1, 0.035, 0.74, 0.39, 0.08, -0.45),
+    ]),
+    horse: merge([
+      box(1.55, 0.5, 0.42, 0, 0.94, 0),
+      ...legs(0.86, 0.5, 0.15, 0.08),
+      box(0.46, 0.16, 0.18, 0.8, 0.78, 0, -0.72),
+      box(0.34, 0.22, 0.2, 1.08, 0.52, 0, -0.2),
+      box(0.06, 0.18, 0.035, 1.15, 0.66, -0.08, -0.38),
+      box(0.06, 0.18, 0.035, 1.15, 0.66, 0.08, -0.38),
+    ]),
+  };
+  return grazerGeos;
+}
+
 function bgSettlement(group, era, smokes) {
   const rng = mulberry32(4300 + era * 17);
-  const props = { hay: [], wood: [], vinda: [], fence: [] };
+  const props = { hay: [], wood: [], vinda: [], fence: [], boxWell: [], garden: [], tuft: [], cow: [], sheep: [], horse: [] };
   const { wall, roof } = bgAssets();
   const skip = (x, z) => nearStagePOI(x, z);
+  const cornersOf = (it, pad = 0) => {
+    const ca = Math.cos(it.rot), sa = Math.sin(it.rot);
+    const hw = it.w / 2 + pad, hd = it.d / 2 + pad;
+    return [[hw, hd], [hw, -hd], [-hw, hd], [-hw, -hd]]
+      .map(([ox, oz]) => [it.x + ox * ca - oz * sa, it.z + ox * sa + oz * ca]);
+  };
+  const waterBlockedAt = (x, z) => {
+    const rv = riverAt(x, z);
+    if (rv && rv.d < rv.hw + 1.5) return true;
+    const st = streamAt(x, z);
+    if (st && st.d < st.hw + 1) return true;
+    const lk = lakeAt(x, z);
+    if (lk && heightAt(x, z) < lk.level + 0.5) return true;
+    if ((era === 3 || era === 4) && pondAt(x, z)) return true;
+    return false;
+  };
+  const waterBlocked = (it) => cornersOf(it).some(([x, z]) => waterBlockedAt(x, z));
+  const roadBlocked = (it) => cornersOf(it).some(([x, z]) => distToRoadEx(era, x, z).d < 4);
+  const itemBlocked = (it) => waterBlocked(it) || roadBlocked(it);
+  const footprintRoadHit = (it, limit = 1.2) => cornersOf(it).some(([x, z]) => distToRoadEx(era, x, z).d < limit);
+  const placementBlocked = (it) => cornersOf(it).some(([x, z]) => {
+    if (distToRoadEx(era, x, z).d < 1) return true;
+    return waterBlockedAt(x, z);
+  });
+  const nudgeBy = (it, blocked) => {
+    if (!blocked(it)) return { it, nudged: false };
+    for (const a of [0, 1.57, 3.14, 4.71, 0.79, 2.36, 3.93, 5.5]) {
+      const moved = { ...it, x: it.x + Math.cos(a) * 16, z: it.z + Math.sin(a) * 16 };
+      if (!blocked(moved)) return { it: moved, nudged: true };
+    }
+    return null;
+  };
+  const nudgeDwelling = (it) => nudgeBy(it, itemBlocked);
+  const nudgeFootprint = (it) => nudgeBy(it, (moved) => itemBlocked(moved) || footprintRoadHit(moved));
+  const insideSiteItem = (px, pz, siteItems) => siteItems.some((it) => {
+    const ca = Math.cos(it.rot), sa = Math.sin(it.rot);
+    const dx = px - it.x, dz = pz - it.z;
+    const lx = dx * ca + dz * sa, lz = -dx * sa + dz * ca;
+    return Math.abs(lx) <= it.w / 2 + 0.6 && Math.abs(lz) <= it.d / 2 + 0.6;
+  });
+  const fencePoleOK = (px, pz, siteItems) => {
+    if (insideSiteItem(px, pz, siteItems)) return false;
+    if (distToRoadEx(era, px, pz).d < 1.2) return false;
+    if (waterBlockedAt(px, pz)) return false;
+    return true;
+  };
+  const localPoint = (x, z, rot, ox, oz) => {
+    const ca = Math.cos(rot), sa = Math.sin(rot);
+    return [x + ox * ca - oz * sa, z + ox * sa + oz * ca];
+  };
+  const addFenceRect = (x, z, w, d, rot, siteItems) => {
+    const pts = [
+      localPoint(x, z, rot, -w / 2, -d / 2),
+      localPoint(x, z, rot, w / 2, -d / 2),
+      localPoint(x, z, rot, w / 2, d / 2),
+      localPoint(x, z, rot, -w / 2, d / 2),
+      localPoint(x, z, rot, -w / 2, -d / 2),
+    ];
+    const poles = [];
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+      const len = Math.hypot(bx - ax, bz - az) || 1;
+      const dx = (bx - ax) / len, dz = (bz - az) / len;
+      const dir = Math.atan2(dx, dz);
+      for (let fp = 0; fp < len; fp += 0.9) {
+        const px = ax + dx * fp, pz = az + dz * fp;
+        if (!fencePoleOK(px, pz, siteItems)) return false;
+        poles.push([px, pz, dir + 0.9 + (poles.length % 2) * 1.3]);
+      }
+    }
+    props.fence.push(...poles);
+    return true;
+  };
   const items = [];
   if (era === 5) {
+    let osmWaterSkipped = 0;
     for (const [x, z, w, d, rot] of BUILDINGS_OSM) {
       if (skip(x, z)) continue;
-      items.push({ x, z, w, d, rot, big: w * d > 220, kind: 'new' });
+      const it = { x, z, w, d, rot, big: w * d > 220, kind: 'new' };
+      if (waterBlocked(it)) { osmWaterSkipped++; continue; }
+      items.push(it);
     }
+    console.info(`bgSettlement: skipped ${osmWaterSkipped} OSM building footprints in water`);
   } else {
     DWELLINGS_OSM.forEach(([x, z, name], si) => {
       // Brežģu Pienotava — the family dairy co-op point: a white plastered
       // creamery by the krogs road in 1935; no such site before the co-op era
       if (/pienotava/i.test(name || '')) {
-        if (era === 4) items.push({ x, z, w: 11, d: 7, rot: 0.98, kind: 'dairy', white: true });
+        if (era === 4) {
+          const dairy = { x, z, w: 11, d: 7, rot: 0.98, kind: 'dairy', white: true };
+          const nudgedDairy = nudgeFootprint(dairy);
+          if (nudgedDairy) items.push(nudgedDairy.it);
+        }
         return;
       }
       if (skip(x, z) || !farmSiteKept(si, era)) return;
-      // OSM place nodes are approximate: nudge any site out of the
-      // carriageway (a farmhouse stood ON the P30 before this check)
-      {
-        const rd = distToRoadEx(era, x, z);
-        if (rd.c <= 1 && rd.d < 8) {
-          let moved = false;
-          for (const a of [0, 1.57, 3.14, 4.71, 0.79, 2.36, 3.93, 5.5]) {
-            const nx2 = x + Math.cos(a) * 16, nz2 = z + Math.sin(a) * 16;
-            if (distToRoadEx(era, nx2, nz2).d >= 8) { x = nx2; z = nz2; moved = true; break; }
-          }
-          if (!moved) return;
-        }
-      }
       const sr = mulberry32(si * 613 + era * 37);
       const rot = sr() * Math.PI;
       const ca = Math.cos(rot), sa = Math.sin(rot);
-      items.push({ x, z, w: 8 + sr() * 5, d: 5.5 + sr() * 2, rot, kind: 'dwell', site: si });
+      // OSM place nodes are approximate: nudge any farmhouse footprint out of
+      // carriageways and water before the whole site is dropped.
+      const nudged = nudgeDwelling({ x, z, w: 8 + sr() * 5, d: 5.5 + sr() * 2, rot, kind: 'dwell', site: si });
+      if (!nudged) return;
+      const hardClear = nudgeFootprint(nudged.it);
+      if (!hardClear) return;
+      const dwelling = hardClear.it;
+      ({ x, z } = dwelling);
+      const siteItems = [dwelling];
+      items.push(dwelling);
       const yd = 15 + sr() * 8;
-      items.push({
+      const barn = {
         x: x + ca * yd, z: z + sa * yd,
         w: 10 + sr() * 7, d: 6 + sr() * 3,
         rot: rot + (sr() - 0.5) * 0.5, kind: 'barn',
-      });
+      };
+      if (!itemBlocked(barn)) { items.push(barn); siteItems.push(barn); }
       if (sr() < 0.65) {
         const yd2 = 12 + sr() * 6;
-        items.push({
+        const klets = {
           x: x - sa * yd2, z: z + ca * yd2,
           w: 5 + sr() * 2, d: 4 + sr(), rot: rot + 1.57, kind: 'klets',
-        });
+        };
+        if (!itemBlocked(klets)) { items.push(klets); siteItems.push(klets); }
       }
       // signs of life in the yard (period props, instanced below)
       if (era < 5) {
+        let hadVinda = false;
         const py = 9 + sr() * 5;
         props.hay.push([x + sa * py, z - ca * py, sr() * 6.3, 0.8 + sr() * 0.5]);
         if (sr() < 0.6) props.hay.push([x + sa * (py + 5), z - ca * (py + 4), sr() * 6.3, 0.7 + sr() * 0.4]);
         if (sr() < 0.75) props.wood.push([x + ca * 6 - sa * 4, z + sa * 6 + ca * 4, rot + 1.57, 0.8 + sr() * 0.4]);
-        if (sr() < 0.55) props.vinda.push([x - ca * 8, z - sa * 8, sr() * 6.3]);
+        if (sr() < (era === 3 ? 0.8 : 0.55)) {
+          props.vinda.push([x - ca * 8, z - sa * 8, sr() * 6.3]);
+          hadVinda = true;
+        }
         // a run of riķu fence closing the yard
         if (sr() < 0.8) {
           const fl = 16 + sr() * 14, fx = x - ca * 12, fz = z - sa * 12;
           for (let fp = 0; fp < fl; fp += 0.9) {
-            props.fence.push([fx + sa * (fp - fl / 2), fz - ca * (fp - fl / 2), rot + 0.9 + (fp % 2) * 1.3]);
+            const px = fx + sa * (fp - fl / 2), pz = fz - ca * (fp - fl / 2);
+            if (fencePoleOK(px, pz, siteItems)) props.fence.push([px, pz, rot + 0.9 + (fp % 2) * 1.3]);
+          }
+        }
+        // appended draws only: the old farm layout stream above stays stable.
+        if (era === 4 && !hadVinda && sr() < 0.5) {
+          const well = { x: x - ca * 8, z: z - sa * 8, w: 1.4, d: 1.4, rot };
+          if (!placementBlocked(well) && !insideSiteItem(well.x, well.z, siteItems)) props.boxWell.push([well.x, well.z, rot]);
+        }
+        if ((era === 3 || era === 4) && sr() < 0.45) {
+          const pw = 14 + sr() * 8, pd = 14 + sr() * 8;
+          const side = sr() < 0.5 ? -1 : 1;
+          const sideOff = side * (2 + sr() * 4);
+          const dist = dwelling.w / 2 + 8 + pw / 2;
+          const paddock = {
+            x: x - ca * dist + sa * sideOff,
+            z: z - sa * dist - ca * sideOff,
+            w: pw, d: pd, rot,
+          };
+          if (!placementBlocked(paddock) && addFenceRect(paddock.x, paddock.z, paddock.w, paddock.d, paddock.rot, siteItems)) {
+            const pick = sr();
+            const kind = pick < 0.45 ? 'cow' : pick < 0.82 ? 'sheep' : 'horse';
+            const count = kind === 'sheep' ? 2 + ((sr() * 2) | 0) : kind === 'cow' ? 1 + (sr() < 0.35 ? 1 : 0) : 1;
+            for (let li = 0; li < count; li++) {
+              const lx = (sr() - 0.5) * (pw - 4), lz = (sr() - 0.5) * (pd - 4);
+              const [px, pz] = localPoint(paddock.x, paddock.z, paddock.rot, lx, lz);
+              props[kind].push([px, pz, sr() * 6.3, 0.85 + sr() * 0.25]);
+            }
+          }
+        }
+        if ((era === 3 || era === 4) && sr() < 0.5) {
+          const garden = {
+            x: x - ca * (dwelling.w / 2 + 4.4),
+            z: z - sa * (dwelling.w / 2 + 4.4),
+            w: 4, d: 7, rot,
+          };
+          if (!placementBlocked(garden) && !insideSiteItem(garden.x, garden.z, siteItems)) {
+            props.garden.push([garden.x, garden.z, garden.rot]);
+            const rows = 3 + ((sr() * 3) | 0);
+            for (let gr = 0; gr < rows; gr++) {
+              const ox = -garden.w / 2 + ((gr + 1) * garden.w) / (rows + 1);
+              for (let lz = -garden.d / 2 + 0.55; lz < garden.d / 2 - 0.3; lz += 0.85) {
+                const [tx, tz] = localPoint(garden.x, garden.z, garden.rot, ox + (sr() - 0.5) * 0.14, lz + (sr() - 0.5) * 0.18);
+                props.tuft.push([tx, tz, sr() * 6.3, 0.7 + sr() * 0.45]);
+              }
+            }
           }
         }
       }
     });
   }
-  const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff }), items.length);
+  // the planters ask "is there a building here?" — hand them the final,
+  // validated footprints (plus the stage rects footprints.js lists itself)
+  registerFootprints(era, items);
+  const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), items.length);
   const roofs = new THREE.InstancedMesh(roof, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), items.length);
   walls.castShadow = roofs.castShadow = true;
   const dummy = new THREE.Object3D();
@@ -346,10 +741,9 @@ function bgSettlement(group, era, smokes) {
   items.forEach((it, i) => {
     // seat on the LOWEST footprint corner and stretch the walls up to the
     // highest — a single centre sample floated corners 2m+ on slopes
-    const cca = Math.cos(it.rot), csa = Math.sin(it.rot);
     let minH = Infinity, maxH = -Infinity;
-    for (const [ox, oz] of [[it.w / 2, it.d / 2], [it.w / 2, -it.d / 2], [-it.w / 2, it.d / 2], [-it.w / 2, -it.d / 2]]) {
-      const hh = heightAt(it.x + ox * cca - oz * csa, it.z + ox * csa + oz * cca);
+    for (const [cx, cz] of cornersOf(it)) {
+      const hh = heightAt(cx, cz);
       if (hh < minH) minH = hh;
       if (hh > maxH) maxH = hh;
     }
@@ -365,15 +759,19 @@ function bgSettlement(group, era, smokes) {
     // walls: aged log browns before the war, mixed render/wood today
     if (era === 5) {
       const pick = rng();
-      if (pick < 0.35) col.setRGB(0.82, 0.78, 0.68);        // render/plaster
-      else if (pick < 0.6) col.setRGB(0.62, 0.55, 0.44);    // timber
-      else if (pick < 0.8) col.setRGB(0.72, 0.68, 0.62);    // silicate/grey
-      else col.setRGB(0.5, 0.42, 0.34);                     // dark wood
-      if (it.big) col.setRGB(0.66, 0.68, 0.7);              // steel-clad barn
+      if (pick < 0.22) col.setRGB(0.66, 0.55, 0.36);        // ochre plaster
+      else if (pick < 0.4) col.setRGB(0.55, 0.53, 0.49);    // silicate brick
+      else if (pick < 0.54) col.setRGB(0.45, 0.28, 0.20);   // red brick
+      else if (pick < 0.7) col.setRGB(0.32, 0.38, 0.27);    // painted wood
+      else if (pick < 0.88) col.setRGB(0.42, 0.35, 0.26);   // weathered timber
+      else col.setRGB(0.28, 0.24, 0.20);                    // tarred wood
+      // darker than the palette midpoint: mid-grey steel tone-maps to white
+      // under the noon sun and reads as the old untextured box
+      if (it.big) col.setRGB(0.36, 0.41, 0.39);             // steel-clad barn
     } else if (it.white) {
       col.setRGB(0.88, 0.85, 0.78);                         // plastered creamery
     } else {
-      col.setRGB(0.42 + rng() * 0.12, 0.34 + rng() * 0.08, 0.24 + rng() * 0.06);
+      col.setRGB(0.42 + (rng() - 0.5) * 0.1, 0.34 + (rng() - 0.5) * 0.1, 0.24 + (rng() - 0.5) * 0.1);
     }
     walls.setColorAt(i, col);
     // roof: ridge along the longer footprint axis
@@ -386,7 +784,7 @@ function bgSettlement(group, era, smokes) {
     if (era === 5) {
       const pick = rng();
       if (it.big) col.setRGB(0.45, 0.47, 0.5);
-      else if (pick < 0.4) col.setRGB(0.48, 0.2, 0.14);     // red metal/tile
+      else if (pick < 0.5) col.setRGB(0.48, 0.2, 0.14);     // red metal/tile
       else if (pick < 0.7) col.setRGB(0.36, 0.38, 0.4);     // grey metal
       else col.setRGB(0.3, 0.28, 0.26);                     // dark bitumen
     } else if (era === 4) {
@@ -402,71 +800,147 @@ function bgSettlement(group, era, smokes) {
   walls.instanceMatrix.needsUpdate = roofs.instanceMatrix.needsUpdate = true;
   group.add(walls, roofs);
 
-  // --- yard props, all instanced: haystacks, woodpiles, well-sweeps -------
-  if (era < 5 && props.hay.length + props.wood.length + props.vinda.length + props.fence.length > 0) {
+  // --- yard props, all instanced: haystacks, woodpiles, wells, fences ------
+  if (era < 5 && props.hay.length + props.wood.length + props.vinda.length + props.fence.length +
+      props.boxWell.length + props.garden.length + props.tuft.length + props.cow.length + props.sheep.length + props.horse.length > 0) {
     const put = (mesh, arr, fill) => {
+      if (!arr.length) return;
       arr.forEach((p, i) => { fill(p, i); mesh.setMatrixAt(i, dummy.matrix); });
       mesh.count = arr.length;
       mesh.instanceMatrix.needsUpdate = true;
       mesh.castShadow = true;
       group.add(mesh);
     };
-    const hayCone = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 2.4, 9), MAT.hay, props.hay.length);
-    put(hayCone, props.hay, ([x, z, r, sc]) => {
-      dummy.position.set(x, heightAt(x, z) + 1.2 * sc - 0.05, z);
-      dummy.rotation.set(0, r, 0);
-      dummy.scale.setScalar(sc);
-      dummy.updateMatrix();
-    });
-    const woodGeo = new THREE.BoxGeometry(2.1, 1.05, 1.0);
-    const wood = new THREE.InstancedMesh(woodGeo, MAT.logOld, props.wood.length);
-    put(wood, props.wood, ([x, z, r, sc]) => {
-      dummy.position.set(x, heightAt(x, z) + 0.5 * sc, z);
-      dummy.rotation.set(0, r, 0);
-      dummy.scale.setScalar(sc);
-      dummy.updateMatrix();
-    });
-    // vinda: post + counterweighted sweep beam + hanging rod, baked into one
-    // transform frame
-    const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.12, 3.2, 6), MAT.logOld, props.vinda.length);
-    const beamGeo = new THREE.CylinderGeometry(0.05, 0.07, 4.8, 5);
-    beamGeo.rotateZ(1.05);
-    beamGeo.translate(0.9, 3.1, 0);
-    const beam = new THREE.InstancedMesh(beamGeo, MAT.lightWood, props.vinda.length);
-    const rodGeo = new THREE.CylinderGeometry(0.025, 0.025, 2.2, 4);
-    rodGeo.translate(2.9, 2.2, 0);
-    const rod = new THREE.InstancedMesh(rodGeo, MAT.lightWood, props.vinda.length);
-    props.vinda.forEach(([x, z, r], i) => {
-      dummy.position.set(x, heightAt(x, z) + 1.55, z);
-      dummy.rotation.set(0, r, 0);
-      dummy.scale.setScalar(1);
-      dummy.updateMatrix();
-      post.setMatrixAt(i, dummy.matrix);
-      dummy.position.y -= 1.55;
-      dummy.updateMatrix();
-      beam.setMatrixAt(i, dummy.matrix);
-      rod.setMatrixAt(i, dummy.matrix);
-    });
-    for (const m of [post, beam, rod]) {
-      m.count = props.vinda.length;
-      m.instanceMatrix.needsUpdate = true;
-      m.castShadow = true;
-      group.add(m);
+    if (props.hay.length) {
+      const hayCone = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 2.4, 9), MAT.hay, props.hay.length);
+      put(hayCone, props.hay, ([x, z, r, sc]) => {
+        dummy.position.set(x, heightAt(x, z) + 1.2 * sc - 0.05, z);
+        dummy.rotation.set(0, r, 0);
+        dummy.scale.setScalar(sc);
+        dummy.updateMatrix();
+      });
     }
-    // slanted riķu-fence poles
-    const fenceGeo = new THREE.CylinderGeometry(0.035, 0.05, 2.1, 4);
-    fenceGeo.rotateZ(0.42);
-    const fence = new THREE.InstancedMesh(fenceGeo, MAT.logOld, props.fence.length);
-    props.fence.forEach(([x, z, r], i) => {
-      dummy.position.set(x, heightAt(x, z) + 0.8, z);
-      dummy.rotation.set(0, r, 0);
-      dummy.scale.setScalar(1);
-      dummy.updateMatrix();
-      fence.setMatrixAt(i, dummy.matrix);
-    });
-    fence.count = props.fence.length;
-    fence.instanceMatrix.needsUpdate = true;
-    group.add(fence);
+    if (props.wood.length) {
+      const woodGeo = new THREE.BoxGeometry(2.1, 1.05, 1.0);
+      const wood = new THREE.InstancedMesh(woodGeo, MAT.logOld, props.wood.length);
+      put(wood, props.wood, ([x, z, r, sc]) => {
+        dummy.position.set(x, heightAt(x, z) + 0.5 * sc, z);
+        dummy.rotation.set(0, r, 0);
+        dummy.scale.setScalar(sc);
+        dummy.updateMatrix();
+      });
+    }
+    if (props.vinda.length) {
+      // vinda: post + counterweighted sweep beam + hanging rod, baked into
+      // one transform frame
+      const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.12, 3.2, 6), MAT.logOld, props.vinda.length);
+      const beamGeo = new THREE.CylinderGeometry(0.05, 0.07, 4.8, 5);
+      beamGeo.rotateZ(1.05);
+      beamGeo.translate(0.9, 3.1, 0);
+      const beam = new THREE.InstancedMesh(beamGeo, MAT.lightWood, props.vinda.length);
+      const rodGeo = new THREE.CylinderGeometry(0.025, 0.025, 2.2, 4);
+      rodGeo.translate(2.9, 2.2, 0);
+      const rod = new THREE.InstancedMesh(rodGeo, MAT.lightWood, props.vinda.length);
+      props.vinda.forEach(([x, z, r], i) => {
+        dummy.position.set(x, heightAt(x, z) + 1.55, z);
+        dummy.rotation.set(0, r, 0);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+        post.setMatrixAt(i, dummy.matrix);
+        dummy.position.y -= 1.55;
+        dummy.updateMatrix();
+        beam.setMatrixAt(i, dummy.matrix);
+        rod.setMatrixAt(i, dummy.matrix);
+      });
+      for (const m of [post, beam, rod]) {
+        m.count = props.vinda.length;
+        m.instanceMatrix.needsUpdate = true;
+        m.castShadow = true;
+        group.add(m);
+      }
+    }
+    if (props.boxWell.length) {
+      const shaft = new THREE.InstancedMesh(wall, MAT.plank, props.boxWell.length);
+      const wellRoof = new THREE.InstancedMesh(roof, MAT.darkWood, props.boxWell.length);
+      props.boxWell.forEach(([x, z, r], i) => {
+        const y = heightAt(x, z);
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(0, -r, 0);
+        dummy.scale.set(1, 0.82, 1);
+        dummy.updateMatrix();
+        shaft.setMatrixAt(i, dummy.matrix);
+        dummy.position.y = y + 0.82;
+        dummy.scale.set(1.35, 0.45, 1.15);
+        dummy.updateMatrix();
+        wellRoof.setMatrixAt(i, dummy.matrix);
+      });
+      for (const m of [shaft, wellRoof]) {
+        m.count = props.boxWell.length;
+        m.instanceMatrix.needsUpdate = true;
+        m.castShadow = true;
+        group.add(m);
+      }
+    }
+    if (props.garden.length) {
+      const gardenGeo = new THREE.PlaneGeometry(4, 7);
+      gardenGeo.rotateX(-Math.PI / 2);
+      const gardenMat = new THREE.MeshLambertMaterial({
+        color: 0x4d3d2b, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      });
+      const gardens = new THREE.InstancedMesh(gardenGeo, gardenMat, props.garden.length);
+      put(gardens, props.garden, ([x, z, r]) => {
+        dummy.position.set(x, heightAt(x, z) + 0.04, z);
+        dummy.rotation.set(0, -r, 0);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+      });
+      gardens.receiveShadow = true;
+    }
+    if (props.tuft.length) {
+      const tuftGeo = new THREE.ConeGeometry(0.08, 0.22, 5);
+      const tufts = new THREE.InstancedMesh(tuftGeo, new THREE.MeshLambertMaterial({ color: 0x3f6f2d }), props.tuft.length);
+      put(tufts, props.tuft, ([x, z, r, sc]) => {
+        dummy.position.set(x, heightAt(x, z) + 0.11 * sc, z);
+        dummy.rotation.set(0, r, 0);
+        dummy.scale.setScalar(sc);
+        dummy.updateMatrix();
+      });
+    }
+    if (props.fence.length) {
+      // slanted riķu-fence poles
+      const fenceGeo = new THREE.CylinderGeometry(0.035, 0.05, 2.1, 4);
+      fenceGeo.rotateZ(0.42);
+      const fence = new THREE.InstancedMesh(fenceGeo, MAT.logOld, props.fence.length);
+      props.fence.forEach(([x, z, r], i) => {
+        dummy.position.set(x, heightAt(x, z) + 0.8, z);
+        dummy.rotation.set(0, r, 0);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+        fence.setMatrixAt(i, dummy.matrix);
+      });
+      fence.count = props.fence.length;
+      fence.instanceMatrix.needsUpdate = true;
+      group.add(fence);
+    }
+    const geos = grazerAssets();
+    const grazerMat = {
+      cow: new THREE.MeshLambertMaterial({ color: new THREE.Color(0.42, 0.24, 0.16) }),
+      sheep: new THREE.MeshLambertMaterial({ color: new THREE.Color(0.78, 0.75, 0.68) }),
+      horse: new THREE.MeshLambertMaterial({ color: new THREE.Color(0.18, 0.08, 0.045) }),
+    };
+    const putGrazer = (kind) => {
+      if (!props[kind].length) return;
+      const mesh = new THREE.InstancedMesh(geos[kind], grazerMat[kind], props[kind].length);
+      put(mesh, props[kind], ([x, z, r, sc]) => {
+        dummy.position.set(x, heightAt(x, z), z);
+        dummy.rotation.set(0, -r, 0);
+        dummy.scale.setScalar(sc);
+        dummy.updateMatrix();
+      });
+    };
+    putGrazer('cow');
+    putGrazer('sheep');
+    putGrazer('horse');
   }
   // hearth smoke at the farms nearest the stage — the horizon breathes
   if (smokes && era < 5) {
@@ -545,7 +1019,32 @@ function wildSpawns(era, spawns) {
   spawns.push(['butterflyW', 6, meadow, { medium: 'air', fly: 'flutter' }]);
   spawns.push(['butterflyO', 4, wideMeadow, { medium: 'air', fly: 'flutter' }]);
   spawns.push(['butterflyY', 4, meadow, { medium: 'air', fly: 'flutter' }]);
-  spawns.push(['buzzard', 1, { x: S2.x + 400, z: S2.z + 300, r: 1 }, { medium: 'air', fly: 'soar', alt: [70, 130] }]);
+  // a soaring pair — with the old main.js triangle birds gone, the buzzards
+  // ARE the sky (and a pair circling a thermal is the true Vidzeme default)
+  spawns.push(['buzzard', 2, { x: S2.x + 400, z: S2.z + 300, r: 1 }, { medium: 'air', fly: 'soar', alt: [70, 130] }]);
+  spawns.push(['buzzard', 1, { x: S2.x - 300, z: S2.z - 250, r: 1 }, { medium: 'air', fly: 'soar', alt: [60, 110] }]);
+  // bumblebees work the flower layer wherever there are flowers
+  if (era >= 1) {
+    spawns.push(['bee', 7, meadow, { medium: 'air', fly: 'flutter', low: true }]);
+    spawns.push(['bee', 4, wideMeadow, { medium: 'air', fly: 'flutter', low: true }]);
+  }
+  // baltā cielava — the national bird flits between yard fence posts,
+  // wags on top, drops to the grass to forage (inhabited eras)
+  if (era >= 2) {
+    const mkPerches = (cx, cz) => {
+      const pts = [];
+      for (let i = 0; i < 9; i++) {
+        const pa = (i / 9) * Math.PI * 2 + 0.4;
+        const pr = 9 + (i % 3) * 4.5;
+        const px = cx + Math.cos(pa) * pr, pz = cz + Math.sin(pa) * pr;
+        pts.push([px, heightAt(px, pz) + 0.95 + (i % 2) * 0.35, pz]);
+      }
+      pts.push([cx + 4, heightAt(cx + 4, cz - 3) + 4.1, cz - 3]);   // the roof ridge perch
+      return pts;
+    };
+    spawns.push(['wagtail', 3, { x: S2.x, z: S2.z, r: 30 }, { medium: 'air', fly: 'perch', perches: mkPerches(S2.x, S2.z) }]);
+    if (era >= 3) spawns.push(['wagtail', 2, { x: LOC.MANOR.x, z: LOC.MANOR.z, r: 30 }, { medium: 'air', fly: 'perch', perches: mkPerches(LOC.MANOR.x, LOC.MANOR.z) }]);
+  }
   spawns.push(['crane', 7, { x: 500, z: 1700, r: 400 }, { medium: 'air', fly: 'cross', level: 360 }]);
 
   if (era <= 2) {
@@ -583,6 +1082,102 @@ function wildSpawns(era, spawns) {
     spawns.push(['stork', 2, { x: S2.x - 100, z: S2.z + 150, r: 55 }, { speed: 0.4, grazeBias: 0.55 }]);
     spawns.push(['wolf', 1, { x: S2.x + 300, z: S2.z - 1300, r: 150 }, { speed: 1.3, grazeBias: 0.4 }]);
   }
+}
+
+function shadowProps(g) {
+  g.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    }
+  });
+  return g;
+}
+
+function gravelEllipse(x, z, rx, rz, rot, color) {
+  const pos = [x, meshHeightAt(x, z) + 0.055, z];
+  const idx = [];
+  const N = 36;
+  const ca = Math.cos(rot), sa = Math.sin(rot);
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const lx = Math.cos(a) * rx, lz = Math.sin(a) * rz;
+    const px = x + lx * ca - lz * sa, pz = z + lx * sa + lz * ca;
+    pos.push(px, meshHeightAt(px, pz) + 0.055, pz);
+  }
+  for (let i = 0; i < N; i++) idx.push(0, 1 + ((i + 1) % N), 1 + i);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshLambertMaterial({
+    color, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function infoSign() {
+  const g = new THREE.Group();
+  for (const x of [-0.32, 0.32]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.15, 0.08), MAT.darkWood);
+    post.position.set(x, 0.58, 0);
+    g.add(post);
+  }
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.06), MAT.plank);
+  panel.position.set(0, 1.12, 0);
+  panel.rotation.x = -0.16;
+  const face = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.46, 0.018), new THREE.MeshLambertMaterial({ color: 0xd8cfac }));
+  face.position.set(0, 1.12, -0.04);
+  face.rotation.x = -0.16;
+  g.add(panel, face);
+  return shadowProps(g);
+}
+
+function picnicTable() {
+  const g = new THREE.Group();
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.62), MAT.plank);
+  top.position.y = 0.72;
+  g.add(top);
+  for (const z of [-0.58, 0.58]) {
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.1, 0.22), MAT.plank);
+    bench.position.set(0, 0.46, z);
+    g.add(bench);
+  }
+  for (const x of [-0.58, 0.58]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.62, 0.14), MAT.darkWood);
+    leg.position.set(x, 0.33, -0.22);
+    const leg2 = leg.clone();
+    leg2.position.z = 0.22;
+    g.add(leg, leg2);
+  }
+  return shadowProps(g);
+}
+
+function fireRing() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const st = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), MAT.stone);
+    st.position.set(Math.cos(a) * 0.52, 0.08, Math.sin(a) * 0.52);
+    st.rotation.y = -a;
+    g.add(st);
+  }
+  return shadowProps(g);
+}
+
+function outhouse() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.65, 1.2), MAT.plank);
+  body.position.y = 0.82;
+  const door = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.25, 0.04), MAT.darkWood);
+  door.position.set(0, 0.68, -0.62);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.14, 1.34), MAT.darkWood);
+  roof.position.y = 1.72;
+  roof.rotation.x = -0.18;
+  g.add(body, door, roof);
+  return shadowProps(g);
 }
 
 export function buildEra(era, ctx) {
@@ -761,6 +1356,9 @@ export function buildEra(era, ctx) {
     spawns.push(['goose', modern ? 3 : 4, { x: S.x - 10, z: S.z + 14, r: 14 }]);
     spawns.push(['storkNest', 1, { x: S.x + 30, z: S.z + 22, r: 0 }]);
     spawns.push(['stork', 1, { x: S.x - 90, z: S.z + 50, r: 40 }]);
+    // nests scattered on the background farms too — the stork parish
+    spawns.push(['storkNest', 1, { x: 812, z: 452, r: 0 }]);
+    spawns.push(['storkNest', 1, { x: 439, z: -455, r: 0 }]);
     spawns.push(['horseBay', 1, { x: K.x + 14, z: K.z + 16, r: 8 }]); // traveller's horse at the krogs
   }
 
@@ -790,6 +1388,11 @@ export function buildEra(era, ctx) {
 
     // Brežģa kalns: the 2017 observation tower, the summit oak, the Jāņi pyre
     add(observationTower(), B.x, B.z, 0.2);
+    addRaw(gravelEllipse(B.x + 55, B.z - 60, 12, 7, -0.58, 0x8d7c5f));
+    add(infoSign(), B.x + 48, B.z - 52, -0.7);
+    add(picnicTable(), B.x + 24, B.z - 18, -0.45);
+    add(fireRing(), B.x + 10, B.z - 8, 0.25);
+    add(outhouse(), B.x + 38, B.z - 36, 0.55);
     bgSettlement(g, 5, smokes);
     roadRibbons(g, 5);
     add(pyre(), B.x + 22, B.z + 10, 0.4);
@@ -798,8 +1401,14 @@ export function buildEra(era, ctx) {
     utilityPoles(g, true);
 
     spawns.push(['cattleFarm', 4, { x: S.x - 115, z: S.z + 35, r: 60 }]);
+    // the ARK herd grazes OPEN floodplain — the satellite says the meadow
+    // by the Gauja at (101,-374) is grass today; the first pick was forest
+    spawns.push(['horseKonik', 8, { x: 101, z: -374, r: 55 }]);
     spawns.push(['storkNest', 1, { x: S.x + 30, z: S.z + 22, r: 0 }]);
     spawns.push(['stork', 1, { x: S.x - 90, z: S.z + 50, r: 40 }]);
+    // nests scattered on the background farms too — the stork parish
+    spawns.push(['storkNest', 1, { x: 812, z: 452, r: 0 }]);
+    spawns.push(['storkNest', 1, { x: 439, z: -455, r: 0 }]);
     spawns.push(['elk', 2, { x: B.x - 700, z: B.z - 900, r: 90 }]); // forest has returned
   }
 

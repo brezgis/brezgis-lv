@@ -128,12 +128,12 @@ export function buildSky(scene, renderer) {
   // sky-reflecting water (grazing-bright rivers vs near-black meadow read
   // as glare, not evening)
   const stops = [
-    { t: 0.0, zen: 0x2e4a72, fog: 0xb99a84, hemiI: 0.56 },
-    { t: 0.12, zen: 0x3c6ba4, fog: 0xd5e0da, hemiI: 0.72 },
-    { t: 0.35, zen: 0x3f6fa8, fog: 0xcfe0e8, hemiI: 0.85 },
-    { t: 0.62, zen: 0x3f6fa8, fog: 0xd3e2e6, hemiI: 0.8 },
-    { t: 0.82, zen: 0x35577f, fog: 0xe6cba6, hemiI: 0.66 },
-    { t: 1.0, zen: 0x27395c, fog: 0x9a7660, hemiI: 0.52 },
+    { t: 0.0, zen: 0x2e4a72, fog: 0xb99a84, hemiI: 0.64 },
+    { t: 0.12, zen: 0x3c6ba4, fog: 0xd5e0da, hemiI: 0.84 },
+    { t: 0.35, zen: 0x3f6fa8, fog: 0xcfe0e8, hemiI: 1.02 },
+    { t: 0.62, zen: 0x3f6fa8, fog: 0xd3e2e6, hemiI: 0.96 },
+    { t: 0.82, zen: 0x35577f, fog: 0xe6cba6, hemiI: 0.78 },
+    { t: 1.0, zen: 0x27395c, fog: 0x9a7660, hemiI: 0.6 },
   ];
   const cA = new THREE.Color(), cB = new THREE.Color();
   function stopLerp(t, key, target) {
@@ -355,6 +355,7 @@ export function buildSky(scene, renderer) {
 
     // stars & aurora darkness gate
     const dark = clamp(-sd.y * 9 + 0.25, 0, 1) * 0.9 + state.sunLow * 0.12;
+    state.dark = dark;              // effects gate on true night vs twilight
     stars.material.opacity = clamp(dark, 0, 0.95);
     stars.position.set(focus.x, 0, focus.z);
 

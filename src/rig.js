@@ -9,9 +9,8 @@
 // Feel constants adapted from LAAS (MIT, github.com/Braffolk/fable5-world-demo).
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { distToRiver, riverLevelNear } from './landuse.js';
-import { LAKES } from './geodata.js';
-import { pointInPoly, clamp } from './util.js';
+import { waterLevelAt } from './riverzone.js';
+import { clamp } from './util.js';
 
 const EYE_HEIGHT = 1.7;
 const WALK_SPEED = 4.6;
@@ -39,13 +38,8 @@ const KEY_ALIAS = {
 };
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD']);
 
-function waterLevelAt(x, z) {
-  let w = -Infinity;
-  if (distToRiver(x, z) < 18) w = Math.max(w, riverLevelNear(x, z));
-  for (const lake of LAKES) {
-    if (pointInPoly(x, z, lake.poly)) w = Math.max(w, lake.level);
-  }
-  return w;
+export function flyBoostFor(alt) {
+  return 1 + clamp((alt - 14) / 55, 0, 5);
 }
 
 export class Rig {
@@ -55,7 +49,9 @@ export class Rig {
     this.mode = 'cinema';         // 'cinema' | 'fly' | 'walk'
     this.yaw = 0; this.pitch = 0;
     this.yawT = 0; this.pitchT = 0;
-    this.flySpeed = 26;
+    this.flySpeed = 32;
+    this.sprint = false;
+    this.era = 4;
     this.keys = new Set();
     this.vel = new THREE.Vector3();
     this.basePos = new THREE.Vector3();
@@ -68,6 +64,7 @@ export class Rig {
     this.collideFn = null;        // (x, z, feetY) -> [x, z], set by main
     this.jumpAt = -1;
     this.lastSpaceT = -1e9;
+    this.lastWT = -1e9;
 
     let unlockAt = -1e9;
     const requestLock = () => {
@@ -121,14 +118,26 @@ export class Rig {
           }
         }
       }
+      if (code === 'KeyW' && this.mode === 'fly' && !e.repeat) {
+        const now = performance.now();
+        if (now - this.lastWT < DOUBLE_TAP_MS) this.sprint = true;
+        this.lastWT = now;
+      }
       this.keys.add(code);
     });
-    addEventListener('keyup', (e) => this.keys.delete(KEY_ALIAS[e.code] || e.code));
+    addEventListener('keyup', (e) => {
+      const code = KEY_ALIAS[e.code] || e.code;
+      this.keys.delete(code);
+      if (code === 'KeyW') this.sprint = false;
+    });
     addEventListener('wheel', (e) => {
       if (this.mode !== 'fly' || !this.locked) return;
       this.flySpeed = clamp(this.flySpeed * (e.deltaY > 0 ? 0.85 : 1.18), 3, 300);
     }, { passive: true });
-    addEventListener('blur', () => this.keys.clear());
+    addEventListener('blur', () => {
+      this.keys.clear();
+      this.sprint = false;
+    });
   }
 
   // read the current camera pose into the rig (after intro/preset moves)
@@ -146,6 +155,7 @@ export class Rig {
     const from = this.mode;
     this.mode = mode;
     if (from === 'cinema') this.adoptCamera();
+    if (mode !== 'fly') this.sprint = false;
     if (mode === 'walk') {
       // do NOT snap to the ground: if you were flying you now fall to it
       const g = heightAt(this.basePos.x, this.basePos.z) + EYE_HEIGHT;
@@ -186,12 +196,14 @@ export class Rig {
       let up = 0;
       if (this.keys.has('Space') || this.keys.has('KeyE')) up += 1;
       if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.keys.has('KeyQ')) up -= 1;
+      const eyeGround = heightAt(this.basePos.x, this.basePos.z) + EYE_HEIGHT;
+      const alt = this.basePos.y - (eyeGround - EYE_HEIGHT);
+      const speed = this.flySpeed * flyBoostFor(alt) * (this.sprint ? 2.3 : 1);
       if (wish.lengthSq() > 0) wish.normalize();
       wish.y = up * 0.85;
-      this.vel.lerp(wish.multiplyScalar(this.flySpeed), 1 - Math.exp(-6 * dt));
+      this.vel.lerp(wish.multiplyScalar(speed), 1 - Math.exp(-6 * dt));
       this.basePos.addScaledVector(this.vel, dt);
       this.applyCollision(this.basePos.y - 1.0);
-      const eyeGround = heightAt(this.basePos.x, this.basePos.z) + EYE_HEIGHT;
       if (this.basePos.y <= eyeGround + LAND_EPS) {
         if (up < 0) {
           // settled onto the turf while sinking: that's a landing
@@ -218,7 +230,7 @@ export class Rig {
     this.applyCollision(this.basePos.y - EYE_HEIGHT);
 
     const ground = heightAt(this.basePos.x, this.basePos.z);
-    const water = waterLevelAt(this.basePos.x, this.basePos.z);
+    const water = waterLevelAt(this.basePos.x, this.basePos.z, this.era);
 
     if (this.grounded && this.jumpAt > 0 && performance.now() - this.jumpAt < 150) {
       this.velY = JUMP_V0;

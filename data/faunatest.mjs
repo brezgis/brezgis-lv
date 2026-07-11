@@ -24,6 +24,14 @@ const subjects = [
   ['frog', { x: rp[0] + 14, z: rp[1], r: 10 }, { hop: true, hopLen: 0.32, hopH: 0.14, hopDur: 0.3, restT: [4, 9], chainT: 0.5 }, { minMove: 0.3 }],
   ['roeDeer', meadow, { grazeBias: 0.75 }, { minMove: 2, land: true }],
   ['wolf', meadow, { speed: 1.3, grazeBias: 0.4 }, { minMove: 4, land: true }],
+  ['wagtail', meadow, {
+    medium: 'air', fly: 'perch',
+    perches: [0, 1, 2, 3].map((i) => {
+      const px = meadow.x + Math.cos(i * 1.57) * 12, pz = meadow.z + Math.sin(i * 1.57) * 12;
+      return [px, heightAt(px, pz) + 1.0, pz];
+    }),
+  }, { minMove: 6, path: true }],
+  ['bee', meadow, { medium: 'air', fly: 'flutter', low: true }, { minMove: 5, air: [0.05, 1.6], path: true }],
 ];
 
 const recs = subjects.map(([kind, home, opts]) => mgr.spawn(kind, home, opts));

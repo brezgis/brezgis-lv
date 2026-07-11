@@ -1,0 +1,35 @@
+{
+  "verdicts": [
+    {
+      "finding": "Water fauna do not translate between probe dumps",
+      "verdict": "FIXED",
+      "reason": "Direct simulation now validates the behaviour that screenshots cannot: node data/faunatest.mjs passes, with fishPerch moving 20.3 m, duckM 10.7 m, and beaver 10.3 m over 40 sim-seconds. A Node source check also confirms the distance-cull block in src/animals.js only toggles visibility and contains no continue before tickWater, so culled water fauna keep simulating."
+    },
+    {
+      "finding": "Flutter butterflies often remain fixed at probe precision",
+      "verdict": "FIXED",
+      "reason": "node data/faunatest.mjs passes the flutter control, with butterflyW moving 19.7 m over 40 sim-seconds against an 8 m threshold. A Node source check confirms the flutter branch now seeds guaranteed horizontal drift when vx/vz are low, so zero-mean noise can no longer leave butterflies fixed at probe precision."
+    },
+    {
+      "finding": "Molehill placement skips lake/pond water and only validates the cluster seed",
+      "verdict": "FIXED",
+      "reason": "The r2 lake and field target shots no longer show the reported bad molehills. A placement mirror of the current placementsFor code found 0 rendered molehill violations after stride caps when checking final child positions against forest, river, field, lake, and pond predicates."
+    },
+    {
+      "finding": "Forest still-life offsets cross out of forest and into fields/banks",
+      "verdict": "FIXED",
+      "reason": "src/vegetation.js now gates anthills, mushrooms, cones, twigs, and litter through okMicro at their final coordinates. A placement mirror of the rendered subsets found 0 micro-prop violations for low forest density, fields, river banks, lakes, or the pond, and the r2 forest-prop target no longer shows field-only forest clutter."
+    },
+    {
+      "finding": "Boletus caps hover above their heightAt anchors",
+      "verdict": "FIXED",
+      "reason": "The bolete cap geometry was translated down relative to the old hover: a fresh THREE geometry probe reports shroomB bbox minY=-0.0092 and maxY=0.0652, so caps placed at heightAt now contact or slightly sink into the terrain instead of floating above it. The r2 bolete macro does not show the previous visible gap."
+    },
+    {
+      "finding": "Leaf litter is a flat raised disc that slices sloped terrain",
+      "verdict": "PARTIAL",
+      "reason": "The fix tilts and shrinks the litter disc, but it is still a flat CircleGeometry patch rather than draped terrain geometry. A rendered-subset audit of the current placement transform still found 239 of 486 litter discs with more than 1 cm of terrain edge penetration; the worst sampled case had 0.352 m penetration and 0.451 m opposite-edge float. The r2 litter close-up still reads as a large flat polygonal patch, so the original contact problem is mitigated but not resolved."
+    }
+  ],
+  "new_issues": []
+}

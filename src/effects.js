@@ -62,8 +62,11 @@ export class Effects {
     this.group.add(this.fireflies);
     this.fireflyCenter = new THREE.Vector3();
 
-    // mist patches (shown at dawn/dusk over the water)
-    this.mistMat = new THREE.SpriteMaterial({ map: this.blob, color: 0xe8eef2, transparent: true, opacity: 0, depthWrite: false });
+    // mist patches (shown at dawn/dusk over the water). Muted blue-grey —
+    // the old near-white at 0.34 opacity read as glowing ovals, and being
+    // SPRITES they turn flat-on under an aerial camera: a white oval lying
+    // on the lake. Colour + twilight gate + altitude fade fix all three.
+    this.mistMat = new THREE.SpriteMaterial({ map: this.blob, color: 0xc7d2d6, transparent: true, opacity: 0, depthWrite: false });
     this.mists = [];
 
     // aurora borealis — glacial-era dusk only
@@ -162,12 +165,17 @@ export class Effects {
     this.fires = [];
   }
 
-  tick(t, dt, wind, sunLow) {
+  tick(t, dt, wind, sunLow, dark = 0, camPos = null) {
     // smoke columns
     for (const s of this.smokes) {
       const pos = s.pts.geometry.attributes.position;
       const size = s.pts.geometry.attributes.aSize;
       const alpha = s.pts.geometry.attributes.aAlpha;
+      // seen straight down, 34 stacked puffs collapse into one bright disc —
+      // "a random white oval" over every hearth from the air. Thin the
+      // column as the camera rises above it; eye-level cosiness unchanged.
+      let aerialK = 1;
+      if (camPos) aerialK = 1 - Math.min(0.8, Math.max(0, (camPos.y - (s.y + 14) - 25) / 110));
       s.parts.forEach((p, i) => {
         p.age += dt;
         if (p.age > s.life) { p.age = 0; p.drift = rng() * 6.3; }
@@ -179,7 +187,7 @@ export class Effects {
           s.y + rise,
           s.z + Math.cos(p.age * 1.1 + p.drift) * 1.0 * u + Math.cos(p.drift * 5 + u * 7) * 0.5 * u + wind.y * u * u * 14);
         size.setX(i, 0.5 + u * 3.6 + Math.sin(p.drift) * 0.3);
-        alpha.setX(i, 0.09 * Math.sin(Math.min(u * 2.6, Math.PI)) * (1 - u * 0.45));
+        alpha.setX(i, 0.09 * aerialK * Math.sin(Math.min(u * 2.6, Math.PI)) * (1 - u * 0.45));
       });
       pos.needsUpdate = true; size.needsUpdate = true; alpha.needsUpdate = true;
     }
@@ -206,9 +214,17 @@ export class Effects {
       pos.needsUpdate = true;
       this.fireflyMat.size = 0.4 + Math.sin(t * 6) * 0.12;
     }
-    // mist
+    // mist: twilight only (sunLow is 1 all night — the patches used to glow
+    // in the dark), and faded out under a high camera (sprites face the
+    // camera, so from the air they flatten into hard white ovals on the water)
+    const twilight = sunLow * (1 - Math.min(1, Math.max(0, (dark - 0.35) / 0.4)));
     for (const m of this.mists) {
-      m.material.opacity = sunLow * 0.34;
+      let k = twilight * 0.2;
+      if (camPos) {
+        const above = camPos.y - m.position.y;
+        k *= 1 - Math.min(0.92, Math.max(0, (above - 25) / 110));
+      }
+      m.material.opacity = k;
       m.position.x = m.userData.baseX + Math.sin(t * 0.05 + m.userData.phase) * 8;
     }
     // aurora fades in with deep dusk

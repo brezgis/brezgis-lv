@@ -7,13 +7,13 @@
 // moraine, birch and alder along water, oaks on the terrace, manor lindens.
 import * as THREE from 'three';
 import { heightAt } from './terrain.js';
-import { forestDensity, distToRiver, riverLevelNear, fieldAt, farmSiteKept, nearStagePOI, LOC } from './landuse.js';
-import { LAKES, RIVER_PTS } from './geodata.js';
-// exclusion shoreline = the RENDERED (smoothed) shoreline, not the raw poly
-const LAKE_SHORES = LAKES.map((l) => ({ level: l.level, poly: chaikinPoly(l.poly) }));
+import { forestDensity, distToRiver, fieldAt, farmSiteKept, nearStagePOI, distToRoad, LOC } from './landuse.js';
+import { RIVER_PTS } from './geodata.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, vegExcluded, lakeAt, riverAt, bankCharAt, lakeShoreDistAt, waterLevelAt } from './riverzone.js';
+import { buildingAt } from './footprints.js';
 import { DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
-import { makeNoise, clamp, pointInPoly, chaikinPoly, canvasTexture } from './util.js';
+import { makeNoise, clamp, smoothstep, canvasTexture, mulberry32 } from './util.js';
 import { SPECIES, buildTree, buildFern, buildLog, buildStump, buildBoulder } from './treegen.js';
 import { captureTwigAtlas, captureImpostorAtlas } from './capture.js';
 
@@ -216,6 +216,57 @@ function makeInstanced(geo, mat, count, shadows) {
   return m;
 }
 
+function strideSubsample(arr, cap) {
+  const n = Math.min(arr.length, cap);
+  const stride = n > 0 ? arr.length / n : 1;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = arr[(i * stride) | 0];
+  return out;
+}
+
+function sampleNormal(samples, i) {
+  const a = samples[Math.max(0, i - 1)], b = samples[Math.min(samples.length - 1, i + 1)];
+  let dx = b[0] - a[0], dz = b[1] - a[1];
+  const len = Math.hypot(dx, dz) || 1;
+  dx /= len; dz /= len;
+  return [-dz, dx];
+}
+
+function poissonish(rng, mean) {
+  const stop = Math.exp(-mean);
+  let p = 1, n = 0;
+  do { n++; p *= rng(); } while (p > stop);
+  return n - 1;
+}
+
+// copy a throwaway primitive geometry's position+normal into a shared
+// wetland-plant vertex array, tinting every vertex one flat colour — lets
+// cattail bake a stem cylinder + a head cylinder + two leaf boxes into ONE
+// instanced mesh instead of juggling three
+function mergeIn(pos, nrm, colArr, idx, geo, rgb) {
+  const p = geo.attributes.position, n = geo.attributes.normal;
+  const base = pos.length / 3;
+  for (let i = 0; i < p.count; i++) {
+    pos.push(p.getX(i), p.getY(i), p.getZ(i));
+    nrm.push(n.getX(i), n.getY(i), n.getZ(i));
+    colArr.push(rgb[0], rgb[1], rgb[2]);
+  }
+  const gi = geo.index;
+  for (let i = 0; i < gi.count; i++) idx.push(base + gi.getX(i));
+}
+
+// step off a lake-shore edge point along its normal, picking whichever sign
+// actually lands on the side we want (inside the lake, or out on the bank) —
+// the poly winding direction isn't guaranteed, so guessing one sign would
+// silently plant half the margin flora on the wrong shore
+function sideOf(x, z, nx, nz, dist, inside) {
+  let ox = x + nx * dist, oz = z + nz * dist;
+  if ((lakeAt(ox, oz) !== null) === inside) return [ox, oz];
+  ox = x - nx * dist; oz = z - nz * dist;
+  if ((lakeAt(ox, oz) !== null) === inside) return [ox, oz];
+  return null;
+}
+
 // species build order (also impostor atlas order)
 const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'linden', 'apple', 'shrub', 'snag'];
 // instance capacity per species: [full, far]. Two tiers only — real geometry
@@ -405,8 +456,20 @@ export function buildVegetation(scene, renderer) {
   const twigGeo = new THREE.CylinderGeometry(0.014, 0.02, 1, 4);
   twigGeo.rotateZ(Math.PI / 2);
   const twigs = makeInstanced(twigGeo, plainM(0x594836), 2000, false);
-  const litterGeo = new THREE.CircleGeometry(1, 7);
-  litterGeo.rotateX(-Math.PI / 2);
+  // leaf drift: an IRREGULAR 12-gon — the old 7-segment circle read as an
+  // angular plate with straight edges from any walking distance
+  const litterGeo = (() => {
+    const lr = makeNoise(4242).rng;
+    const pts = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const r = 0.68 + lr() * 0.46;
+      pts.push(new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r));
+    }
+    const g = new THREE.ShapeGeometry(new THREE.Shape(pts));
+    g.rotateX(-Math.PI / 2);
+    return g;
+  })();
   const litterMat = new THREE.MeshLambertMaterial({
     color: 0x6a5638, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
   });
@@ -457,7 +520,8 @@ export function buildVegetation(scene, renderer) {
       const py = heightAt(px, pz);
       if (forestDensity(era, px, pz, py) < 0.35) return false;
       if (era >= 2 && fieldAt(era, px, pz)) return false;
-      if (distToRiver(px, pz) < 18 || py < riverLevelNear(px, pz) + 0.45) return false;
+      if (vegExcluded(px, pz, py, era, 3)) return false;
+      if (buildingAt(era, px, pz, 0.8)) return false;
       return true;
     };
     const S = LOC.STEAD;
@@ -469,14 +533,9 @@ export function buildVegetation(scene, renderer) {
         const x = (ix / (N - 1) - 0.5) * EXT + HM_OFF_X + (rng() - 0.5) * step * 1.4;
         const z = (iz / (N - 1) - 0.5) * EXT + HM_OFF_Z + (rng() - 0.5) * step * 1.4;
         const y = heightAt(x, z);
-        let inLake = false;
-        for (const lake of LAKE_SHORES) {
-          if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { inLake = true; break; }
-        }
-        if (inLake) continue;
-        if (distToRiver(x, z) < 42 && y < riverLevelNear(x, z) + 0.4) continue;
-        if ((era === 3 || era === 4) && y < LOC.POND_LEVEL + 0.3 &&
-            Math.hypot((x - (LOC.POND.x + 4)) / 54, (z - LOC.POND.z) / 36) < 1.05) continue;
+        if (vegExcluded(x, z, y, era, 1.5)) continue;
+        // no spruce through a roof: every validated footprint says no
+        if (buildingAt(era, x, z, 2)) continue;
         const d = forestDensity(era, x, z, y);
         if (d <= 0.02) continue;
         const dp = dPOI(x, z);
@@ -515,28 +574,46 @@ export function buildVegetation(scene, renderer) {
         if (tier !== 'far' && d > 0.42) {
           if (era >= 1 && rng() < 0.28) {
             const ux = x + (rng() - 0.5) * 9, uz = z + (rng() - 0.5) * 9;
-            // low dark tangle (bramble) or a taller hazel-ish bush
-            const bramble = rng() < 0.45;
-            lists.shrub.full.push([
-              ux, heightAt(ux, uz), uz,
-              bramble ? 0.9 + rng() * 0.7 : 1.6 + rng() * 1.2,
-              rng() * 6.3, bramble ? 0.68 + rng() * 0.18 : 0.85 + rng() * 0.25,
-            ]);
+            const uy = heightAt(ux, uz);
+            if (!vegExcluded(ux, uz, uy, era, 2.5) && !buildingAt(era, ux, uz, 1.2)) {
+              // low dark tangle (bramble) or a taller hazel-ish bush.
+              // hazel capped at ~1.9m and WIDENED: the shrub species is
+              // grown for 0.7-1.3m — stretched to 2.8m it was all trunk
+              // tube with a wisp of cards, "a thick green stick"
+              const bramble = rng() < 0.45;
+              lists.shrub.full.push([
+                ux, uy, uz,
+                bramble ? 0.9 + rng() * 0.7 : 1.3 + rng() * 0.6,
+                rng() * 6.3, bramble ? 0.68 + rng() * 0.18 : 1.1 + rng() * 0.35,
+              ]);
+            }
           }
           if (rng() < (era <= 2 ? 0.55 : 0.3)) {
             const fx = x + (rng() - 0.5) * 10, fz = z + (rng() - 0.5) * 10;
-            lists.fern.push([fx, heightAt(fx, fz), fz, 0.7 + rng() * 0.9, rng() * 6.3]);
+            const fy = heightAt(fx, fz);
+            if (!vegExcluded(fx, fz, fy, era, 3) && !buildingAt(era, fx, fz, 1)) {
+              lists.fern.push([fx, fy, fz, 0.7 + rng() * 0.9, rng() * 6.3]);
+            }
           }
           if (rng() < 0.08) {
             const rx = x + (rng() - 0.5) * 10, rz = z + (rng() - 0.5) * 10;
-            lists.rock.push([rx, heightAt(rx, rz), rz, 0.12 + Math.pow(rng(), 1.7) * 0.55, rng() * 6.3]);
+            const ry = heightAt(rx, rz);
+            if (!vegExcluded(rx, rz, ry, era, 1) && !buildingAt(era, rx, rz, 0.8)) {
+              lists.rock.push([rx, ry, rz, 0.12 + Math.pow(rng(), 1.7) * 0.55, rng() * 6.3]);
+            }
           }
           if ((era === 1 || era === 2) && rng() < 0.12) {
             const lx = x + (rng() - 0.5) * 12, lz = z + (rng() - 0.5) * 12;
-            lists.log.push([lx, heightAt(lx, lz), lz, rng() * 6.3, 0.8 + rng() * 0.7, (rng() * 3) | 0]);
+            const ly = heightAt(lx, lz);
+            if (!vegExcluded(lx, lz, ly, era, 1) && !buildingAt(era, lx, lz, 0.8)) {
+              lists.log.push([lx, ly, lz, rng() * 6.3, 0.8 + rng() * 0.7, (rng() * 3) | 0]);
+            }
           } else if (era >= 3 && rng() < 0.05) {
             const sx = x + (rng() - 0.5) * 9, sz = z + (rng() - 0.5) * 9;
-            lists.stump.push([sx, heightAt(sx, sz), sz, rng() * 6.3, 0.8 + rng() * 0.6]);
+            const sy = heightAt(sx, sz);
+            if (!vegExcluded(sx, sz, sy, era, 1) && !buildingAt(era, sx, sz, 0.8)) {
+              lists.stump.push([sx, sy, sz, rng() * 6.3, 0.8 + rng() * 0.6]);
+            }
           }
           // the forest-floor still life: ant mounds under conifers, mushroom
           // troops, cone fall, wind-thrown twigs, leaf drifts under broadleaves
@@ -581,7 +658,7 @@ export function buildVegetation(scene, renderer) {
         const z = (iz / (NM - 1) - 0.5) * EXT + HM_OFF_Z + (rng() - 0.5) * stepM;
         const y = heightAt(x, z);
         if (forestDensity(era, x, z, y) > 0.12) continue;      // meadow only
-        if (distToRiver(x, z) < 22 || y < riverLevelNear(x, z) + 0.5) continue;
+        if (vegExcluded(x, z, y, era, 4)) continue;
         if (era >= 2 && fieldAt(era, x, z)) continue;          // ploughing destroys them
         const n2 = 2 + (rng() * 4) | 0;
         for (let k = 0; k < n2; k++) {
@@ -590,11 +667,8 @@ export function buildVegetation(scene, renderer) {
           // each child mound revalidates — a 3m offset crossed into fields,
           // lake shores and the river bank from a valid seed
           if (forestDensity(era, ox, oz, oy) > 0.12) continue;
-          if (distToRiver(ox, oz) < 22 || oy < riverLevelNear(ox, oz) + 0.5) continue;
+          if (vegExcluded(ox, oz, oy, era, 4) || buildingAt(era, ox, oz, 0.8)) continue;
           if (era >= 2 && fieldAt(era, ox, oz)) continue;
-          let inL = false;
-          for (const lake of LAKE_SHORES) { if (oy < lake.level + 0.5 && pointInPoly(ox, oz, lake.poly)) { inL = true; break; } }
-          if (inL) continue;
           lists.molehill.push([ox, oy, oz, 0.7 + rng() * 0.6, rng() * 6.3]);
         }
       }
@@ -609,14 +683,19 @@ export function buildVegetation(scene, renderer) {
         for (let k = 0; k < n; k++) {
           const a = (k / n) * 6.28 + si;
           const ox = dx + Math.cos(a) * (14 + (si % 5)), oz = dz + Math.sin(a) * (13 + (k * 3) % 6);
+          const oy = heightAt(ox, oz);
+          if (vegExcluded(ox, oz, oy, era, 1) || buildingAt(era, ox, oz, 1)) continue;
           const tier = dPOI(ox, oz) < FULL_R ? 'full' : 'far';
-          lists.apple[tier].push([ox, heightAt(ox, oz), oz, 3.4 + ((si + k) % 4) * 0.35, si + k, 1]);
+          lists.apple[tier].push([ox, oy, oz, 3.4 + ((si + k) % 4) * 0.35, si + k, 1]);
         }
       });
       for (let i = 0; i < 12; i++) {
         const x = S.x - 26 + (i % 4) * 8 + rng() * 2;
         const z = S.z - 34 + Math.floor(i / 4) * 8 + rng() * 2;
-        lists.apple.full.push([x, heightAt(x, z), z, 3.6 + rng(), rng() * 6.3, 1]);
+        const y = heightAt(x, z);
+        if (!vegExcluded(x, z, y, era, 1)) {
+          lists.apple.full.push([x, y, z, 3.6 + rng(), rng() * 6.3, 1]);
+        }
       }
       const M = LOC.MANOR;
       for (let i = 0; i < 9; i++) {
@@ -830,14 +909,16 @@ export function buildVegetation(scene, renderer) {
       const z = (rng() - 0.5) * (HM_SPAN - 200) + HM_OFF_Z;
       if (dPOI(x, z) > 700) continue;
       const y = heightAt(x, z);
+      const lake = lakeAt(x, z);
+      if (lake && y < lake.level + 0.5) continue;
       let bad = false;
-      for (const lake of LAKE_SHORES) if (y < lake.level + 0.5 && pointInPoly(x, z, lake.poly)) { bad = true; break; }
-      if (bad) continue;
       for (const e of [2, 3, 4]) if (fieldAt(e, x, z)) { bad = true; break; }
       if (bad) continue;
       const n0 = noiseB.fbm(x * 0.004, z * 0.004, 3);
-      const nearRiver = distToRiver(x, z);
-      if (rng() > (n0 > 0.62 ? 0.5 : 0.06) && !(nearRiver < 30 && rng() < 0.3)) continue;
+      const rv = riverAt(x, z);
+      if (rv && rv.d < rv.hw + 0.5) continue;
+      const nearRiver = rv && rv.d < rv.hw + 8;
+      if (rng() > (n0 > 0.62 ? 0.5 : 0.06) && !(nearRiver && rng() < 0.3)) continue;
       const which = rng() < 0.5 ? 0 : 1;
       if (bi[which] >= 600) continue;
       const s = 0.25 + Math.pow(rng(), 2.2) * 2.4;
@@ -911,10 +992,11 @@ export function buildVegetation(scene, renderer) {
           // as dark shadowy clumps littering the meadow
           const px = p[0] + side * (11 + rng() * 4), pz = p[1] + (rng() - 0.5) * 22;
           const y = heightAt(px, pz);
-          if (y > p[2] + 1.0) continue;
-          // raw OSM points sit off the smoothed spline on bends — verify
-          // against the real channel so no reed stands in open water
-          if (distToRiver(px, pz) < 9.6 || y < p[2] - 0.45) continue;
+          const rv = riverAt(px, pz);
+          if (!rv || rv.d < rv.hw - 0.6 || rv.d > rv.hw + 1.8) continue;
+          if (y > rv.level + 1.0 || y < rv.level - 0.45) continue;
+          // raw OSM points sit off the smoothed spline on bends; verify
+          // against the rugged edge so reeds keep wet feet, not deep water
           dummy.position.set(px, y - 0.1, pz);
           dummy.rotation.y = rng() * 6.3;
           const s = 0.45 + rng() * 0.6;
@@ -928,41 +1010,393 @@ export function buildVegetation(scene, renderer) {
     reeds.instanceMatrix.needsUpdate = true;
     group.add(reeds);
 
-    // cobbled shores AND a stony bed (LAAS streambed rule): waterworn
-    // pebbles on the bars, real rocks down IN the channel — the bigger ones
-    // break the surface in the shallows
-    const pebbles = makeInstanced(buildBoulder(47), boulderMat, 5600, false);
-    let pi = 0;
-    for (const p of RIVER_PTS) {
-      for (let k = 0; k < 8 && pi < 5600; k++) {
-        const side = rng() < 0.5 ? -1 : 1;
-        const px = p[0] + side * (8 + rng() * 7.5), pz = p[1] + (rng() - 0.5) * 40;
-        const y = heightAt(px, pz);
-        if (y > p[2] + 1.4) continue;             // pebbles hug the waterline
-        const s = 0.05 + Math.pow(rng(), 1.8) * 0.3;
-        dummy.position.set(px, y - s * 0.35, pz);
-        dummy.rotation.set(rng() * 0.6, rng() * 6.3, rng() * 0.6);
-        dummy.scale.set(s * (0.9 + rng() * 0.5), s * (0.55 + rng() * 0.3), s * (0.9 + rng() * 0.5));
-        dummy.updateMatrix();
-        pebbles.setMatrixAt(pi++, dummy.matrix);
+    // washed gravel bars: the stones follow the SAME rugged riverzone rows as
+    // the water skirt, so a bar reach reads stony in the paint, the collar
+    // and the actual cobbles instead of drifting between three systems.
+    const pebbleGeo = new THREE.IcosahedronGeometry(1, 0);
+    pebbleGeo.scale(1, 0.55, 1);
+    const cobbleGeo = new THREE.IcosahedronGeometry(1, 1);
+    cobbleGeo.scale(1, 0.6, 1);
+    const stoneMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const pebbles = makeInstanced(pebbleGeo, stoneMat, 32000, false);
+    const cobbles = makeInstanced(cobbleGeo, stoneMat, 32000, false);
+    pebbles.receiveShadow = true;
+    cobbles.receiveShadow = true;
+    pebbles.name = 'pebbles';
+    cobbles.name = 'cobbles';
+
+    const RIVER_STONE_CAP = 26000, STREAM_STONE_CAP = 6000;
+    const riverPebbles = [], riverCobbles = [], streamPebbles = [], streamCobbles = [];
+    const addStones = (chan, density, seedBase, pebbleArr, cobbleArr) => {
+      const samples = chan.samples;
+      for (let si = 0; si < samples.length; si++) {
+        const [x, z, level, hw] = samples[si];
+        const [nx, nz] = sampleNormal(samples, si);
+        const ch = bankCharAt(x, z);
+        const nExp = 1.4 * (0.35 + 2.4 * ch.bar) * (1 - 0.85 * ch.mud) * density;
+        for (const side of [-1, 1]) {
+          const rngS = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
+          const n = poissonish(rngS, nExp);
+          for (let k = 0; k < n; k++) {
+            const u = -1.3 + 3.9 * Math.pow(rngS(), 1.4);
+            const off = hw + u;
+            const px = x + nx * side * off, pz = z + nz * side * off;
+            const py = heightAt(px, pz);
+            if (lakeAt(px, pz) || py < level - 0.7 || py > level + 1.1) continue;
+            const cobble = ch.bar > 0.3 && rngS() < 0.22 + 0.42 * ch.bar;
+            const s = cobble ? 0.28 + rngS() * 0.22 : 0.07 + rngS() * 0.19;
+            const jitter = (rngS() - 0.5) * 0.18;
+            const warm = rngS() < 0.333;
+            const wet = py < level + 0.12;
+            const tiltX = (rngS() - 0.5) * 0.5;
+            const tiltZ = (rngS() - 0.5) * 0.5;
+            const e = [px, py, pz, s, rngS() * 6.283, tiltX, tiltZ, jitter, warm ? 1 : 0, wet ? 1 : 0];
+            (cobble ? cobbleArr : pebbleArr).push(e);
+          }
+        }
       }
-      // channel bed stones: sit on the carved bottom; the largest shoulder
-      // out of the water on the inside of bends
-      for (let k = 0; k < 3 && pi < 5600; k++) {
-        const px = p[0] + (rng() - 0.5) * 16, pz = p[1] + (rng() - 0.5) * 36;
-        const y = heightAt(px, pz);
-        if (y > p[2] + 0.4) continue;             // in or at the water only
-        const s = 0.14 + Math.pow(rng(), 1.6) * 0.55;
-        dummy.position.set(px, y - s * 0.25, pz);
-        dummy.rotation.set(rng() * 0.6, rng() * 6.3, rng() * 0.6);
-        dummy.scale.set(s * (0.9 + rng() * 0.6), s * (0.6 + rng() * 0.35), s * (0.9 + rng() * 0.6));
+    };
+    addStones(RIVER, 1, 0x71710000, riverPebbles, riverCobbles);
+    STREAM_CHANNELS.forEach((chan, si) => {
+      addStones(chan, 0.5, 0x57130000 + si * 100000, streamPebbles, streamCobbles);
+    });
+
+    const placeStones = (mesh, arr, ySquash) => {
+      let i = 0;
+      for (const e of arr) {
+        const [x, y, z, s, yaw, tiltX, tiltZ, jitter, warm, wet] = e;
+        const h = s * ySquash * 2;
+        dummy.position.set(x, y - h * 0.3, z);
+        dummy.rotation.set(tiltX, yaw, tiltZ);
+        dummy.scale.setScalar(s);
         dummy.updateMatrix();
-        pebbles.setMatrixAt(pi++, dummy.matrix);
+        mesh.setMatrixAt(i, dummy.matrix);
+        let cr = 0.48 + jitter, cg = 0.46 + jitter, cb = 0.43 + jitter;
+        if (warm) { cr += 0.06; cg += 0.02; }
+        if (wet) { cr *= 0.68 * 0.94; cg *= 0.68 * 0.98; cb *= 0.68 * 1.06; }
+        col.setRGB(clamp(cr, 0.02, 1), clamp(cg, 0.02, 1), clamp(cb, 0.02, 1));
+        mesh.setColorAt(i++, col);
       }
-    }
-    pebbles.count = pi;
-    pebbles.instanceMatrix.needsUpdate = true;
+      mesh.count = i;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    };
+    const pebbleList = [
+      ...strideSubsample(riverPebbles, RIVER_STONE_CAP),
+      ...strideSubsample(streamPebbles, STREAM_STONE_CAP),
+    ];
+    const cobbleList = [
+      ...strideSubsample(riverCobbles, RIVER_STONE_CAP),
+      ...strideSubsample(streamCobbles, STREAM_STONE_CAP),
+    ];
+    placeStones(pebbles, pebbleList, 0.55);
+    placeStones(cobbles, cobbleList, 0.6);
     group.add(pebbles);
+    group.add(cobbles);
+  }
+
+  // ---- wet-margin colonies: sedge, cattail, yellow flag iris ---------------
+  // The mud reaches Phragmites doesn't bother with. Same channel-sample walk
+  // as the stone scatter above (bankCharAt's mud/bar split); a colony-patch
+  // fbm keeps sedge and iris clumped instead of a uniform sprinkle, and
+  // cattail seeds discrete stands of 5-14 stalks rather than one per point.
+  // Static across every era, same as the reeds above — wetlands don't care
+  // what century it is, and buildingAt/distToRoad are checked against era 4
+  // (the fullest footprint + road network) as the one persistent reference.
+  {
+    const wetPatch = makeNoise(8181);
+    const patchAt = (x, z) => smoothstep(0.26, 0.46, wetPatch.fbm(x * 0.028, z * 0.028, 2));
+    const blocked = (x, z) => buildingAt(4, x, z, 2) || distToRoad(4, x, z) < 2;
+
+    // -- geometry: 12-blade arcing clump, darker/stiffer than a reed --------
+    const sedgeGeom = (() => {
+      const pos = [], colArr = [], idx = [];
+      const rr = makeNoise(5301).rng;
+      for (let b = 0; b < 12; b++) {
+        const yaw = rr() * Math.PI * 2;
+        const c = Math.cos(yaw), s = Math.sin(yaw);
+        const h = 0.55 + rr() * 0.45;     // fraction of the H=1 reference blade
+        const arc = 0.1 + rr() * 0.16;    // slight outward arc, stiffer than a reed's droop
+        const w = 0.014 + rr() * 0.006;
+        const SEGS = 3;
+        const base = pos.length / 3;
+        for (let i = 0; i <= SEGS; i++) {
+          const t = i / SEGS, y = t * h, out = arc * t * t, ww = w * (1 - t * 0.7);
+          for (const side of [-1, 1]) {
+            const lx = side * ww;
+            pos.push(lx * c - out * s, y, lx * s + out * c);
+            colArr.push(0.16 + t * 0.07, 0.24 + t * 0.09, 0.10 + t * 0.05);
+          }
+        }
+        for (let i = 0; i < SEGS; i++) {
+          const b0 = base + i * 2;
+          idx.push(b0, b0 + 1, b0 + 2, b0 + 1, b0 + 3, b0 + 2);
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      return g;
+    })();
+
+    // -- geometry: thin stem + dark-brown sausage head + two strap leaves ---
+    const cattailGeom = (() => {
+      const pos = [], nrm = [], colArr = [], idx = [];
+      const stem = new THREE.CylinderGeometry(0.014, 0.02, 1, 6, 1, true);
+      stem.translate(0, 0.5, 0);
+      mergeIn(pos, nrm, colArr, idx, stem, [0.20, 0.30, 0.13]);
+      const head = new THREE.CylinderGeometry(0.045, 0.05, 0.3, 6);
+      head.translate(0, 0.83, 0);
+      mergeIn(pos, nrm, colArr, idx, head, [0.22, 0.14, 0.08]);
+      for (const rot of [0.2, -0.2]) {
+        const leaf = new THREE.BoxGeometry(0.02, 1.02, 0.01);
+        leaf.translate(0, 0.51, 0);
+        leaf.translate(0.03, 0, 0);
+        leaf.rotateY(rot);
+        mergeIn(pos, nrm, colArr, idx, leaf, [0.22, 0.34, 0.14]);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
+      g.setIndex(idx);
+      return g;
+    })();
+
+    // -- geometry: 3-4 broad blades fanned from one base + a 3-quad flower --
+    const irisGeom = (() => {
+      const pos = [], colArr = [], idx = [];
+      const rr = makeNoise(9911).rng;
+      const BLADES = 3 + ((rr() * 2) | 0);
+      for (let b = 0; b < BLADES; b++) {
+        const yaw = (b / BLADES) * Math.PI * 2 + (rr() - 0.5) * 0.5;
+        const c = Math.cos(yaw), s = Math.sin(yaw);
+        const h = 0.75 + rr() * 0.25, lean = 0.12 + rr() * 0.12, w = 0.028 + rr() * 0.01;
+        const base = pos.length / 3;
+        const tipX = lean * h;
+        const quad = [[-w, 0, 0], [w, 0, 0], [tipX + w * 0.35, h, 0], [tipX - w * 0.35, h, 0]];
+        for (const [lx, ly, lz] of quad) pos.push(lx * c - lz * s, ly, lx * s + lz * c);
+        const base0 = [0.20, 0.34, 0.10], tip0 = [0.30, 0.46, 0.14];
+        colArr.push(...base0, ...base0, ...tip0, ...tip0);
+        idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      }
+      // one small yellow flower — three quads splayed like the far-tree
+      // impostor crosses, perched just off-centre in the fan
+      const fx = 0.05, fz = 0.02, fy = 0.72, fw = 0.07, fh = 0.09;
+      for (let k = 0; k < 3; k++) {
+        const a = (k / 3) * Math.PI * 2 + 0.3, c = Math.cos(a), s = Math.sin(a);
+        const base = pos.length / 3;
+        const quad = [[-fw, 0, 0], [fw, 0, 0], [fw * 0.5, fh, 0], [-fw * 0.5, fh, 0]];
+        for (const [lx, ly, lz] of quad) pos.push(fx + lx * c - lz * s, fy + ly, fz + lx * s + lz * c);
+        const yellow = [0.95, 0.8, 0.15];
+        colArr.push(...yellow, ...yellow, ...yellow, ...yellow);
+        idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      return g;
+    })();
+
+    const wetMat = windify(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    const SEDGE_CAP = 22000, CATTAIL_CAP = 9000, IRIS_CAP = 2500;
+    const sedges = makeInstanced(sedgeGeom, wetMat, SEDGE_CAP, false);
+    const cattails = makeInstanced(cattailGeom, wetMat, CATTAIL_CAP, false);
+    const irises = makeInstanced(irisGeom, wetMat, IRIS_CAP, false);
+
+    const placeWet = (mesh, arr, cap) => {
+      const list = strideSubsample(arr, cap);
+      for (let i = 0; i < list.length; i++) {
+        const [x, y, z, h, rot] = list[i];
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(0, rot, 0);
+        dummy.scale.setScalar(h);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.count = list.length;
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+
+    const sedgeCands = [], cattailCands = [], irisCands = [];
+
+    // -- river + stream banks: sedge & iris on the bank, cattail wading in --
+    const addChannelSedge = (chan, seedBase) => {
+      const samples = chan.samples;
+      for (let si = 0; si < samples.length; si++) {
+        const [x, z, , hw] = samples[si];
+        const [nx, nz] = sampleNormal(samples, si);
+        const tx = -nz, tz = nx;
+        const ch = bankCharAt(x, z);
+        const patch = patchAt(x, z);
+        if (patch <= 0) continue;
+        const density = 0.5 * (0.4 + 1.6 * ch.mud) * patch;  // ~1/2m, mud-weighted, patch-gated
+        for (const side of [-1, 1]) {
+          const rng = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
+          const n = poissonish(rng, density * 4);            // ~4m of arc per sample
+          for (let k = 0; k < n; k++) {
+            const along = (rng() - 0.5) * 3.6;
+            const u = 0.2 + rng() * 4.3;                     // rv.d - rv.hw in [0.2, 4.5]
+            const off = hw + u;
+            const px = x + tx * along + nx * side * off, pz = z + tz * along + nz * side * off;
+            const py = heightAt(px, pz);
+            // the shelf just past the rendered edge sinks well below the
+            // channel's nominal level BY DESIGN (a graded underwater bench,
+            // see riverzone's shelf carve) — that's not open water once
+            // you're past waterLevelAt's own wet radius, so judge "dry
+            // enough" against the canonical wading oracle, not the raw level
+            if (waterLevelAt(px, pz, 4) - 0.05 > py) continue;
+            if (blocked(px, pz)) continue;
+            sedgeCands.push([px, py, pz, 0.35 + rng() * 0.35, rng() * 6.283]);
+          }
+        }
+      }
+    };
+    const addChannelCattail = (chan, seedBase) => {
+      const samples = chan.samples;
+      for (let si = 0; si < samples.length; si++) {
+        const [x, z, level, hw] = samples[si];
+        const [nx, nz] = sampleNormal(samples, si);
+        const tx = -nz, tz = nx;
+        const ch = bankCharAt(x, z);
+        if (ch.mud < 0.25) continue;                        // mud reaches only
+        for (const side of [-1, 1]) {
+          const rng = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
+          if (rng() > 0.22) continue;                        // sparse colony seeding
+          const n = 5 + ((rng() * 10) | 0);                   // colonies of 5-14
+          const u0 = -1.4 + rng() * 1.7;
+          for (let m = 0; m < n; m++) {
+            const along = (rng() - 0.5) * 3;
+            const u = clamp(u0 + (rng() - 0.5) * 1.3, -1.4, 0.3); // rv.d - rv.hw in [-1.4, 0.3]
+            const off = hw + u;
+            const px = x + tx * along + nx * side * off, pz = z + tz * along + nz * side * off;
+            const py = heightAt(px, pz);
+            if (py > level + 0.35) continue;
+            if (blocked(px, pz)) continue;
+            cattailCands.push([px, py, pz, 1.1 + rng() * 0.6, rng() * 6.283]);
+          }
+        }
+      }
+    };
+    const addChannelIris = (chan, seedBase) => {
+      const samples = chan.samples;
+      for (let si = 0; si < samples.length; si++) {
+        const [x, z, , hw] = samples[si];
+        const [nx, nz] = sampleNormal(samples, si);
+        const tx = -nz, tz = nx;
+        const ch = bankCharAt(x, z);
+        if (ch.mud < 0.3 || patchAt(x, z) <= 0) continue;    // muddy, in the sedge zone
+        for (const side of [-1, 1]) {
+          const rng = mulberry32(seedBase + si * 2 + (side > 0 ? 1 : 0));
+          const n = poissonish(rng, 4 / 25);                  // 1 clump per ~25m
+          for (let k = 0; k < n; k++) {
+            const along = (rng() - 0.5) * 3.6;
+            const u = 0.2 + rng() * 4.3;
+            const off = hw + u;
+            const px = x + tx * along + nx * side * off, pz = z + tz * along + nz * side * off;
+            const py = heightAt(px, pz);
+            // the shelf just past the rendered edge sinks well below the
+            // channel's nominal level BY DESIGN (a graded underwater bench,
+            // see riverzone's shelf carve) — that's not open water once
+            // you're past waterLevelAt's own wet radius, so judge "dry
+            // enough" against the canonical wading oracle, not the raw level
+            if (waterLevelAt(px, pz, 4) - 0.05 > py) continue;
+            if (blocked(px, pz)) continue;
+            irisCands.push([px, py, pz, 0.5 + rng() * 0.3, rng() * 6.283]);
+          }
+        }
+      }
+    };
+    addChannelSedge(RIVER, 0x53440001);
+    addChannelCattail(RIVER, 0x43540001);
+    addChannelIris(RIVER, 0x49520001);
+    STREAM_CHANNELS.forEach((chan, si) => {
+      addChannelSedge(chan, 0x53440100 + si * 0x1000);
+      addChannelCattail(chan, 0x43540100 + si * 0x1000);
+      addChannelIris(chan, 0x49520100 + si * 0x1000);
+    });
+
+    // -- lake shores: sedge/iris on the bank, cattail wading just inside ----
+    LAKE_SHORES.forEach((lake, li) => {
+      const poly = lake.poly;
+      for (let e = 0; e < poly.length; e++) {
+        const [ax, az] = poly[e], [bx, bz] = poly[(e + 1) % poly.length];
+        const len = Math.hypot(bx - ax, bz - az);
+        const segs = Math.max(1, Math.round(len / 4));
+        const [enx, enz] = sampleNormal(poly, e);
+        for (let s = 0; s < segs; s++) {
+          const t = (s + 0.5) / segs;
+          const mx = ax + (bx - ax) * t, mz = az + (bz - az) * t;
+          const ch = bankCharAt(mx, mz);
+          const patch = patchAt(mx, mz);
+
+          if (patch > 0) {
+            // sedge — land side, within 6m of the rendered shoreline
+            const rng = mulberry32(0x53449000 + li * 100000 + e * 977 + s);
+            const density = 0.5 * (0.4 + 1.6 * ch.mud) * patch;
+            const n = poissonish(rng, density * (len / segs));
+            for (let k = 0; k < n; k++) {
+              const dist = 0.3 + rng() * 5.5;
+              const land = sideOf(mx, mz, enx, enz, dist, false);
+              if (!land) continue;
+              const [px, pz] = land;
+              if (lakeShoreDistAt(px, pz) >= 6) continue;
+              const py = heightAt(px, pz);
+              if (py < lake.level - 0.05 || py > lake.level + 0.6) continue;
+              if (blocked(px, pz)) continue;
+              sedgeCands.push([px, py, pz, 0.35 + rng() * 0.35, rng() * 6.283]);
+            }
+          }
+
+          if (patch > 0 && ch.mud > 0.3) {
+            // iris — same band as sedge, sparser, muddy reaches only
+            const rng = mulberry32(0x49529000 + li * 100000 + e * 977 + s);
+            const n = poissonish(rng, (len / segs) / 25);
+            for (let k = 0; k < n; k++) {
+              const dist = 0.3 + rng() * 5.5;
+              const land = sideOf(mx, mz, enx, enz, dist, false);
+              if (!land) continue;
+              const [px, pz] = land;
+              if (lakeShoreDistAt(px, pz) >= 6) continue;
+              const py = heightAt(px, pz);
+              if (py < lake.level - 0.05 || py > lake.level + 0.6) continue;
+              if (blocked(px, pz)) continue;
+              irisCands.push([px, py, pz, 0.5 + rng() * 0.3, rng() * 6.283]);
+            }
+          }
+
+          if (ch.mud >= 0.25) {
+            // cattail — wading INSIDE the shoreline, mud reaches only
+            const rng = mulberry32(0x43549000 + li * 100000 + e * 977 + s);
+            if (rng() <= 0.22) {
+              const n = 5 + ((rng() * 10) | 0);
+              for (let m = 0; m < n; m++) {
+                const dist = rng() * 6.5;
+                const water = sideOf(mx, mz, enx, enz, dist, true);
+                if (!water) continue;
+                const [px, pz] = water;
+                if (lakeShoreDistAt(px, pz) >= 7) continue;
+                const py = heightAt(px, pz);
+                if (py > lake.level + 0.35) continue;
+                if (blocked(px, pz)) continue;
+                cattailCands.push([px, py, pz, 1.1 + rng() * 0.6, rng() * 6.283]);
+              }
+            }
+          }
+        }
+      }
+    });
+
+    placeWet(sedges, sedgeCands, SEDGE_CAP);
+    placeWet(cattails, cattailCands, CATTAIL_CAP);
+    placeWet(irises, irisCands, IRIS_CAP);
+    group.add(sedges);
+    group.add(cattails);
+    group.add(irises);
   }
 
   // day-night tint for the unlit far impostors (sun colour × ambient level)

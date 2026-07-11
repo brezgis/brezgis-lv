@@ -14,6 +14,7 @@ import { AnimalManager } from './animals.js';
 import { Effects } from './effects.js';
 import { Ambience } from './audio.js';
 import { Rig } from './rig.js';
+import { buildMinimap } from './minimap.js';
 import { LOC } from './landuse.js';
 import { RIVER_PTS, LAKES } from './geodata.js';
 import { ERAS } from './content.js';
@@ -24,26 +25,31 @@ const $ = (id) => document.getElementById(id);
 // ---------------- UI language (chrome only; the chronicle stays English) ----
 const I18N = {
   lv: {
-    seta: 'Sēta', pagalms: 'Pagalms', upe: 'Gauja', muiza: 'Muiža', ezers: 'Ezers',
-    brezga: 'Brežģis', putns: 'Putns', fly: 'Lidot', walk: 'Iet',
+    fly: 'Lidot', walk: 'Iet',
     flow: 'Rit', dawn: 'Rīts', noon: 'Diena', evening: 'Vakars',
-    lblView: 'Skats', lblMove: 'Kustība', lblTime: 'Diennakts',
+    lblMove: 'Kustība', lblTime: 'Diennakts', karte: 'Karte · M',
     sound: 'skaņa', chronicle: 'Hronika un avoti', story: 'Stāsts / story', close: 'Aizvērt ✕',
     era0: 'Tundra', era1: 'Tauri', era2: 'Latgaļi', era3: 'Muiža', era4: 'Taurene', era5: 'Šodiena',
-    hintCinema: 'klikšķini vai spied WASD, lai lidotu · 1–6 vai [ ] ceļo laikā',
-    hintFly: 'WASD/bultiņas lido · Space augšup, Shift lejup — nolaidies zemē, lai ietu · ritenis = ātrums',
-    hintWalk: 'WASD/bultiņas iet · Shift skrien · Space lec · dubult-Space = lidot',
   },
   en: {
-    seta: 'Farmstead', pagalms: 'Yard', upe: 'Gauja', muiza: 'Manor', ezers: 'Lake',
-    brezga: 'Brežģis hill', putns: "Bird's eye", fly: 'Fly', walk: 'Walk',
+    fly: 'Fly', walk: 'Walk',
     flow: 'Flow', dawn: 'Dawn', noon: 'Noon', evening: 'Evening',
-    lblView: 'View', lblMove: 'Move', lblTime: 'Time of day',
+    lblMove: 'Move', lblTime: 'Time of day', karte: 'Map · M',
     sound: 'sound', chronicle: 'Chronicle & sources', story: 'Story', close: 'Close ✕',
     era0: 'Tundra', era1: 'Aurochs', era2: 'Latgalians', era3: 'Manor', era4: 'Taurene', era5: 'Today',
-    hintCinema: 'click or press WASD to fly · 1–6 or [ ] travel in time',
-    hintFly: 'WASD/arrows fly · Space up, Shift down — settle onto the ground to walk · wheel = speed',
-    hintWalk: 'WASD/arrows walk · Shift sprint · Space jump · double-Space to fly',
+  },
+};
+// compact keycap chips per mode — the old prose hint line read as a manual
+const KEYCHIPS = {
+  lv: {
+    cinema: [['Klikšķis / WASD', 'lidot'], ['1–6', 'laikmeti'], ['M', 'karte']],
+    fly: [['WASD', 'lidot'], ['Space · Shift', 'augšup · lejup'], ['W W', 'ātri'], ['Ritenis', 'ātrums'], ['Space ×2', 'iet'], ['M', 'karte']],
+    walk: [['WASD', 'iet'], ['Shift', 'skriet'], ['Space', 'lēkt'], ['Space ×2', 'lidot'], ['1–6', 'laikmeti'], ['M', 'karte']],
+  },
+  en: {
+    cinema: [['Click / WASD', 'fly'], ['1–6', 'eras'], ['M', 'map']],
+    fly: [['WASD', 'fly'], ['Space · Shift', 'up · down'], ['W W', 'boost'], ['Wheel', 'speed'], ['Space ×2', 'walk'], ['M', 'map']],
+    walk: [['WASD', 'walk'], ['Shift', 'sprint'], ['Space', 'jump'], ['Space ×2', 'fly'], ['1–6', 'eras'], ['M', 'map']],
   },
 };
 let lang = localStorage.getItem('brezgi-lang') || 'lv';
@@ -145,15 +151,18 @@ async function boot() {
   // Minecraft-style rig: fly + walk only; 'cinema' idles until first input
   const rig = new Rig(camera, canvas);
   const cinema = { angle: Math.atan2(88, 68), r: 110, h: 26 };
-  const hintEl = $('hint');
-  const applyHints = () => {
-    const L = I18N[lang];
-    hintEl.textContent = rig.mode === 'cinema' ? L.hintCinema
-      : rig.mode === 'fly' ? L.hintFly : L.hintWalk;
+  const keysEl = $('keys');
+  let keysDimT = null;
+  const renderKeys = () => {
+    const chips = KEYCHIPS[lang][rig.mode] || KEYCHIPS[lang].fly;
+    keysEl.innerHTML = chips.map(([k, l]) => `<span class="kc"><kbd>${k}</kbd><span class="kl">${l}</span></span>`).join('');
+    keysEl.classList.remove('dim');
+    clearTimeout(keysDimT);
+    keysDimT = setTimeout(() => keysEl.classList.add('dim'), 9000);
   };
   rig.onModeChange = (mode) => {
     document.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
-    applyHints();
+    renderKeys();
   };
   document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
     if (rig.mode === 'cinema') rig.setMode('fly');
@@ -265,6 +274,7 @@ async function boot() {
   // ------- era management -------
   const eraCache = new Map();
   let current = null, currentEra = -1, eraTicks = [];
+  let minimap = null;                    // assigned once the presets exist
 
   function activateEra(era) {
     if (era === currentEra) return;
@@ -287,6 +297,8 @@ async function boot() {
     for (const [x, y, z, o] of built.fires) effects.addFire(x, y, z, o);
     water.pond.visible = era === 3 || era === 4;
     water.setEra(era);
+    rig.era = era;                       // wading rules follow the century
+    if (minimap) minimap.onEra();
     effects.setAurora(era === 0);
     effects.setFireflies(era >= 1);
     ambience.setScene(era, sky.state.sunLow, built.fires.length > 0);
@@ -308,21 +320,26 @@ async function boot() {
     fade.classList.add('on');
     const fromYear = currentEra >= 0 ? ERAS[currentEra].year : ERAS[era].year;
     const toYear = ERAS[era].year;
+    const labelEl = $('era-label');
     setTimeout(() => {
       activateEra(era);
       const t0 = performance.now();
       yearEl.style.opacity = 1;
+      labelEl.textContent = I18N[lang]['era' + era];
+      labelEl.style.opacity = 1;
       const spin = () => {
         const u = Math.min(1, (performance.now() - t0) / 1100);
         const e = u < 0.5 ? 2 * u * u : -1 + (4 - 2 * u) * u;
         const y = Math.round(fromYear + (toYear - fromYear) * e);
         yearEl.textContent = y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${y}`;
         if (u < 1) requestAnimationFrame(spin);
-        else setTimeout(() => { yearEl.style.opacity = 0; }, 600);
+        else setTimeout(() => { yearEl.style.opacity = 0; labelEl.style.opacity = 0; }, 600);
       };
       spin();
-      fade.classList.remove('on');
-      setTimeout(() => { switching = false; }, 700);
+      // hold the parchment a beat — the gold sweep and the emblem deserve
+      // to be SEEN, and the new era loading its meshes hides behind it
+      setTimeout(() => fade.classList.remove('on'), 480);
+      setTimeout(() => { switching = false; }, 1150);
     }, 620);
   }
 
@@ -355,10 +372,9 @@ async function boot() {
   // preset moves tween the camera, then hand control back in fly mode
   let camTween = null;
   const _lookT = new THREE.Vector3();
-  function flyTo(name) {
-    const [pos, tgt] = PRESETS[name]();
-    // presets park the camera mid-air: hand control back in FLY regardless of
-    // the old mode, or a walking player resumes walk physics in the sky
+  function tweenTo(pos, tgt) {
+    // hand control back in FLY regardless of the old mode, or a walking
+    // player resumes walk physics in the sky
     if (rig.mode !== 'fly') rig.setMode('fly');
     const fwd = new THREE.Vector3();
     camera.getWorldDirection(fwd);
@@ -368,6 +384,16 @@ async function boot() {
       t0: camera.position.clone().addScaledVector(fwd, 60), t1: new THREE.Vector3(...tgt),
     };
   }
+  function flyTo(name) {
+    const [pos, tgt] = PRESETS[name]();
+    tweenTo(pos, tgt);
+  }
+  // map click: swoop to any point, approaching from the south-east like the
+  // presets so the light reads well on arrival
+  function flyToPoint(x, z, alt = 250) {
+    const gy = heightAt(x, z);
+    tweenTo([x + alt * 0.55, gy + alt, z + alt * 0.7], [x, gy + 4, z]);
+  }
   function jumpTo(pos, tgt) {
     if (rig.mode !== 'fly') rig.setMode('fly');
     camTween = null;
@@ -376,6 +402,15 @@ async function boot() {
     rig.adoptCamera();
     simControls.target.set(tgt[0], tgt[1], tgt[2]);
   }
+
+  // the parish map: same landmarks in every era, M to open
+  minimap = buildMinimap({
+    camera, rig,
+    getEra: () => currentEra,
+    getLang: () => lang,
+    flyToPoint,
+    flyToView: flyTo,
+  });
 
   // ------- HUD wiring -------
   // harness compatibility stub (shot2/dbg read a controls.target)
@@ -392,7 +427,6 @@ async function boot() {
     era: (e) => { activateEra(e); },
   };
   document.querySelectorAll('.era-btn').forEach((b, i) => b.addEventListener('click', () => switchEra(i)));
-  document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => flyTo(b.dataset.view)));
   // arrows belong to walking now — time travel lives on 1-6 and [ ] , .
   addEventListener('keydown', (e) => {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
@@ -412,7 +446,8 @@ async function boot() {
     });
     $('sound-btn').textContent = (soundOn ? '🔊 ' : '🔇 ') + L.sound;
     $('lang-btn').textContent = l === 'lv' ? 'EN' : 'LV';
-    applyHints();
+    renderKeys();
+    if (minimap) minimap.onLang();
   }
   $('lang-btn').addEventListener('click', () => setLang(lang === 'lv' ? 'en' : 'lv'));
 
@@ -440,20 +475,8 @@ async function boot() {
     composer.setSize(innerWidth, innerHeight);
   });
 
-  // high birds circling the valley
-  const birds = new THREE.Group();
-  const birdGeo = new THREE.BufferGeometry();
-  birdGeo.setAttribute('position', new THREE.Float32BufferAttribute([-1.1, 0, 0, 0, 0.18, 0.35, 0, 0, -0.25, 0, 0.18, 0.35, 1.1, 0, 0, 0, 0, -0.25], 3));
-  birdGeo.computeVertexNormals();
-  const birdMat = new THREE.MeshBasicMaterial({ color: 0x22282c, side: THREE.DoubleSide });
-  const birdSeeds = [];
-  for (let i = 0; i < 4; i++) {
-    const b = new THREE.Mesh(birdGeo, birdMat);
-    b.scale.setScalar(1.6);
-    birds.add(b);
-    birdSeeds.push({ r: 180 + i * 90, h: 120 + i * 40, s: 0.05 + i * 0.012, p: i * 1.7 });
-  }
-  scene.add(birds);
+  // (the old hard-triangle "high birds" circling on rails are gone — the
+  // animal system's buzzards with their wing-flap rig own the sky now)
 
   // ------- start -------
   await progress('Herding the aurochs…');
@@ -562,15 +585,9 @@ async function boot() {
       cubeCam.update(renderer, scene);
     }
     animals.tick(t, dt, camera.position);
-    effects.tick(t, dt, wind, sky.state.sunLow);
+    minimap.tick(dt);
+    effects.tick(t, dt, wind, sky.state.sunLow, sky.state.dark || 0, camera.position);
     for (const fn of eraTicks) fn(t, dt);
-    for (let i = 0; i < birds.children.length; i++) {
-      const b = birds.children[i], sd = birdSeeds[i];
-      const a = t * sd.s + sd.p;
-      b.position.set(S.x + Math.cos(a) * sd.r, steadY() + sd.h + Math.sin(t * 0.2 + sd.p) * 8, S.z + Math.sin(a) * sd.r * 0.8);
-      b.rotation.y = -a - Math.PI / 2;
-      b.rotation.z = Math.sin(t * 3 + sd.p) * 0.12;
-    }
     const clockEl = $('day-clock');
     if (clockEl) {
       const h = Math.floor(sky.state.hour), m = Math.floor((sky.state.hour % 1) * 60);

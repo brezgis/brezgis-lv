@@ -12,7 +12,8 @@ import { RIVER_PTS, STREAMS, LAKES, BREZGA } from './geodata.js';
 import { ROADS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
-import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, sampleSpline, sampleSplineEven, pointInPoly } from './util.js';
+import { RIVER, STREAM_CHANNELS, riverAt, streamAt, setPond } from './riverzone.js';
+import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, pointInPoly } from './util.js';
 
 const noise = makeNoise(4217);
 
@@ -87,14 +88,15 @@ function bucketDist(m, x, z) {
       }
     }
   };
-  const fineR = sampleSplineEven(RIVER_PTS, 4.5);
-  splat(fineR, wdRiver, true);
-  for (const st of STREAMS) {
-    const fineS = sampleSplineEven(st.pts, 4.5);
-    splat(fineS, wdStream, false);
-    for (const p of fineS) bucketAdd(strmBuckets, p);
+  // fine samples come from riverzone — the SAME samples that carve the bed,
+  // build the ribbon rows and gate the vegetation, so "distance to river"
+  // can never disagree with where the water actually is
+  splat(RIVER.samples, wdRiver, true);
+  for (const chan of STREAM_CHANNELS) {
+    splat(chan.samples, wdStream, false);
+    for (const p of chan.samples) bucketAdd(strmBuckets, p);
   }
-  for (const p of fineR) bucketAdd(rivBuckets, p);
+  for (const p of RIVER.samples) bucketAdd(rivBuckets, p);
 }
 function wdSample(arr, x, z) {
   const fx = clamp((x - (HM_OFF_X - HM_SPAN / 2)) / WD_RES, 0, WD_N - 1.001);
@@ -168,6 +170,8 @@ export const LOC = {
   BREZGA: { x: BREZGA.x, z: BREZGA.z },      // Brežģa kalns summit (255 m) — the family hill
   KROGS: { x: 2320, z: 5270 },               // Brežģa krogs / Brezgis settlement, on the old road
 };
+// the mill pond becomes a riverzone location (eras 3-4; riverzone gates it)
+setPond({ x: LOC.POND.x + 4, z: LOC.POND.z, rx: 54, rz: 36, level: LOC.POND_LEVEL });
 
 // Terrain pads to flatten (union across eras — the ground itself is continuous)
 // Late Iron Age dispersal: Latgalian settlement was scattered single
@@ -499,6 +503,9 @@ export function forestDensity(era, x, z, y) {
     d = forestMaskAt(x, z) ? 0.97 + n * 0.03 : 0;
     d *= smoothstep(55, 140, dStead) * 0.94 + 0.06;
     d *= smoothstep(60, 150, dManor) * 0.94 + 0.06;
+    // the 2017 tower crowns an open summit — 19m trees right up to an 11m
+    // tower buried it (its whole point is the view)
+    d *= smoothstep(15, 36, Math.hypot(x - B.x, z - B.z));
   } else {
     // agrarian mosaic: forest survives on high/steep hills and in patches
     const high = smoothstep(208, 224, y);
@@ -514,8 +521,12 @@ export function forestDensity(era, x, z, y) {
   if (fieldAt(era, x, z)) return 0;
   if (era >= 2 && distToRoad(era, x, z) < 3.5) return 0;
   for (const p of PADS) if (Math.hypot(x - p.x, z - p.z) < p.r + 6) return 0;
-  if (dRiver < 11) return 0;
-  if (distToStreams(x, z) < 3.5) return 0;
+  // edge-relative water exclusion: the rugged shoreline decides, not a
+  // fixed centerline radius (a wide pool used to drown trees on its bulges)
+  const rz = riverAt(x, z);
+  if (rz && rz.d < rz.hw + 2.2) return 0;
+  const sz = streamAt(x, z);
+  if (sz && sz.d < sz.hw + 1.4) return 0;
   return clamp(d, 0, 1);
 }
 

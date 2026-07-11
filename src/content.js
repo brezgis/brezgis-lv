@@ -75,8 +75,10 @@ civic life, the stork still keeps the nest, and the storks' Latvia holds more of
 than anywhere. On Brežģa kalns stands the observation tower raised in 2017 — eleven
 metres of timber above the family hill, looking out over Alauksts, the lake chain and
 the whole country of this chronicle [7][24]. The Jāņi fire still burns beside it each
-midsummer. The aurochs are four hundred years gone. The name holds.`,
-    facts: ['Real Sentinel-2 land cover', 'Observation tower on Brežģa kalns, 2017', '347 people (2022) — the quiet century'],
+midsummer. The aurochs are four hundred years gone — but wild grazing returned: in 2008
+the Dutch rewilding foundation ARK released a herd of Konik horses, the tarpan's hardy
+descendants, onto Taurene meadowland [25]. The name holds.`,
+    facts: ['Real Sentinel-2 land cover', 'Observation tower on Brežģa kalns, 2017', 'ARK Konik grazing herd since 2008', '347 people (2022) — the quiet century'],
   },
 ];
 

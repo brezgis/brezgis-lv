@@ -9,7 +9,7 @@
 //       4 = 1935     (Taurene, independent Latvia)
 //       5 = 2025     (today — terrain draped in Sentinel-2 imagery)
 import { RIVER_PTS, STREAMS, LAKES, BREZGA } from './geodata.js';
-import { ROADS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
+import { ROADS_OSM, DWELLINGS_OSM, BUILDINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
 import { RIVER, STREAM_CHANNELS, riverAt, streamAt, setPond } from './riverzone.js';
@@ -474,6 +474,43 @@ export function distToRoad(era, x, z) {
 }
 
 // --- Forest density 0..1 at a point, per era. y = ground elevation (m ASL).
+// --- era-5 settlement openness: the 50m binary satellite mask reads mixed
+// town pixels as closed forest and buries Taurene's yards in stems. Gaussian-
+// splat OSM footprint AREA (σ=60m) into a 40m grid once; where the built
+// fraction is town-like, cap the satellite forest density — lawns and yards
+// with the odd tree, not woodland. Lone farmsteads stay under their trees.
+const SETTLE_RES = 40;
+const SETTLE_OFF = Math.ceil((HM_SPAN / 2 + Math.max(Math.abs(HM_OFF_X), Math.abs(HM_OFF_Z))) / SETTLE_RES) + 2;
+const SETTLE_N = SETTLE_OFF * 2 + 1;
+const settleGrid = (() => {
+  const g = new Float32Array(SETTLE_N * SETTLE_N);
+  const SIG2 = 2 * 60 * 60, REACH = Math.ceil(150 / SETTLE_RES);
+  for (const [bx, bz, w, d] of BUILDINGS_OSM) {
+    const area = Math.max(20, w * d);
+    const cx = Math.round(bx / SETTLE_RES), cz = Math.round(bz / SETTLE_RES);
+    for (let ix = cx - REACH; ix <= cx + REACH; ix++) {
+      for (let iz = cz - REACH; iz <= cz + REACH; iz++) {
+        if (ix < -SETTLE_OFF || ix > SETTLE_OFF || iz < -SETTLE_OFF || iz > SETTLE_OFF) continue;
+        const dx = ix * SETTLE_RES - bx, dz = iz * SETTLE_RES - bz;
+        g[(ix + SETTLE_OFF) * SETTLE_N + iz + SETTLE_OFF] += area * Math.exp(-(dx * dx + dz * dz) / SIG2);
+      }
+    }
+  }
+  // normalise to a built-area fraction (kernel mass ≈ π·σ² ≈ 11.3k m²)
+  for (let i = 0; i < g.length; i++) g[i] /= 11300;
+  return g;
+})();
+function settlementK(x, z) {
+  const fx = x / SETTLE_RES + SETTLE_OFF, fz = z / SETTLE_RES + SETTLE_OFF;
+  const ix = Math.floor(fx), iz = Math.floor(fz);
+  if (ix < 0 || iz < 0 || ix >= SETTLE_N - 1 || iz >= SETTLE_N - 1) return 0;
+  const ax = fx - ix, az = fz - iz;
+  const g = settleGrid, r0 = ix * SETTLE_N + iz, r1 = r0 + SETTLE_N;
+  const v = (g[r0] * (1 - az) + g[r0 + 1] * az) * (1 - ax) + (g[r1] * (1 - az) + g[r1 + 1] * az) * ax;
+  // ~0.02 built fraction ≈ a village block; lone farms sit well below 0.008
+  return smoothstep(0.008, 0.022, v);
+}
+
 export function forestDensity(era, x, z, y) {
   if (era === 0) {
     // Younger Dryas tundra: no forest — dwarf-birch / juniper shrub heath
@@ -504,6 +541,7 @@ export function forestDensity(era, x, z, y) {
     // says forest, it IS forest — near-certain keep, or the Bernoulli thinning
     // reads as savanna (clumps of 2-4 stems, then 40m gaps)
     d = forestMaskAt(x, z) ? 0.97 + n * 0.03 : 0;
+    d *= 1 - settlementK(x, z) * 0.9;   // town yards: cap at ~10% of mask density
     d *= smoothstep(55, 140, dStead) * 0.94 + 0.06;
     d *= smoothstep(60, 150, dManor) * 0.94 + 0.06;
     // the 2017 tower crowns an open summit — 19m trees right up to an 11m

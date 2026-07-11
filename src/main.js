@@ -506,8 +506,15 @@ async function boot() {
   // FPS governor: shed pixel ratio, shadow rate/size, then grass density —
   // never the trees. Kicks in early (below ~34fps) so it never feels laggy
   // for long.
-  const gov = { acc: 0, frames: 0, level: 0, shadowEvery: 2, shadowTick: 0 };
+  const HEADROOM_SHADOW_MAP = renderer.capabilities.maxTextureSize >= 5120 ? 5120 : 4096;
+  const gov = {
+    acc: 0, frames: 0, level: 1, shadowEvery: 2, shadowTick: 0,
+    fps: 0, highSamples: 0, upgradeCooldown: 0,
+  };
   const GOV_STEPS = [
+    // A high-FPS-only rung: 5120 is 1.56x the texel memory of the 4096
+    // default, and is never selected when the GPU's texture limit is lower.
+    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP },
     { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096 },
     { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 3, shadowMap: 4096 },
     { pr: 1.25, grass: 0.65, shadowEvery: 4, shadowMap: 2048 },
@@ -522,20 +529,39 @@ async function boot() {
     if (sky.sun.shadow.mapSize.x !== s.shadowMap) {
       sky.sun.shadow.mapSize.set(s.shadowMap, s.shadowMap);
       if (sky.sun.shadow.map) { sky.sun.shadow.map.dispose(); sky.sun.shadow.map = null; }
+      // Rebuild the resized map on this cadence-controlled frame.
+      gov.shadowTick = 1e9;
     }
   }
   function govern(dt) {
     gov.acc += dt; gov.frames++;
     if (gov.acc < 3) return;
     const fps = gov.frames / gov.acc;
+    gov.fps = fps;
+    gov.upgradeCooldown = Math.max(0, gov.upgradeCooldown - gov.acc);
     gov.acc = 0; gov.frames = 0;
     if (fps < 34 && gov.level < GOV_STEPS.length - 1) {
       gov.level++;
+      gov.highSamples = 0;
+      gov.upgradeCooldown = 30;
       applyGov(GOV_STEPS[gov.level]);
+    } else if (fps >= 55 && gov.level > 0 && gov.upgradeCooldown === 0
+      && GOV_STEPS[gov.level - 1].shadowMap > GOV_STEPS[gov.level].shadowMap) {
+      // Four comfortable samples (12s) plus a 30s post-change cooldown keep
+      // the optional map-size rung from oscillating around a single sample.
+      if (++gov.highSamples >= 4) {
+        gov.level--;
+        gov.highSamples = 0;
+        gov.upgradeCooldown = 30;
+        applyGov(GOV_STEPS[gov.level]);
+      }
+    } else {
+      gov.highSamples = 0;
     }
   }
   window.__gov = gov;
   window.__renderer = renderer;
+  window.__shadow = sky.shadowInfo;
 
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
@@ -580,6 +606,11 @@ async function boot() {
     }
 
     const focus = camera.position;
+    const terrainY = heightAt(focus.x, focus.z);
+    // Clamp bad/underwater terrain samples and teleports before they reach
+    // the altitude curves; a failed sample conservatively keeps ground LOD.
+    const agl = Number.isFinite(focus.y) && Number.isFinite(terrainY)
+      ? Math.min(2000, Math.max(0, focus.y - terrainY)) : 0;
     // shadow cadence: the pass costs as much as the main render — 20Hz is
     // visually identical for a slow-moving sun. The shadow rig only MOVES on
     // refresh frames (sky.update) so matrix and map always agree.
@@ -588,7 +619,7 @@ async function boot() {
       gov.shadowTick = 0;
       renderer.shadowMap.needsUpdate = true;
     }
-    sky.update(dt, focus, shadowNow);
+    sky.update(dt, focus, shadowNow, agl);
     veg.tick(sky.state.sunColor, sky.state.ambient);
     veg.promote(camera.position.x, camera.position.z);
     water.tick(t);

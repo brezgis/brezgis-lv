@@ -12,6 +12,63 @@ import { canvasTexture, makeNoise, lerp, smoothstep, clamp } from './util.js';
 
 const DAY_SECONDS = 900; // slow sun = smooth shadows; Rit still flows
 
+// Shadow/fog altitude response is exported so the numerical path can be
+// probed headlessly without constructing the canvas-backed sky ornaments.
+export const SHADOW_BASE_RADIUS = 360;
+export const SHADOW_MAX_RADIUS = SHADOW_BASE_RADIUS * 3.5;
+export const SHADOW_RADIUS_HYSTERESIS = 0.12;
+// 0.6 world units at R=360/map=2048 is 0.6/(720/2048)=1.7067 texels.
+export const SHADOW_NORMAL_BIAS_TEXELS = 1.7;
+export const SHADOW_DEPTH_BIAS = -0.0002;
+export const FOG_BASE_NEAR = 420;
+export const FOG_BASE_FAR = 7200;
+
+function finiteAgl(agl) {
+  return Number.isFinite(agl) ? clamp(agl, 0, 2000) : 0;
+}
+
+export function shadowRadiusForAgl(agl) {
+  // Full ground resolution through 25m AGL, then a smooth 1x -> 3.5x
+  // expansion through 350m AGL. smoothstep has zero slope at both joins.
+  return SHADOW_BASE_RADIUS * (1 + 2.5 * smoothstep(25, 350, finiteAgl(agl)));
+}
+
+export function fogDensityFactorForAgl(agl) {
+  // Full ground haze through 40m AGL, thinning smoothly to 45% by 500m.
+  return 1 - 0.55 * smoothstep(40, 500, finiteAgl(agl));
+}
+
+export function updateShadowForAltitude(shadow, agl) {
+  const target = shadowRadiusForAgl(agl);
+  const oldRadius = Number.isFinite(shadow.camera.right) && shadow.camera.right > 0
+    ? shadow.camera.right : SHADOW_BASE_RADIUS;
+  const changed = Math.abs(target - oldRadius) > oldRadius * SHADOW_RADIUS_HYSTERESIS;
+  // Promote the last upward step to the exact cap instead of getting stuck
+  // just inside the 12% deadband below it.
+  const radius = changed && SHADOW_MAX_RADIUS - target <= oldRadius * SHADOW_RADIUS_HYSTERESIS
+    ? SHADOW_MAX_RADIUS : changed ? target : oldRadius;
+  if (changed) {
+    shadow.camera.left = -radius; shadow.camera.right = radius;
+    shadow.camera.top = radius; shadow.camera.bottom = -radius;
+    shadow.camera.updateProjectionMatrix();
+  }
+  const mapSize = Number.isFinite(shadow.mapSize.x) && shadow.mapSize.x > 0
+    ? shadow.mapSize.x : 2048;
+  // Keep normal offset constant in shadow texels as coverage/map size changes.
+  shadow.normalBias = SHADOW_NORMAL_BIAS_TEXELS * (radius * 2 / mapSize);
+  shadow.bias = SHADOW_DEPTH_BIAS;
+  return changed;
+}
+
+export function updateFogForAltitude(fog, agl) {
+  const densityFactor = fogDensityFactorForAgl(agl);
+  // Scaling both linear-fog distances by 1/density is the linear-fog
+  // equivalent of reducing a density coefficient, retaining horizon haze.
+  fog.near = FOG_BASE_NEAR / densityFactor;
+  fog.far = FOG_BASE_FAR / densityFactor;
+  return densityFactor;
+}
+
 // ---- sun transmittance (drives the directional light colour) ---------------
 const Rp = 6371e3, Ra = 6451e3, Hr = 8500, Hm = 1400;
 const BR = [5.8e-6, 13.5e-6, 33.1e-6], BM = 8e-6;
@@ -108,19 +165,19 @@ export function buildSky(scene, renderer) {
   const sun = new THREE.DirectionalLight(0xffffff, 2.6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
-  const SC = 360;
+  const SC = SHADOW_BASE_RADIUS;
   sun.shadow.camera.left = -SC; sun.shadow.camera.right = SC;
   sun.shadow.camera.top = SC; sun.shadow.camera.bottom = -SC;
   sun.shadow.camera.near = 50; sun.shadow.camera.far = 2600;
-  sun.shadow.bias = -0.0005;
-  sun.shadow.normalBias = 0.5;
+  sun.shadow.bias = SHADOW_DEPTH_BIAS;
+  sun.shadow.normalBias = SHADOW_NORMAL_BIAS_TEXELS * (SC * 2 / sun.shadow.mapSize.x);
   sun.shadow.radius = 2.2;
   scene.add(sun, sun.target);
 
   const hemi = new THREE.HemisphereLight(0xbcd4e8, 0x51603e, 0.75);
   scene.add(hemi);
 
-  scene.fog = new THREE.Fog(0xcfe0e8, 420, 7200);
+  scene.fog = new THREE.Fog(0xcfe0e8, FOG_BASE_NEAR, FOG_BASE_FAR);
 
   // colour keys for fog/ambient across the day (t: 0 = 4:00, 1 = 23:00)
   // dusk/dawn ambient raised so the land never falls far behind the
@@ -302,8 +359,14 @@ export function buildSky(scene, renderer) {
   const sunWorld = new THREE.Vector3();
   const qInv = new THREE.Quaternion();
   const sunLocal = new THREE.Vector3();
+  const shadowInfo = {
+    R: SC, agl: 0, mapSize: sun.shadow.mapSize.x,
+    texel: SC * 2 / sun.shadow.mapSize.x,
+    normalBias: sun.shadow.normalBias, fogDensityFactor: 1,
+  };
 
-  function update(dt, focus, shadowNow = true) {
+  function update(dt, focus, shadowNow = true, agl = 0) {
+    agl = finiteAgl(agl);
     if (!state.paused) state.t = (state.t + dt / DAY_SECONDS) % 1;
     const t = state.t;
     state.hour = 4 + t * 19;
@@ -316,11 +379,14 @@ export function buildSky(scene, renderer) {
     state.sunLow = 1 - smoothstep(0.05, 0.28, el);
     // reposition the shadow rig ONLY on map-refresh frames: sampling a stale
     // map through a fresh light matrix made every shadow jitter and snap
-    // while walking. Snapped to 0.5m so the frustum crawls in steady steps.
+    // while walking. Snapping follows the current shadow texel size.
     if (shadowNow) {
+      // Extent changes share the existing refresh cadence. The 12% gate
+      // prevents tiny altitude changes from dirtying a large shadow map.
+      if (updateShadowForAltitude(sun.shadow, agl)) renderer.shadowMap.needsUpdate = true;
       // snap to SHADOW TEXELS (not half-metres): coarse snapping made the
       // whole shadow field step visibly as you walked
-      const texel = (SC * 2) / sun.shadow.mapSize.x;
+      const texel = (sun.shadow.camera.right * 2) / sun.shadow.mapSize.x;
       _snapFocus.set(
         Math.round(focus.x / texel) * texel,
         Math.round(focus.y / texel) * texel,
@@ -345,6 +411,13 @@ export function buildSky(scene, renderer) {
     // fog is scattered SUNLIGHT: after the sun goes it must darken with the
     // sky or the horizon glows all night
     scene.fog.color.multiplyScalar(0.09 + 0.91 * clamp(sd.y * 5 + 0.42, 0.05, 1));
+    shadowInfo.fogDensityFactor = updateFogForAltitude(scene.fog, agl);
+
+    shadowInfo.R = sun.shadow.camera.right;
+    shadowInfo.agl = agl;
+    shadowInfo.mapSize = sun.shadow.mapSize.x;
+    shadowInfo.texel = sun.shadow.camera.right * 2 / sun.shadow.mapSize.x;
+    shadowInfo.normalBias = sun.shadow.normalBias;
 
     sky.position.copy(focus);
     horizon.position.set(focus.x, 0, focus.z);
@@ -381,5 +454,5 @@ export function buildSky(scene, renderer) {
       }
     }
   }
-  return { update, state, sun, hemi };
+  return { update, state, sun, hemi, shadowInfo };
 }

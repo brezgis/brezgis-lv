@@ -194,7 +194,9 @@ export function initTextures() {
     }
   }, { repeat: [2, 2] });
 
-  const L = (map, extra = {}) => new THREE.MeshLambertMaterial({ map, ...extra });
+  // faint emissive floor = sky bounce the Lambert rig can't compute; the
+  // shade side of a wall crushed to pitch black under ACES at noon
+  const L = (map, extra = {}) => new THREE.MeshLambertMaterial({ map, emissive: 0x0b0b0d, ...extra });
   MAT.log = L(TEX.log);
   MAT.logOld = L(TEX.logOld);
   MAT.bark = L(TEX.bark);

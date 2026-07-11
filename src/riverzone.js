@@ -548,7 +548,12 @@ export function vegExcluded(x, z, y, era = 4, m = 0) {
   const lk = lakeAt(x, z);
   if (lk && y < lk.level + 0.5) return true;
   const rv = riverAt(x, z);
-  if (rv && (rv.d < rv.hw + 2.5 + m || (rv.d < rv.hw + 10 && y < rv.level + 0.45))) return true;
+  if (rv) {
+    // presence-aware margin: on grassy reaches (apron→0) the sward stands
+    // nearly at the wet lip; sand bars keep their wide keep-out ring
+    const ap = clamp(bankCharFromQuery(rv, x, z).apron, 0.12, 1);
+    if (rv.d < rv.hw + 1.1 + (1.4 + m) * ap || (rv.d < rv.hw + 10 && y < rv.level + 0.45)) return true;
+  }
   const st = streamAt(x, z);
   if (st && (st.d < st.hw + 1.2 + m * 0.6 || (st.d < st.hw + 5 && y < st.level + 0.4))) return true;
   if ((era === 3 || era === 4 || era === undefined) && POND) {
@@ -574,22 +579,36 @@ export function bankCharAt(x, z) {
 // side: +1/'left' is left looking downstream; -1/'right' is right.
 // Curvature drives the opposing geomorphic roles, with the old FBM retained
 // as secondary reach-scale variation and as the straight-reach fallback.
-export function bankCharSideAt(x, z, side = 1, chan = null) {
-  const sideSign = side === 'right' || side === -1 ? -1 : 1;
-  let q = chan ? projectChannel(chan, x, z) : riverAt(x, z);
-  if (!q) q = streamAt(x, z);
+// The core law works from an existing channel query (curvature + side) so
+// hot paths (vegExcluded per blade/tree) never pay a re-projection.
+const presNoise = makeNoise(7331);
+export function bankCharFromQuery(q, x, z, sideSign = q ? q.side : 1) {
   const base = bankCharAt(x, z);
   const signedBend = q ? clamp(q.curvature * 55, -1, 1) : 0;
   const inner = Math.max(0, signedBend * sideSign);
   const outer = Math.max(0, -signedBend * sideSign);
+  // PRESENCE gates the sand apron to true zero: a river only exposes sand
+  // where it deposits — point bars and bar reaches. A continuous collar
+  // read as a brown stripe from the air; on ~half the shoreline the turf
+  // now walks to the water over a bare wet lip instead.
+  const presN = presNoise.fbm(x * 0.013, z * 0.013, 2);
+  const presence = smoothstep(0.34, 0.62,
+    inner * 0.72 + base.bar * 0.55 + presN * 0.42 - base.mud * 0.28);
   return {
     mud: clamp(base.mud + outer * 0.18 - inner * 0.12, 0, 1),
     bar: clamp(base.bar * (1 - 0.35 * outer) + inner * 0.82, 0, 1),
     erosion: clamp(outer * 0.9 + (1 - base.bar) * 0.12, 0, 1),
     bare: clamp(outer * 0.78 + base.mud * 0.18, 0, 1),
-    apron: clamp(1 + inner * 0.65 - outer * 0.35, 0.55, 1.7),
+    presence,
+    apron: presence * (0.7 + inner * 0.75 + base.bar * 0.35),
     inner, outer, curvature: q ? q.curvature : 0, side: sideSign,
   };
+}
+export function bankCharSideAt(x, z, side = 1, chan = null) {
+  const sideSign = side === 'right' || side === -1 ? -1 : 1;
+  let q = chan ? projectChannel(chan, x, z) : riverAt(x, z);
+  if (!q) q = streamAt(x, z);
+  return bankCharFromQuery(q, x, z, sideSign);
 }
 
 // ------------------------------------------------- shared mesh geometry ----

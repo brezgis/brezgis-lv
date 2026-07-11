@@ -374,6 +374,16 @@ export function buildWater() {
         const dryC = mixC(mixC(bandC[1], [0.62, 0.58, 0.50], ch.bar), [0.34, 0.29, 0.22], ch.erosion * 0.7);
         const fringeC = mixC(bandC[2], [0.38, 0.43, 0.27], 0.3 + 0.45 * ch.mud);
         const rowC = [wetC, dryC, fringeC];
+        // presence sink: as the apron gates toward zero the whole band
+        // dissolves into meadow tones — the collar must never read as a
+        // continuous brown stripe from the air
+        {
+          const meadow = [0.30, 0.45, 0.20];
+          const sink = 1 - Math.min(1, ch.apron * 1.4);
+          rowC[0] = mixC(rowC[0], [0.30, 0.34, 0.20], sink * 0.65);
+          rowC[1] = mixC(rowC[1], meadow, sink * 0.8);
+          rowC[2] = mixC(rowC[2], meadow, 0.35 + sink * 0.65);
+        }
         const inn = inner[si][i], out = outer[si][i];
         const mx = inn[0] + (out[0] - inn[0]) * 0.3;
         const mz = inn[2] + (out[2] - inn[2]) * 0.3;

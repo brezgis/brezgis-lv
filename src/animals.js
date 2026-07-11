@@ -743,6 +743,38 @@ export const SPECIES = {
   bee: () => bumblebee(),
 };
 
+// bake a species into ONE vertex-coloured geometry for background statics —
+// the paddock grazers were primitive box assemblies ("a super square cow");
+// now they are the real animals, frozen mid-graze, cheap to instance.
+export function bakeSpeciesGeometry(kind, { grazing = true } = {}) {
+  const a = SPECIES[kind]();
+  if (grazing && a.neck && a.neck.rotation) a.neck.rotation.x = 0.72;
+  a.group.updateMatrixWorld(true);
+  const pos = [], nrm = [], col = [];
+  const v = new THREE.Vector3();
+  const nmx = new THREE.Matrix3();
+  a.group.traverse((o) => {
+    if (!o.isMesh) return;
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
+    const p = g.getAttribute('position'), nn = g.getAttribute('normal');
+    nmx.getNormalMatrix(o.matrixWorld);
+    const c = o.material.color;
+    for (let i = 0; i < p.count; i++) {
+      v.set(p.getX(i), p.getY(i), p.getZ(i)).applyMatrix4(o.matrixWorld);
+      pos.push(v.x, v.y, v.z);
+      v.set(nn.getX(i), nn.getY(i), nn.getZ(i)).applyMatrix3(nmx).normalize();
+      nrm.push(v.x, v.y, v.z);
+      col.push(c.r, c.g, c.b);
+    }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 // --- behaviour ----------------------------------------------------------------
 const TAU = Math.PI * 2;
 const HERD_PROFILES = {

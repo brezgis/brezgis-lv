@@ -475,7 +475,7 @@ export function buildVegetation(scene, renderer) {
     }
     group.add(bark);
     if (cards) group.add(cards);
-    promPool[key] = { bark, cards, hRef: S.full[0].skel.height, active: new Map(), free: [] };
+    promPool[key] = { bark, cards, hRef: S.full[0].skel.height, active: new Map(), free: [], trans: new Map() };
   }
   const farPlaced = {};   // per species: { entries, byCell, widen } for the ACTIVE era
 
@@ -1666,51 +1666,81 @@ export function buildVegetation(scene, renderer) {
       cand.sort((a, b) => a[0] - b[0]);
       const want = new Set();
       for (let i = 0; i < cand.length && want.size < PROM_CAP; i++) want.add(cand[i][1]);
-      let farDirty = false;
-      // demote: restore the impostor's real matrix, free the pool slot
-      for (const [idx, slot] of [...pool.active]) {
-        if (want.has(idx)) continue;
-        const [x, y, z, h, , leanX = 0, leanZ = 0] = fp.entries[idx];
-        dummy.position.set(x, y - 0.4, z);
-        dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
-        dummy.scale.set(h * 1.12 * fp.widen, h, h * 1.12 * fp.widen);
-        dummy.updateMatrix();
-        farM.setMatrixAt(idx, dummy.matrix);
-        farM.instanceMatrix.addUpdateRange(idx * 16, 16);
-        farDirty = true;
-        pool.active.delete(idx);
-        pool.free.push(slot);
+      // the swap used to be a one-frame binary flip — flying through a
+      // non-POI forest read as "trees generating around me". Promotion and
+      // demotion are now CROSS-FADED by promoteTransitions(): the impostor
+      // scales out while the real tree scales in over ~0.45s.
+      // demote: start (or continue) a fade-out for trees no longer wanted
+      for (const [idx] of pool.active) {
+        if (want.has(idx)) {
+          const tr = pool.trans.get(idx);
+          if (tr && tr.dir < 0) tr.dir = 1;          // re-wanted mid-demote
+          continue;
+        }
+        const tr = pool.trans.get(idx);
+        if (tr) tr.dir = -1;
+        else pool.trans.set(idx, { k: 1, dir: -1 });
       }
-      // promote: hide the impostor, stand a real tree in its place
+      // promote: allocate a slot and start the fade-in
       for (const idx of want) {
         if (pool.active.has(idx) || !pool.free.length) continue;
         const slot = pool.free.pop();
-        _pm.makeScale(0.0001, 0.0001, 0.0001);
-        farM.setMatrixAt(idx, _pm);
-        farM.instanceMatrix.addUpdateRange(idx * 16, 16);
-        farDirty = true;
-        const [x, y, z, h, tint, leanX = 0, leanZ = 0] = fp.entries[idx];
-        const s = h / pool.hRef;
-        dummy.position.set(x, y - 0.08 * s, z);
-        dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
-        dummy.scale.set(s, s, s);
-        dummy.updateMatrix();
-        pool.bark.setMatrixAt(slot, dummy.matrix);
-        if (pool.cards) pool.cards.setMatrixAt(slot, dummy.matrix);
+        const tint = fp.entries[idx][4];
         col.setScalar(tint);
         pool.bark.setColorAt(slot, col);
         if (pool.cards) pool.cards.setColorAt(slot, col);
         pool.active.set(idx, slot);
+        pool.trans.set(idx, { k: 0, dir: 1 });
+      }
+      if (pool.bark.instanceColor) pool.bark.instanceColor.needsUpdate = true;
+      if (pool.cards && pool.cards.instanceColor) pool.cards.instanceColor.needsUpdate = true;
+    }
+  }
+
+  // advance the promotion cross-fades — called every frame with dt
+  function promoteTransitions(dt) {
+    const step = dt / 0.45;
+    for (const key of SP_KEYS) {
+      const pool = promPool[key], fp = farPlaced[key], farM = farMeshes[key];
+      if (!pool || !fp || !farM || !pool.trans.size) continue;
+      let farDirty = false, nearDirty = false;
+      for (const [idx, tr] of pool.trans) {
+        tr.k = Math.min(1, Math.max(0, tr.k + step * tr.dir));
+        const k = tr.k * tr.k * (3 - 2 * tr.k);
+        const slot = pool.active.get(idx);
+        const [x, y, z, h, , leanX = 0, leanZ = 0] = fp.entries[idx];
+        // impostor shrinks as the real tree grows (and vice versa)
+        const ik = Math.max(0.0001, 1 - k);
+        dummy.position.set(x, y - 0.4, z);
+        dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
+        dummy.scale.set(h * 1.12 * fp.widen * ik, Math.max(0.0001, h * ik), h * 1.12 * fp.widen * ik);
+        dummy.updateMatrix();
+        farM.setMatrixAt(idx, dummy.matrix);
+        farM.instanceMatrix.addUpdateRange(idx * 16, 16);
+        farDirty = true;
+        if (slot !== undefined) {
+          const s = (h / pool.hRef) * Math.max(0.0001, k);
+          dummy.position.set(x, y - 0.08 * s, z);
+          dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
+          dummy.scale.set(s, s, s);
+          dummy.updateMatrix();
+          pool.bark.setMatrixAt(slot, dummy.matrix);
+          if (pool.cards) pool.cards.setMatrixAt(slot, dummy.matrix);
+          nearDirty = true;
+        }
+        if (tr.k >= 1 && tr.dir > 0) pool.trans.delete(idx);   // steady, promoted
+        if (tr.k <= 0 && tr.dir < 0) {                          // fully demoted
+          pool.trans.delete(idx);
+          if (slot !== undefined) { pool.active.delete(idx); pool.free.push(slot); }
+        }
       }
       if (farDirty) farM.instanceMatrix.needsUpdate = true;
-      pool.bark.instanceMatrix.needsUpdate = true;
-      if (pool.bark.instanceColor) pool.bark.instanceColor.needsUpdate = true;
-      if (pool.cards) {
-        pool.cards.instanceMatrix.needsUpdate = true;
-        if (pool.cards.instanceColor) pool.cards.instanceColor.needsUpdate = true;
+      if (nearDirty) {
+        pool.bark.instanceMatrix.needsUpdate = true;
+        if (pool.cards) pool.cards.instanceMatrix.needsUpdate = true;
       }
     }
   }
 
-  return { setEra, group, tick, getColliders, promote };
+  return { setEra, group, tick, getColliders, promote, promoteTransitions };
 }

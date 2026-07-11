@@ -69,3 +69,21 @@ function inRect(r, x, z, m) {
   const u = dx * c - dz * s, v = dx * s + dz * c;
   return Math.abs(u) < r.w / 2 + m && Math.abs(v) < r.d / 2 + m;
 }
+
+// ---- trampled ground (paddocks) -------------------------------------------
+// fenced livestock ground is grazed and trodden — the grass system reads
+// this to thin and shorten the sward inside, same idea as the yard pads.
+const trampleReg = new Map();
+export function registerTrample(era, rects) {
+  trampleReg.set(era, { rects, grid: indexRects(rects) });
+}
+export function trampleAt(era, x, z, margin = 0) {
+  const e = trampleReg.get(era);
+  if (!e) return false;
+  const arr = e.grid.get(Math.floor(x / CELL) + ':' + Math.floor(z / CELL));
+  if (!arr) return false;
+  for (const i of arr) {
+    if (inRect(e.rects[i], x, z, margin)) return true;
+  }
+  return false;
+}

@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { heightAt } from './terrain.js';
 import { forestDensity, distToRiver, distToRoad, distToRoadEx, ROAD_HALF_W, fieldAt, PADS, ERA2_FARMS } from './landuse.js';
 import { vegExcluded, lakeShoreWavyAt, lakeAt } from './riverzone.js';
-import { buildingAt } from './footprints.js';
+import { buildingAt, trampleAt } from './footprints.js';
 import { mulberry32, smoothstep as smoothstepJ } from './util.js';
 import { WIND } from './vegetation.js';
 
@@ -349,6 +349,9 @@ export function buildGrass(scene) {
       cDRiv = distToRiver(ccx, ccz);
       if (vegExcluded(ccx, ccz, cY, era, 2 + cell * 0.75)) cellOK = false;
       if (cellOK) {
+        // no sward through a farmhouse floor — flowers checked footprints,
+        // the blade carpet never did (cell test; the margin covers the cell)
+        if (buildingAt(era, ccx, ccz, cell * 0.75)) cellOK = false;
         // lakeshore feather: the sward thins gently to the waterline
         // instead of stopping on a drawn rim; the wavy distance makes the
         // fade wander with the real water's edge
@@ -370,6 +373,7 @@ export function buildGrass(scene) {
             if (Math.hypot(ccx - f.x, ccz - f.z) < 11) { cTrodden = true; break; }
           }
         }
+        if (!cTrodden && trampleAt(era, ccx, ccz, 0.5)) cTrodden = true;   // paddocks graze bare
         cFa = era >= 2 ? fieldAt(era, ccx, ccz) : null;
       }
       if (!cellOK) return;

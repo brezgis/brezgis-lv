@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
-import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, confluenceAt, lakeShoreSignedDistAt } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, bankCharFromQuery, confluenceAt, lakeShoreSignedDistAt } from './riverzone.js';
 import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
@@ -586,7 +586,7 @@ export function paintEra(era) {
     }
     const dRiv = distToRiver(x, z);
     const rv = riverAt(x, z);
-    const riverCh = rv ? bankCharAt(x, z) : null;
+    const riverCh = rv ? bankCharFromQuery(rv, x, z) : null;
 
     // base meadow green, dryer on heights, lusher near water
     let r = 0.275 + n1 * 0.14 + smoothstep(200, 245, y) * 0.10;
@@ -622,8 +622,11 @@ export function paintEra(era) {
     // V-roads, gravel elsewhere, bare dirt on the farm tracks
     if (era >= 2) {
       const ri = distToRoadEx(era, x, z);
-      if (ri.d < 2.5) {
-        const t = smoothstep(2.5, -1, ri.d);
+      // the ribbons carry the surface; paint only a NARROW dirt fringe and
+      // a worn-green verge — the old 2.5m halo painted every road corridor
+      // brown from the air (roads read as fat tan stripes)
+      if (ri.d < 0.8) {
+        const t = smoothstep(0.8, -1, ri.d);
         if (era === 5 && ri.c === 0) {   // P30 only — class-1 V-roads stay gravel like their ribbons
           const lane = 0.30 + n2 * 0.03;
           r = lerp(r, lane, t); g = lerp(g, lane + 0.008, t); b = lerp(b, lane + 0.02, t);
@@ -632,6 +635,9 @@ export function paintEra(era) {
         } else {
           r = lerp(r, 0.44, t); g = lerp(g, 0.36, t); b = lerp(b, 0.26, t);
         }
+      } else if (ri.d < 3.2) {
+        const t = smoothstep(3.2, 0.8, ri.d) * 0.5;
+        r = lerp(r, 0.36, t); g = lerp(g, 0.42, t); b = lerp(b, 0.20, t);   // trodden verge green
       }
     }
     for (const p of PADS) {
@@ -664,8 +670,9 @@ export function paintEra(era) {
       } else if (rv.d < hw + 1.5) {
         wet = Math.max(wet, smoothstep(hw + 1.5, hw - 0.5, rv.d));
       } else if (rv.d < hw + 6) {
-        // the bank itself: bare sandy earth, distinct from the meadow
-        const bank = smoothstep(hw + 6, hw + 2.5, rv.d);
+        // the bank itself: bare sandy earth — but ONLY where the river
+        // deposits (presence gate); grassy reaches stay meadow to the lip
+        const bank = smoothstep(hw + 6, hw + 2.5, rv.d) * (0.12 + 0.88 * riverCh.presence);
         const light = 0.04 * riverCh.bar;
         r = lerp(r, 0.42 + light + n2 * 0.08, bank);
         g = lerp(g, 0.36 + light + n2 * 0.05, bank);

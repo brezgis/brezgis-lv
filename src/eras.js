@@ -17,10 +17,11 @@ import { MAT } from './textures.js';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W } from './landuse.js';
 import { riverAt, streamAt, lakeAt, pondAt, vegExcluded } from './riverzone.js';
-import { registerFootprints, buildingAt } from './footprints.js';
+import { registerFootprints, registerTrample, buildingAt } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { mulberry32, pointInPoly, chaikinPoly } from './util.js';
+import { bakeSpeciesGeometry } from './animals.js';
 import { HM_OFF_X, HM_OFF_Z, HM_SPAN } from './heightmap.js';
 
 const S = LOC.STEAD, C = LOC.CAMP, Mn = LOC.MANOR, P = LOC.POND, B = LOC.BREZGA, K = LOC.KROGS;
@@ -171,8 +172,8 @@ function roadRibbons(group, era) {
   });
   const surf = {
     asphalt: { mat: mkMat(0x393c40, -2), positions: [], indices: [] },
-    gravel: { mat: mkMat(0x8d7c5f, -1), positions: [], indices: [] },
-    darkGravel: { mat: mkMat(0x7d6f56, -1), positions: [], indices: [] },
+    gravel: { mat: mkMat(0x9d947f, -1), positions: [], indices: [] },
+    darkGravel: { mat: mkMat(0x8d8570, -1), positions: [], indices: [] },
     dirt: {
       mat: new THREE.MeshLambertMaterial({
         color: 0xffffff, vertexColors: true,
@@ -183,9 +184,9 @@ function roadRibbons(group, era) {
   };
   const patchSurf = {
     asphalt: { mat: mkMat(0x393c40, -4), positions: [], indices: [], count: 0 },
-    gravel: { mat: mkMat(0x8d7c5f, -4), positions: [], indices: [], count: 0 },
-    darkGravel: { mat: mkMat(0x7d6f56, -4), positions: [], indices: [], count: 0 },
-    dirt: { mat: mkMat(0x736b47, -4), positions: [], indices: [], count: 0 },
+    gravel: { mat: mkMat(0x9d947f, -4), positions: [], indices: [], count: 0 },
+    darkGravel: { mat: mkMat(0x8d8570, -4), positions: [], indices: [], count: 0 },
+    dirt: { mat: mkMat(0x7d7558, -4), positions: [], indices: [], count: 0 },
   };
   const bridgeMat = era === 5 ? new THREE.MeshLambertMaterial({ color: 0x9a9a94 }) : MAT.darkWood;
   const bridgeFixtures = [], bridgeCandidates = [], bridgeSites = [];
@@ -372,6 +373,23 @@ function roadRibbons(group, era) {
     if (pts.length < 2) continue;
     roadRowCount += pts.length;
     const dists = roadDists(pts);
+    // open ends taper to nothing over ~22m — a road that stops dead
+    // mid-field reads as a data artifact; junction ends (another road
+    // within 4m of a probe 10m past the end) keep full width
+    const totalLen = dists[dists.length - 1];
+    const openEnd = (iEnd) => {
+      const pE = pts[iEnd], q = pts[iEnd === 0 ? Math.min(4, pts.length - 1) : Math.max(0, iEnd - 4)];
+      const ddx = pE[0] - q[0], ddz = pE[1] - q[1];
+      const l = Math.hypot(ddx, ddz) || 1;
+      return distToRoadEx(era, pE[0] + (ddx / l) * 10, pE[1] + (ddz / l) * 10).d >= 4;
+    };
+    const taperA = openEnd(0), taperB = openEnd(pts.length - 1);
+    const endK = (i) => {
+      let k = 1;
+      if (taperA) k = Math.min(k, dists[i] / 22);
+      if (taperB) k = Math.min(k, (totalLen - dists[i]) / 22);
+      return Math.max(0.05, Math.min(1, k));
+    };
     const runs = bridgeRuns(pts, dists);
     bridgeRunCount += runs.length;
     for (const run of runs) {
@@ -386,7 +404,7 @@ function roadRibbons(group, era) {
         const [x, z] = pts[i];
         const [dx, dz] = tangentAt(pts, i);
         const run = bridgeAt(runs, i);
-        pushDirtRow(positions, colors, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
+        pushDirtRow(positions, colors, x, z, dx, dz, half * endK(i), run ? bridgeYAt(run, dists, i) : null);
         if (i > 0) addIndices(indices, base, i, 7);
       }
       continue;
@@ -399,7 +417,7 @@ function roadRibbons(group, era) {
           const [x, z] = pts[i];
           const [dx, dz] = tangentAt(pts, i);
           const run = bridgeAt(runs, i);
-          pushShoulderRow(positions, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
+          pushShoulderRow(positions, x, z, dx, dz, half * endK(i), run ? bridgeYAt(run, dists, i) : null);
           if (i > 0) addIndices(indices, base, i, 6, [0, 1, 3, 4]);
         }
       }
@@ -410,7 +428,7 @@ function roadRibbons(group, era) {
           const [x, z] = pts[i];
           const [dx, dz] = tangentAt(pts, i);
           const run = bridgeAt(runs, i);
-          pushCamberedRow(positions, x, z, dx, dz, half, r.c, run ? bridgeYAt(run, dists, i) : null);
+          pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c, run ? bridgeYAt(run, dists, i) : null);
           if (i > 0) {
             addIndices(indices, base, i, 5, [1, 2]);
             // dashed centreline on the paved P30: ~3.4m of paint per 18m cycle
@@ -440,7 +458,7 @@ function roadRibbons(group, era) {
       const [x, z] = pts[i];
       const [dx, dz] = tangentAt(pts, i);
       const run = bridgeAt(runs, i);
-      pushCamberedRow(positions, x, z, dx, dz, half, r.c, run ? bridgeYAt(run, dists, i) : null);
+      pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c, run ? bridgeYAt(run, dists, i) : null);
       if (i > 0) addIndices(indices, base, i, 5);
     }
   }
@@ -687,68 +705,19 @@ function splitFenceRuns(pts, era) {
 let grazerGeos = null;
 function grazerAssets() {
   if (grazerGeos) return grazerGeos;
-  const part = (geo, x, y, z, rz = 0) => {
-    const g = geo.clone();
-    const m = new THREE.Matrix4();
-    m.compose(
-      new THREE.Vector3(x, y, z),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, rz)),
-      new THREE.Vector3(1, 1, 1)
-    );
-    g.applyMatrix4(m);
-    return g;
-  };
-  const box = (w, h, d, x, y, z, rz = 0) => part(new THREE.BoxGeometry(w, h, d), x, y, z, rz);
-  const merge = (parts) => {
-    const pos = [];
-    for (const src of parts) {
-      const g = src.toNonIndexed();
-      const p = g.getAttribute('position');
-      for (let i = 0; i < p.count; i++) pos.push(p.getX(i), p.getY(i), p.getZ(i));
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.computeVertexNormals();
-    geo.computeBoundingSphere();
-    return geo;
-  };
-  const legs = (h, spreadX, spreadZ, w = 0.1) => [
-    box(w, h, w, -spreadX, h / 2, -spreadZ),
-    box(w, h, w, spreadX, h / 2, -spreadZ),
-    box(w, h, w, -spreadX, h / 2, spreadZ),
-    box(w, h, w, spreadX, h / 2, spreadZ),
-  ];
+  // the REAL animal models, baked mid-graze — the box assemblies read as
+  // "a super square cow" the moment anyone flew close
   grazerGeos = {
-    cow: merge([
-      box(1.35, 0.54, 0.5, 0, 0.78, 0),
-      ...legs(0.62, 0.43, 0.18, 0.11),
-      box(0.36, 0.16, 0.18, 0.72, 0.57, 0, -0.62),
-      box(0.32, 0.24, 0.24, 0.96, 0.39, 0, -0.18),
-      box(0.08, 0.16, 0.04, 1.03, 0.52, -0.1, -0.55),
-      box(0.08, 0.16, 0.04, 1.03, 0.52, 0.1, -0.55),
-    ]),
-    sheep: merge([
-      box(0.92, 0.42, 0.42, 0, 0.56, 0),
-      ...legs(0.42, 0.3, 0.15, 0.07),
-      box(0.24, 0.13, 0.14, 0.5, 0.44, 0, -0.55),
-      box(0.22, 0.18, 0.18, 0.68, 0.29, 0, -0.16),
-      box(0.06, 0.1, 0.035, 0.74, 0.39, -0.08, -0.45),
-      box(0.06, 0.1, 0.035, 0.74, 0.39, 0.08, -0.45),
-    ]),
-    horse: merge([
-      box(1.55, 0.5, 0.42, 0, 0.94, 0),
-      ...legs(0.86, 0.5, 0.15, 0.08),
-      box(0.46, 0.16, 0.18, 0.8, 0.78, 0, -0.72),
-      box(0.34, 0.22, 0.2, 1.08, 0.52, 0, -0.2),
-      box(0.06, 0.18, 0.035, 1.15, 0.66, -0.08, -0.38),
-      box(0.06, 0.18, 0.035, 1.15, 0.66, 0.08, -0.38),
-    ]),
+    cow: bakeSpeciesGeometry('cattleFarm'),
+    sheep: bakeSpeciesGeometry('sheepWhite'),
+    horse: bakeSpeciesGeometry('horseBay'),
   };
   return grazerGeos;
 }
 
 function bgSettlement(group, era, smokes, stageItems = []) {
   const rng = mulberry32(4300 + era * 17);
+  const trampleRects = [];   // paddocks: grazed bare by the stock inside
   const props = { hay: [], wood: [], vinda: [], fence: [], boxWell: [], garden: [], tuft: [], cow: [], sheep: [], horse: [] };
   const { wall, roof, door, window4, window6, chimney } = bgAssets();
   const skip = (x, z) => nearStagePOI(x, z);
@@ -912,6 +881,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
             w: pw, d: pd, rot,
           };
           if (!placementBlocked(paddock) && addFenceRect(paddock.x, paddock.z, paddock.w, paddock.d, paddock.rot, siteItems)) {
+            trampleRects.push({ x: paddock.x, z: paddock.z, w: paddock.w, d: paddock.d, rot: paddock.rot });
             const pick = sr();
             const kind = pick < 0.45 ? 'cow' : pick < 0.82 ? 'sheep' : 'horse';
             const count = kind === 'sheep' ? 2 + ((sr() * 2) | 0) : kind === 'cow' ? 1 + (sr() < 0.35 ? 1 : 0) : 1;
@@ -947,6 +917,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
   // the planters ask "is there a building here?" — hand them the final,
   // validated footprints (plus the stage rects footprints.js lists itself)
   registerFootprints(era, items.concat(stageItems));
+  registerTrample(era, trampleRects);
   const propCandidates = Object.fromEntries(Object.entries(props).map(([kind, arr]) => [kind, arr.length]));
   const keep = (kind, radius) => { props[kind] = props[kind].filter(([x, z]) => propOK(era, x, z, radius)); };
   keep('hay', 1.6); keep('wood', 1.2); keep('vinda', 1.0); keep('boxWell', 0.8);
@@ -959,8 +930,8 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     return ok;
   });
   props.tuft = props.tuft.filter(([x, z, , , id]) => keptGardens.has(id) && propOK(era, x, z, 0.16));
-  const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), items.length);
-  const roofs = new THREE.InstancedMesh(roof, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), items.length);
+  const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, emissive: 0x0b0b0d }), items.length);
+  const roofs = new THREE.InstancedMesh(roof, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide, emissive: 0x0a0a0b }), items.length);
   walls.castShadow = roofs.castShadow = true;
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
@@ -1044,16 +1015,24 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     if (era >= 3) {
       let windowCount = dwelling ? 2 + (i % 3) : it.kind === 'barn' || it.big ? (i % 3 === 0 ? 1 : 0) : i % 2;
       if (it.kind === 'klets') windowCount = i % 2;
+      // windows scale with the wall (0.7m panes on a 5m shed read as
+      // portholes), and front-wall windows sit OPPOSITE the door — the old
+      // ±0.24 span landed j=0 on top of the door whenever i was odd
+      const wScale = dwelling ? 1 : Math.min(1.8, Math.max(1, wallH / 2.8));
+      const doorSign = i % 2 ? -1 : 1;
       for (let j = 0; j < windowCount; j++) {
         const target = (i + j) % 2 ? facades.window6 : facades.window4;
-        const ww = dwelling ? 0.92 : 0.72, wh = dwelling ? 0.92 : 0.68;
+        const ww = (dwelling ? 0.92 : 0.72) * wScale, wh = (dwelling ? 0.92 : 0.68) * wScale;
         if (j === windowCount - 1 && dwelling) {
           const side = i % 2 ? -1 : 1;
           if (alongX) facadeAt(target, it, i, side * (it.w / 2 + 0.045), y + wallH + roofH * 0.3, 0, Math.PI / 2, ww, wh);
           else facadeAt(target, it, i, 0, y + wallH + roofH * 0.3, side * (it.d / 2 + 0.045), 0, ww, wh);
         } else {
           const side = j % 2 ? -1 : 1;
-          const across = ((j >> 1) ? 0.24 : -0.24) * longSpan;
+          // front wall (door side): stay clear of the doorway; back wall: free
+          const across = side > 0 && dwelling
+            ? -doorSign * 0.28 * longSpan
+            : ((j >> 1) ? 0.26 : -0.26) * longSpan;
           if (alongX) facadeAt(target, it, i, across, y + Math.min(1.75, wallH * 0.57), side * (shortSpan / 2 + 0.045), side < 0 ? Math.PI : 0, ww, wh);
           else facadeAt(target, it, i, side * (shortSpan / 2 + 0.045), y + Math.min(1.75, wallH * 0.57), across, side < 0 ? -Math.PI / 2 : Math.PI / 2, ww, wh);
         }
@@ -1241,11 +1220,9 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       group.add(fence);
     }
     const geos = grazerAssets();
-    const grazerMat = {
-      cow: new THREE.MeshLambertMaterial({ color: new THREE.Color(0.42, 0.24, 0.16) }),
-      sheep: new THREE.MeshLambertMaterial({ color: new THREE.Color(0.78, 0.75, 0.68) }),
-      horse: new THREE.MeshLambertMaterial({ color: new THREE.Color(0.18, 0.08, 0.045) }),
-    };
+    // the baked models carry the real palettes as vertex colours
+    const grazerVC = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const grazerMat = { cow: grazerVC, sheep: grazerVC, horse: grazerVC };
     const putGrazer = (kind) => {
       if (!props[kind].length) return;
       const mesh = new THREE.InstancedMesh(geos[kind], grazerMat[kind], props[kind].length);
@@ -1686,9 +1663,9 @@ export function buildEra(era, ctx) {
       add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
       markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
     }
-    add(manorOutbuilding(22), Mn.x - 46, Mn.z - 26, 0.35 + Math.PI / 2);
+    add(manorOutbuilding(22), Mn.x - 52, Mn.z - 14, 0.35 + Math.PI / 2);
     markBuilding(Mn.x - 46, Mn.z - 26, 22, 8, 0.35 + Math.PI / 2);
-    add(manorOutbuilding(16), Mn.x + 44, Mn.z - 22, 0.2);
+    add(manorOutbuilding(16), Mn.x + 58, Mn.z - 12, 1.56);
     markBuilding(Mn.x + 44, Mn.z - 22, 16, 8, 0.2);
     add(brewery(), P.x + 58, P.z + 48, Math.PI * 0.72);
     markBuilding(P.x + 58, P.z + 48, 16, 7.5, Math.PI * 0.72);
@@ -1751,9 +1728,9 @@ export function buildEra(era, ctx) {
     if (mh.userData.tick) ticks.push(mh.userData.tick);
     add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
     markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
-    add(manorOutbuilding(22), Mn.x - 46, Mn.z - 26, 0.35 + Math.PI / 2);
+    add(manorOutbuilding(22), Mn.x - 52, Mn.z - 14, 0.35 + Math.PI / 2);
     markBuilding(Mn.x - 46, Mn.z - 26, 22, 8, 0.35 + Math.PI / 2);
-    add(manorOutbuilding(16), Mn.x + 44, Mn.z - 22, 0.2);
+    add(manorOutbuilding(16), Mn.x + 58, Mn.z - 12, 1.56);
     markBuilding(Mn.x + 44, Mn.z - 22, 16, 8, 0.2);
     add(churchSilhouette(), LOC.CHURCH.x, LOC.CHURCH.z, 0.8);
     markBuilding(LOC.CHURCH.x, LOC.CHURCH.z, 38, 24, 0.8);
@@ -1769,7 +1746,7 @@ export function buildEra(era, ctx) {
     // Brežģa kalns: the 2017 observation tower, the summit oak, the Jāņi pyre
     add(observationTower(), B.x, B.z, 0.2);
     markBuilding(B.x, B.z, 4, 4, 0.2);
-    addRaw(gravelEllipse(B.x + 55, B.z - 60, 12, 7, -0.58, 0x8d7c5f));
+    addRaw(gravelEllipse(B.x + 55, B.z - 60, 12, 7, -0.58, 0x9d947f));
     add(infoSign(), B.x + 48, B.z - 52, -0.7);
     add(picnicTable(), B.x + 24, B.z - 18, -0.45);
     add(fireRing(), B.x + 10, B.z - 8, 0.25);

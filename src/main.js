@@ -621,6 +621,7 @@ async function boot() {
     }
     sky.update(dt, focus, shadowNow, agl);
     veg.tick(sky.state.sunColor, sky.state.ambient);
+    veg.promoteTransitions(dt);
     veg.promote(camera.position.x, camera.position.z);
     water.tick(t);
     WIND.time.value = t;

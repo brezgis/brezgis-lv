@@ -16,8 +16,8 @@ import {
 import { MAT } from './textures.js';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W } from './landuse.js';
-import { riverAt, streamAt, lakeAt, pondAt } from './riverzone.js';
-import { registerFootprints } from './footprints.js';
+import { riverAt, streamAt, lakeAt, pondAt, vegExcluded } from './riverzone.js';
+import { registerFootprints, buildingAt } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { mulberry32, pointInPoly, chaikinPoly } from './util.js';
@@ -575,8 +575,113 @@ function bgAssets() {
   const roof = new THREE.BufferGeometry();
   roof.setAttribute('position', new THREE.Float32BufferAttribute(tris.flat(), 3));
   roof.computeVertexNormals();
-  bgGeos = { wall, roof };
+  const merged = (parts) => {
+    const pos = [], norm = [], colors = [];
+    for (const { geo: src, color } of parts) {
+      const g = src.toNonIndexed();
+      const p = g.getAttribute('position'), n = g.getAttribute('normal');
+      for (let i = 0; i < p.count; i++) {
+        pos.push(p.getX(i), p.getY(i), p.getZ(i));
+        norm.push(n.getX(i), n.getY(i), n.getZ(i));
+        if (color) colors.push(color[0], color[1], color[2]);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
+    if (colors.length) g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    g.computeBoundingSphere();
+    return g;
+  };
+  const doorPanel = new THREE.BoxGeometry(1, 1, 0.035);
+  doorPanel.translate(0, 0.5, 0);
+  const lintel = new THREE.BoxGeometry(1.16, 0.1, 0.09);
+  lintel.translate(0, 1.03, 0.025);
+  const door = merged([{ geo: doorPanel }, { geo: lintel }]);
+  const window = (panes) => {
+    const parts = [];
+    const glass = new THREE.BoxGeometry(1, 1, 0.025);
+    parts.push({ geo: glass, color: [0.055, 0.075, 0.085] });
+    const strip = (w, h, x, y) => {
+      const q = new THREE.BoxGeometry(w, h, 0.055);
+      q.translate(x, y, 0.025);
+      parts.push({ geo: q, color: [0.9, 0.88, 0.8] });
+    };
+    strip(1.12, 0.085, 0, -0.5); strip(1.12, 0.085, 0, 0.5);
+    strip(0.085, 1.08, -0.5, 0); strip(0.085, 1.08, 0.5, 0);
+    strip(0.055, 0.98, 0, 0);
+    if (panes === 6) {
+      strip(0.98, 0.05, 0, -1 / 6);
+      strip(0.98, 0.05, 0, 1 / 6);
+    } else {
+      strip(0.98, 0.055, 0, 0);
+    }
+    return merged(parts);
+  };
+  bgGeos = { wall, roof, door, window4: window(4), window6: window(6), chimney: new THREE.BoxGeometry(1, 1, 1) };
   return bgGeos;
+}
+
+// Final-position rule for things which sit in a farmyard. distToRoadEx is
+// already signed from the rendered road edge; retaining the class width as a
+// second verge margin keeps small props out of the visually busy road belt.
+function propOK(era, x, z, radius = 0.2) {
+  if (buildingAt(era, x, z, radius)) return false;
+  const road = distToRoadEx(era, x, z);
+  if (road.d < ROAD_HALF_W[road.c] + radius) return false;
+  const y = heightAt(x, z);
+  return !vegExcluded(x, z, y, era, radius);
+}
+
+function splitFenceRuns(pts, era) {
+  const closed = pts.length > 2 && Math.hypot(pts[0][0] - pts.at(-1)[0], pts[0][1] - pts.at(-1)[1]) < 0.01;
+  const samples = [];
+  for (let s = 0; s < pts.length - 1; s++) {
+    const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+    const len = Math.hypot(bx - ax, bz - az) || 1;
+    const steps = Math.max(1, Math.ceil(len / 0.18));
+    for (let k = 0; k < steps; k++) {
+      const t = k / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+      samples.push({ x, z, seg: s, ok: propOK(era, x, z, 0.6) });
+    }
+  }
+  if (!closed) {
+    const [x, z] = pts.at(-1);
+    samples.push({ x, z, seg: pts.length - 2, ok: propOK(era, x, z, 0.6) });
+  }
+  if (!samples.length) return { runs: [], gates: 0, dropped: 0 };
+  const dropped = samples.reduce((n, p) => n + !p.ok, 0);
+  let gates = 0;
+  for (let i = 0; i < samples.length; i++) {
+    if (samples[i].ok) continue;
+    const prev = i ? samples[i - 1].ok : closed ? samples.at(-1).ok : true;
+    if (prev) gates++;
+  }
+  if (!dropped) return { runs: [pts], gates: 0, dropped: 0 };
+  const ordered = [];
+  if (closed) {
+    const cut = samples.findIndex((p) => !p.ok);
+    for (let i = 1; i <= samples.length; i++) ordered.push(samples[(cut + i) % samples.length]);
+  } else {
+    ordered.push(...samples);
+  }
+  const raw = [];
+  let run = [];
+  for (const p of ordered) {
+    if (p.ok) run.push(p);
+    else if (run.length) { raw.push(run); run = []; }
+  }
+  if (run.length) raw.push(run);
+  const runs = raw.map((arr) => {
+    const out = [[arr[0].x, arr[0].z]];
+    for (let i = 1; i < arr.length - 1; i++) {
+      if (arr[i].seg !== arr[i - 1].seg) out.push([arr[i].x, arr[i].z]);
+    }
+    const last = arr.at(-1);
+    if (Math.hypot(last.x - out.at(-1)[0], last.z - out.at(-1)[1]) > 0.2) out.push([last.x, last.z]);
+    return out;
+  }).filter((arr) => arr.length > 1);
+  return { runs, gates, dropped };
 }
 
 let grazerGeos = null;
@@ -642,10 +747,10 @@ function grazerAssets() {
   return grazerGeos;
 }
 
-function bgSettlement(group, era, smokes) {
+function bgSettlement(group, era, smokes, stageItems = []) {
   const rng = mulberry32(4300 + era * 17);
   const props = { hay: [], wood: [], vinda: [], fence: [], boxWell: [], garden: [], tuft: [], cow: [], sheep: [], horse: [] };
-  const { wall, roof } = bgAssets();
+  const { wall, roof, door, window4, window6, chimney } = bgAssets();
   const skip = (x, z) => nearStagePOI(x, z);
   const cornersOf = (it, pad = 0) => {
     const ca = Math.cos(it.rot), sa = Math.sin(it.rot);
@@ -687,7 +792,8 @@ function bgSettlement(group, era, smokes) {
     const lx = dx * ca + dz * sa, lz = -dx * sa + dz * ca;
     return Math.abs(lx) <= it.w / 2 + 0.6 && Math.abs(lz) <= it.d / 2 + 0.6;
   });
-  const fencePoleOK = (px, pz, siteItems) => {
+  const fencePoleOK = (px, pz, siteItems, final = false) => {
+    if (final) return propOK(era, px, pz, 0.6);
     if (insideSiteItem(px, pz, siteItems)) return false;
     if (distToRoadEx(era, px, pz).d < 1.2) return false;
     if (waterBlockedAt(px, pz)) return false;
@@ -823,13 +929,14 @@ function bgSettlement(group, era, smokes) {
             w: 4, d: 7, rot,
           };
           if (!placementBlocked(garden) && !insideSiteItem(garden.x, garden.z, siteItems)) {
-            props.garden.push([garden.x, garden.z, garden.rot]);
+            const gardenId = props.garden.length;
+            props.garden.push([garden.x, garden.z, garden.rot, gardenId]);
             const rows = 3 + ((sr() * 3) | 0);
             for (let gr = 0; gr < rows; gr++) {
               const ox = -garden.w / 2 + ((gr + 1) * garden.w) / (rows + 1);
               for (let lz = -garden.d / 2 + 0.55; lz < garden.d / 2 - 0.3; lz += 0.85) {
                 const [tx, tz] = localPoint(garden.x, garden.z, garden.rot, ox + (sr() - 0.5) * 0.14, lz + (sr() - 0.5) * 0.18);
-                props.tuft.push([tx, tz, sr() * 6.3, 0.7 + sr() * 0.45]);
+                props.tuft.push([tx, tz, sr() * 6.3, 0.7 + sr() * 0.45, gardenId]);
               }
             }
           }
@@ -839,12 +946,32 @@ function bgSettlement(group, era, smokes) {
   }
   // the planters ask "is there a building here?" — hand them the final,
   // validated footprints (plus the stage rects footprints.js lists itself)
-  registerFootprints(era, items);
+  registerFootprints(era, items.concat(stageItems));
+  const propCandidates = Object.fromEntries(Object.entries(props).map(([kind, arr]) => [kind, arr.length]));
+  const keep = (kind, radius) => { props[kind] = props[kind].filter(([x, z]) => propOK(era, x, z, radius)); };
+  keep('hay', 1.6); keep('wood', 1.2); keep('vinda', 1.0); keep('boxWell', 0.8);
+  keep('cow', 1.0); keep('sheep', 0.75); keep('horse', 1.1);
+  props.fence = props.fence.filter(([x, z]) => fencePoleOK(x, z, null, true));
+  const keptGardens = new Set();
+  props.garden = props.garden.filter(([x, z, , id]) => {
+    const ok = propOK(era, x, z, 3.7);
+    if (ok) keptGardens.add(id);
+    return ok;
+  });
+  props.tuft = props.tuft.filter(([x, z, , , id]) => keptGardens.has(id) && propOK(era, x, z, 0.16));
   const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), items.length);
   const roofs = new THREE.InstancedMesh(roof, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), items.length);
   walls.castShadow = roofs.castShadow = true;
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
+  const facades = { door: [], window4: [], window6: [], chimney: [] };
+  const facadeAt = (arr, it, parent, lx, ly, lz, ry, sx, sy, sz = 1) => {
+    const ca = Math.cos(it.rot), sa = Math.sin(it.rot);
+    arr.push({
+      x: it.x + lx * ca - lz * sa, y: ly, z: it.z + lx * sa + lz * ca,
+      ry: -it.rot + ry, sx, sy, sz, parent,
+    });
+  };
   items.forEach((it, i) => {
     // seat on the LOWEST footprint corner and stretch the walls up to the
     // highest — a single centre sample floated corners 2m+ on slopes
@@ -903,9 +1030,79 @@ function bgSettlement(group, era, smokes) {
       col.setRGB(0.5 + rng() * 0.08, 0.42 + rng() * 0.06, 0.25);  // thatch
     }
     roofs.setColorAt(i, col);
+    const dwelling = it.kind === 'dwell' || it.kind === 'dairy' || (era === 5 && !it.big);
+    const alongX = it.w >= it.d;
+    const longSpan = alongX ? it.w : it.d;
+    const shortSpan = alongX ? it.d : it.w;
+    if (dwelling) {
+      const doorH = era <= 2 ? 1.45 : era === 3 ? 1.78 : 2.02;
+      const doorW = era <= 2 ? 1.22 : 0.94;
+      const off = (i % 2 ? -1 : 1) * Math.min(longSpan * 0.22, longSpan / 2 - doorW * 0.7);
+      if (alongX) facadeAt(facades.door, it, i, off, y + 0.02, shortSpan / 2 + 0.045, 0, doorW, doorH);
+      else facadeAt(facades.door, it, i, it.w / 2 + 0.045, y + 0.02, off, Math.PI / 2, doorW, doorH);
+    }
+    if (era >= 3) {
+      let windowCount = dwelling ? 2 + (i % 3) : it.kind === 'barn' || it.big ? (i % 3 === 0 ? 1 : 0) : i % 2;
+      if (it.kind === 'klets') windowCount = i % 2;
+      for (let j = 0; j < windowCount; j++) {
+        const target = (i + j) % 2 ? facades.window6 : facades.window4;
+        const ww = dwelling ? 0.92 : 0.72, wh = dwelling ? 0.92 : 0.68;
+        if (j === windowCount - 1 && dwelling) {
+          const side = i % 2 ? -1 : 1;
+          if (alongX) facadeAt(target, it, i, side * (it.w / 2 + 0.045), y + wallH + roofH * 0.3, 0, Math.PI / 2, ww, wh);
+          else facadeAt(target, it, i, 0, y + wallH + roofH * 0.3, side * (it.d / 2 + 0.045), 0, ww, wh);
+        } else {
+          const side = j % 2 ? -1 : 1;
+          const across = ((j >> 1) ? 0.24 : -0.24) * longSpan;
+          if (alongX) facadeAt(target, it, i, across, y + Math.min(1.75, wallH * 0.57), side * (shortSpan / 2 + 0.045), side < 0 ? Math.PI : 0, ww, wh);
+          else facadeAt(target, it, i, side * (shortSpan / 2 + 0.045), y + Math.min(1.75, wallH * 0.57), across, side < 0 ? -Math.PI / 2 : Math.PI / 2, ww, wh);
+        }
+      }
+      if (dwelling) {
+        const ch = 0.9 + (i % 3) * 0.12;
+        facadeAt(facades.chimney, it, i, 0, y + wallH + roofH * 0.62, 0, 0, 0.55, ch, 0.55);
+        it.chimneyTop = y + wallH + roofH * 0.62 + ch / 2;
+      }
+    }
   });
   walls.instanceMatrix.needsUpdate = roofs.instanceMatrix.needsUpdate = true;
+  walls.name = `bg-walls-era-${era}`;
+  roofs.name = `bg-roofs-era-${era}`;
   group.add(walls, roofs);
+  const facadeMesh = (geo, mat, arr, kind) => {
+    if (!arr.length) return;
+    const mesh = new THREE.InstancedMesh(geo, mat, arr.length);
+    mesh.name = `bg-facade-${kind}-era-${era}`;
+    mesh.userData.facadeKind = kind;
+    mesh.userData.parentIndices = arr.map((p) => p.parent);
+    arr.forEach((p, i) => {
+      dummy.position.set(p.x, p.y, p.z);
+      dummy.rotation.set(0, p.ry, 0);
+      dummy.scale.set(p.sx, p.sy, p.sz);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.count = arr.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.castShadow = true;
+    group.add(mesh);
+  };
+  facadeMesh(door, new THREE.MeshLambertMaterial({ color: 0x201712 }), facades.door, 'door');
+  const windowMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  facadeMesh(window4, windowMat, facades.window4, 'window-4');
+  facadeMesh(window6, windowMat, facades.window6, 'window-6');
+  facadeMesh(chimney, new THREE.MeshLambertMaterial({ color: 0x6f4030 }), facades.chimney, 'chimney');
+  group.userData.backgroundSettlement = {
+    era, itemCount: items.length,
+    facadeCounts: {
+      door: facades.door.length,
+      window: facades.window4.length + facades.window6.length,
+      chimney: facades.chimney.length,
+    },
+    propCounts: Object.fromEntries(Object.entries(props).map(([kind, arr]) => [kind, arr.length])),
+    propRejected: Object.fromEntries(Object.entries(props).map(([kind, arr]) => [kind, propCandidates[kind] - arr.length])),
+    items: items.map(({ x, z, w, d, rot }) => ({ x, z, w, d, rot })),
+  };
 
   // --- yard props, all instanced: haystacks, woodpiles, wells, fences ------
   if (era < 5 && props.hay.length + props.wood.length + props.vinda.length + props.fence.length +
@@ -920,6 +1117,8 @@ function bgSettlement(group, era, smokes) {
     };
     if (props.hay.length) {
       const hayCone = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 2.4, 9), MAT.hay, props.hay.length);
+      hayCone.name = `bg-prop-hay-era-${era}`;
+      hayCone.userData.positions = props.hay;
       put(hayCone, props.hay, ([x, z, r, sc]) => {
         dummy.position.set(x, heightAt(x, z) + 1.2 * sc - 0.05, z);
         dummy.rotation.set(0, r, 0);
@@ -930,6 +1129,8 @@ function bgSettlement(group, era, smokes) {
     if (props.wood.length) {
       const woodGeo = new THREE.BoxGeometry(2.1, 1.05, 1.0);
       const wood = new THREE.InstancedMesh(woodGeo, MAT.logOld, props.wood.length);
+      wood.name = `bg-prop-wood-era-${era}`;
+      wood.userData.positions = props.wood;
       put(wood, props.wood, ([x, z, r, sc]) => {
         dummy.position.set(x, heightAt(x, z) + 0.5 * sc, z);
         dummy.rotation.set(0, r, 0);
@@ -941,6 +1142,8 @@ function bgSettlement(group, era, smokes) {
       // vinda: post + counterweighted sweep beam + hanging rod, baked into
       // one transform frame
       const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.12, 3.2, 6), MAT.logOld, props.vinda.length);
+      post.name = `bg-prop-vinda-era-${era}`;
+      post.userData.positions = props.vinda;
       const beamGeo = new THREE.CylinderGeometry(0.05, 0.07, 4.8, 5);
       beamGeo.rotateZ(1.05);
       beamGeo.translate(0.9, 3.1, 0);
@@ -969,6 +1172,8 @@ function bgSettlement(group, era, smokes) {
     if (props.boxWell.length) {
       const shaft = new THREE.InstancedMesh(wall, MAT.plank, props.boxWell.length);
       const wellRoof = new THREE.InstancedMesh(roof, MAT.darkWood, props.boxWell.length);
+      shaft.name = `bg-prop-well-era-${era}`;
+      shaft.userData.positions = props.boxWell;
       props.boxWell.forEach(([x, z, r], i) => {
         const y = heightAt(x, z);
         dummy.position.set(x, y, z);
@@ -995,6 +1200,8 @@ function bgSettlement(group, era, smokes) {
         color: 0x4d3d2b, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
       });
       const gardens = new THREE.InstancedMesh(gardenGeo, gardenMat, props.garden.length);
+      gardens.name = `bg-prop-garden-era-${era}`;
+      gardens.userData.positions = props.garden;
       put(gardens, props.garden, ([x, z, r]) => {
         dummy.position.set(x, heightAt(x, z) + 0.04, z);
         dummy.rotation.set(0, -r, 0);
@@ -1006,6 +1213,8 @@ function bgSettlement(group, era, smokes) {
     if (props.tuft.length) {
       const tuftGeo = new THREE.ConeGeometry(0.08, 0.22, 5);
       const tufts = new THREE.InstancedMesh(tuftGeo, new THREE.MeshLambertMaterial({ color: 0x3f6f2d }), props.tuft.length);
+      tufts.name = `bg-prop-tuft-era-${era}`;
+      tufts.userData.positions = props.tuft;
       put(tufts, props.tuft, ([x, z, r, sc]) => {
         dummy.position.set(x, heightAt(x, z) + 0.11 * sc, z);
         dummy.rotation.set(0, r, 0);
@@ -1018,6 +1227,8 @@ function bgSettlement(group, era, smokes) {
       const fenceGeo = new THREE.CylinderGeometry(0.035, 0.05, 2.1, 4);
       fenceGeo.rotateZ(0.42);
       const fence = new THREE.InstancedMesh(fenceGeo, MAT.logOld, props.fence.length);
+      fence.name = `bg-prop-fence-era-${era}`;
+      fence.userData.positions = props.fence;
       props.fence.forEach(([x, z, r], i) => {
         dummy.position.set(x, heightAt(x, z) + 0.8, z);
         dummy.rotation.set(0, r, 0);
@@ -1038,6 +1249,8 @@ function bgSettlement(group, era, smokes) {
     const putGrazer = (kind) => {
       if (!props[kind].length) return;
       const mesh = new THREE.InstancedMesh(geos[kind], grazerMat[kind], props[kind].length);
+      mesh.name = `bg-prop-${kind}-era-${era}`;
+      mesh.userData.positions = props[kind];
       put(mesh, props[kind], ([x, z, r, sc]) => {
         dummy.position.set(x, heightAt(x, z), z);
         dummy.rotation.set(0, -r, 0);
@@ -1056,7 +1269,7 @@ function bgSettlement(group, era, smokes) {
       .sort((a, b) => a.d - b.d)
       .slice(0, 6);
     for (const it of dwells) {
-      smokes.push([it.x, heightAt(it.x, it.z) + 4.2, it.z, { rate: 0.3, gray: 0.86 }]);
+      smokes.push([it.x, it.chimneyTop || heightAt(it.x, it.z) + 4.2, it.z, { rate: 0.3, gray: 0.86 }]);
     }
   }
 }
@@ -1292,6 +1505,9 @@ export function buildEra(era, ctx) {
   const g = new THREE.Group();
   g.name = `era${era}`;
   const ticks = [];
+  const stageFootprints = [];
+  const markBuilding = (x, z, w, d, rot = 0) => stageFootprints.push({ x, z, w, d, rot });
+  const refreshFootprints = () => registerFootprints(era, stageFootprints);
   const add = (obj, x, z, rot = 0, sink = 0.08) => {
     placeOnGround(obj, x, z, rot, sink);
     g.add(obj);
@@ -1305,9 +1521,23 @@ export function buildEra(era, ctx) {
   };
   const smokes = [], fires = [];
   const spawns = [];
+  g.userData.fenceGates = {};
+  const addStageFence = (kind, pts, label) => {
+    refreshFootprints();
+    const split = splitFenceRuns(pts, era);
+    split.runs.forEach((run, i) => {
+      const fence = kind === 'riku' ? rikuFence(run) : wattleFence(run);
+      fence.name = `stage-fence-${label}-${i}`;
+      fence.userData.fenceKind = kind;
+      fence.userData.fenceLabel = label;
+      addRaw(fence);
+    });
+    g.userData.fenceGates[label] = { openings: split.gates, droppedSamples: split.dropped };
+  };
 
   // ======================= 0 · ~10,800 BC =================================
   if (era === 0) {
+    refreshFootprints();
     // dead ice stranded in the future lake basins — the lakes being born
     for (const lake of LAKES) {
       const cx = lake.poly.reduce((s2, p) => s2 + p[0], 0) / lake.poly.length;
@@ -1324,6 +1554,8 @@ export function buildEra(era, ctx) {
   // ======================= 1 · ~AD 50 ======================================
   if (era === 1) {
     add(leanTo(), C.x, C.z, -0.6);
+    markBuilding(C.x, C.z, 3.6, 2.9, -0.6);
+    refreshFootprints();
     add(campfire(), C.x + 3.4, C.z + 2.2);
     fires.push([C.x + 3.4, heightAt(C.x + 3.4, C.z + 2.2) + 0.15, C.z + 2.2]);
     smokes.push([C.x + 3.4, heightAt(C.x + 3.4, C.z + 2.2) + 0.9, C.z + 2.2, { rate: 1.1, gray: 0.8 }]);
@@ -1340,22 +1572,29 @@ export function buildEra(era, ctx) {
   // ======================= 2 · ~AD 950 =====================================
   if (era === 2) {
     const dw = add(logCabin({ w: 5, d: 6, wallH: 2.0, roofH: 2.2, roof: 'barkGable', doorEnd: true }), S.x - 5, S.z - 9, 0.15);
+    markBuilding(S.x - 5, S.z - 9, 5, 6, 0.15);
     void dw;
     smokes.push([S.x - 5, heightAt(S.x - 5, S.z - 9) + 4.0, S.z - 6.6, { rate: 0.65, gray: 0.74 }]);
     add(logCabin({ w: 4, d: 5, wallH: 1.8, roofH: 1.9, roof: 'barkGable', old: true }), S.x + 10, S.z + 6, 1.62);
+    markBuilding(S.x + 10, S.z + 6, 4, 5, 1.62);
     add(postGranary(), S.x + 2, S.z + 13, -0.1);
+    markBuilding(S.x + 2, S.z + 13, 3, 3.6, -0.1);
     add(logCabin({ w: 4.5, d: 7, wallH: 1.6, roofH: 2.0, roof: 'thatchGableOld', old: true }), S.x - 14, S.z + 7, 1.55);
+    markBuilding(S.x - 14, S.z + 7, 4.5, 7, 1.55);
     addRaw(palisadeRing(LOC.HILLFORT.x, LOC.HILLFORT.z, 17));
     add(logCabin({ w: 3.6, d: 4.4, wallH: 1.7, roofH: 1.8, roof: 'barkGable', old: true }), LOC.HILLFORT.x + 4, LOC.HILLFORT.z - 3, 0.7);
+    markBuilding(LOC.HILLFORT.x + 4, LOC.HILLFORT.z - 3, 3.6, 4.4, 0.7);
     // refuge forts held more than one roof: a second dwelling + raised store
     add(logCabin({ w: 3.2, d: 4.0, wallH: 1.6, roofH: 1.7, roof: 'barkGable', old: true }), LOC.HILLFORT.x - 6, LOC.HILLFORT.z + 4, -0.9);
+    markBuilding(LOC.HILLFORT.x - 6, LOC.HILLFORT.z + 4, 3.2, 4, -0.9);
     add(postGranary(), LOC.HILLFORT.x - 9, LOC.HILLFORT.z - 7, 1.9);
+    markBuilding(LOC.HILLFORT.x - 9, LOC.HILLFORT.z - 7, 3, 3.6, 1.9);
     add(campfire(), S.x + 1.5, S.z - 1);
     fires.push([S.x + 1.5, heightAt(S.x + 1.5, S.z - 1) + 0.15, S.z - 1]);
     smokes.push([S.x + 1.5, heightAt(S.x + 1.5, S.z - 1) + 0.9, S.z - 1, { rate: 1.0, gray: 0.8 }]);
-    addRaw(wattleFence([
+    addStageFence('wattle', [
       [S.x - 20, S.z - 16], [S.x + 16, S.z - 16], [S.x + 18, S.z + 18], [S.x - 8, S.z + 20],
-    ]));
+    ], 'stead-wattle');
     add(haystack(2.8), S.x - 24, S.z + 24);
     add(haystack(2.4), S.x - 30, S.z + 18);
     add(beehiveLog(), S.x + 26, S.z - 20, 0.3);
@@ -1370,17 +1609,25 @@ export function buildEra(era, ctx) {
     ERA2_FARMS.forEach((f, i) => {
       const fr = mulberry32(900 + i * 97);
       const rot = fr() * 3.1;
+      const fw = 4.2 + fr() * 1.2, fd = 5 + fr() * 1.4;
       add(logCabin({
-        w: 4.2 + fr() * 1.2, d: 5 + fr() * 1.4, wallH: 1.8, roofH: 2.0,
+        w: fw, d: fd, wallH: 1.8, roofH: 2.0,
         roof: fr() < 0.5 ? 'barkGable' : 'thatchGableOld', doorEnd: true, old: true,
       }), f.x, f.z, rot);
+      markBuilding(f.x, f.z, fw, fd, rot);
       smokes.push([f.x, heightAt(f.x, f.z) + 3.8, f.z, { rate: 0.45, gray: 0.76 }]);
-      if (fr() < 0.7) add(postGranary(), f.x + 9 + fr() * 4, f.z + 6, rot + 1.4);
-      else add(logCabin({ w: 3.6, d: 4.6, wallH: 1.6, roofH: 1.8, roof: 'barkGable', old: true }), f.x + 10, f.z + 7, rot + 1.6);
+      if (fr() < 0.7) {
+        const gx = f.x + 9 + fr() * 4;
+        add(postGranary(), gx, f.z + 6, rot + 1.4);
+        markBuilding(gx, f.z + 6, 3, 3.6, rot + 1.4);
+      } else {
+        add(logCabin({ w: 3.6, d: 4.6, wallH: 1.6, roofH: 1.8, roof: 'barkGable', old: true }), f.x + 10, f.z + 7, rot + 1.6);
+        markBuilding(f.x + 10, f.z + 7, 3.6, 4.6, rot + 1.6);
+      }
       add(haystack(2.2 + fr()), f.x - 9, f.z + 8);
-      addRaw(wattleFence([
+      addStageFence('wattle', [
         [f.x - 13, f.z - 10], [f.x + 12, f.z - 11], [f.x + 14, f.z + 12],
-      ]));
+      ], `farm-${i}-wattle`);
     });
     spawns.push(['cattleIron', 4, { x: S.x - 115, z: S.z + 35, r: 55 }]);
     spawns.push(['sheepDark', 5, { x: S.x - 60, z: S.z - 30, r: 35 }]);
@@ -1399,24 +1646,30 @@ export function buildEra(era, ctx) {
       hasChimney: true, windows: modern ? 3 : 2,
       windowStyle: modern ? 'framed' : 'dark', porch: modern,
     }), S.x, S.z - 15, Math.PI / 2);
+    markBuilding(S.x, S.z - 15, 6.5, 12, Math.PI / 2);
     smokes.push([S.x, heightAt(S.x, S.z - 15) + 6.6, S.z - 13.5, { rate: 0.55, gray: 0.86 }]);
     add(logCabin({ w: 5, d: 8, wallH: 2.2, roofH: 2.3, roof: 'shingleGable', doorEnd: true }), S.x + 21, S.z + 2, -Math.PI / 2);
+    markBuilding(S.x + 21, S.z + 2, 5, 8, -Math.PI / 2);
     add(logCabin({ w: 5.5, d: 13, wallH: 1.9, roofH: 2.4, roof: 'thatchGableOld', old: true }), S.x - 21, S.z + 5, 0.03);
+    markBuilding(S.x - 21, S.z + 5, 5.5, 13, 0.03);
     add(rija(), S.x + 17, S.z + 36, 0.5);
+    markBuilding(S.x + 17, S.z + 36, 8, 13, 0.5);
     const px = riverXAt(S.z + 85) + 16, pz = S.z + 85;
     add(logCabin({ w: 3.4, d: 4.2, wallH: 1.7, roofH: 1.9, roof: 'thatchGableOld', old: true, doorEnd: true }), px, pz, -0.4);
+    markBuilding(px, pz, 3.4, 4.2, -0.4);
     smokes.push([px, heightAt(px, pz) + 3.6, pz, { rate: 1.25, gray: 0.66 }]);
-    add(wellSweep(), S.x + 7, S.z - 7, 0.7);
-    addRaw(rikuFence([
+    refreshFootprints();
+    if (propOK(era, S.x + 7, S.z - 7, 1.0)) add(wellSweep(), S.x + 7, S.z - 7, 0.7);
+    addStageFence('riku', [
       [S.x - 27, S.z - 22], [S.x + 27, S.z - 22], [S.x + 28, S.z + 24], [S.x - 27, S.z + 26], [S.x - 27, S.z - 22],
-    ]));
-    addRaw(rikuFence([[S.x - 27, S.z + 40], [S.x + 5, S.z + 44]]));
+    ], 'stead-riku-ring');
+    addStageFence('riku', [[S.x - 27, S.z + 40], [S.x + 5, S.z + 44]], 'stead-riku-north');
     add(laundryLine(), S.x - 8, S.z - 20.5, 0.1);
-    add(woodpile(), S.x - 4, S.z - 10, 0.4);
+    if (propOK(era, S.x - 4, S.z - 10, 1.2)) add(woodpile(), S.x - 4, S.z - 10, 0.4);
     add(choppingBlock(), S.x - 2.5, S.z - 8);
     add(cart(), S.x + 14, S.z + 9, -0.5);
-    add(haystack(3.4), S.x - 36, S.z + 42);
-    add(haystack(3), S.x - 44, S.z + 34);
+    if (propOK(era, S.x - 36, S.z + 42, 2.0)) add(haystack(3.4), S.x - 36, S.z + 42);
+    if (propOK(era, S.x - 44, S.z + 34, 1.8)) add(haystack(3), S.x - 44, S.z + 34);
     for (let i = 0; i < 3; i++) add(beehiveLog(), S.x - 20 + i * 4, S.z - 36, i);
     add(rowboat(), riverXAt(S.z + 62) + 6.5, S.z + 62, 1.5);
     const wb = add(bridge(false), BRIDGE.x, BRIDGE.z, 0);
@@ -1427,13 +1680,21 @@ export function buildEra(era, ctx) {
 
     // the manor: old classicist house in 1860; brick new manor from 1888 on
     const mh = add(modern ? manorNew({ flag: true }) : manorHouse({ flag: false }), Mn.x, Mn.z, 0.35);
+    markBuilding(Mn.x, Mn.z, modern ? 26 : 30, modern ? 14 : 13, 0.35);
     if (mh.userData.tick) ticks.push(mh.userData.tick);
-    if (modern) add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
+    if (modern) {
+      add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
+      markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
+    }
     add(manorOutbuilding(22), Mn.x - 46, Mn.z - 26, 0.35 + Math.PI / 2);
+    markBuilding(Mn.x - 46, Mn.z - 26, 22, 8, 0.35 + Math.PI / 2);
     add(manorOutbuilding(16), Mn.x + 44, Mn.z - 22, 0.2);
+    markBuilding(Mn.x + 44, Mn.z - 22, 16, 8, 0.2);
     add(brewery(), P.x + 58, P.z + 48, Math.PI * 0.72);
+    markBuilding(P.x + 58, P.z + 48, 16, 7.5, Math.PI * 0.72);
     smokes.push([Mn.x - 8, heightAt(Mn.x, Mn.z) + 9.6, Mn.z, { rate: 0.4, gray: 0.88 }]);
     const mill = add(watermill(ctx.water.pondLevel), P.x + 30, P.z + 16, Math.PI * 0.75);
+    markBuilding(P.x + 30, P.z + 16, 8, 7, Math.PI * 0.75);
     if (mill.userData.tick) ticks.push(mill.userData.tick);
     const dam = new THREE.Mesh(new THREE.BoxGeometry(30, 2.4, 1.8), MAT.plank);
     dam.position.set(P.x + 26, ctx.water.pondLevel - 0.9, P.z + 2);
@@ -1441,9 +1702,11 @@ export function buildEra(era, ctx) {
     dam.castShadow = true;
     g.add(dam);
     add(churchSilhouette(), LOC.CHURCH.x, LOC.CHURCH.z, 0.8);
+    markBuilding(LOC.CHURCH.x, LOC.CHURCH.z, 38, 24, 0.8);
 
     // Brežģa krogs on the old road south — where the manor's ale was drunk
     add(krogs(), K.x - 16, K.z + 2, 0.28);
+    markBuilding(K.x - 16, K.z + 2, 18, 8.5, 0.28);
     smokes.push([K.x - 19, heightAt(K.x - 16, K.z + 2) + 5.2, K.z + 2, { rate: 0.4, gray: 0.85 }]);
     // Jāņi fire pyre on Brežģa kalns — the parish's festival hill
     add(pyre(), B.x, B.z, 0.4);
@@ -1453,7 +1716,7 @@ export function buildEra(era, ctx) {
       add(poemStone(), LOC.STONE.x, LOC.STONE.z, -0.5);
       utilityPoles(g, false);
     }
-    bgSettlement(g, modern ? 4 : 3, smokes);
+    bgSettlement(g, modern ? 4 : 3, smokes, stageFootprints);
     roadRibbons(g, modern ? 4 : 3);
 
     spawns.push(['cattleFarm', modern ? 6 : 5, { x: S.x - 115, z: S.z + 35, r: 60 }]);
@@ -1474,34 +1737,45 @@ export function buildEra(era, ctx) {
   if (era === 5) {
     // the farmstead site today: renovated house, the old klēts, a car
     add(modernHouse(), S.x, S.z - 14, Math.PI / 2);
+    markBuilding(S.x, S.z - 14, 9.5, 7, Math.PI / 2);
     smokes.push([S.x, heightAt(S.x, S.z - 14) + 5.6, S.z - 14, { rate: 0.3, gray: 0.9 }]);
     add(logCabin({ w: 5, d: 8, wallH: 2.2, roofH: 2.3, roof: 'shingleGable', doorEnd: true, old: true }), S.x + 21, S.z + 2, -Math.PI / 2);
+    markBuilding(S.x + 21, S.z + 2, 5, 8, -Math.PI / 2);
     add(car(), S.x + 10, S.z - 4, 0.4);
     add(storkNestPole(), S.x + 30, S.z + 22);
     add(poemStone(), LOC.STONE.x, LOC.STONE.z, -0.5);
 
     // the manor ensemble survives: new manor (parish house), old manor, outbuildings
     const mh = add(manorNew({ flag: true }), Mn.x, Mn.z, 0.35);
+    markBuilding(Mn.x, Mn.z, 26, 14, 0.35);
     if (mh.userData.tick) ticks.push(mh.userData.tick);
     add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
+    markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
     add(manorOutbuilding(22), Mn.x - 46, Mn.z - 26, 0.35 + Math.PI / 2);
+    markBuilding(Mn.x - 46, Mn.z - 26, 22, 8, 0.35 + Math.PI / 2);
     add(manorOutbuilding(16), Mn.x + 44, Mn.z - 22, 0.2);
+    markBuilding(Mn.x + 44, Mn.z - 22, 16, 8, 0.2);
     add(churchSilhouette(), LOC.CHURCH.x, LOC.CHURCH.z, 0.8);
+    markBuilding(LOC.CHURCH.x, LOC.CHURCH.z, 38, 24, 0.8);
     const nb = add(bridge(false), BRIDGE2.x, BRIDGE2.z, Math.PI / 2);
     nb.position.y = BRIDGE2.level + 0.2;
 
     // Brezgis today: two quiet houses where the krogs stood
     add(modernHouse(), K.x - 20, K.z + 6, 0.3);
+    markBuilding(K.x - 20, K.z + 6, 9.5, 7, 0.3);
     add(logCabin({ w: 4.5, d: 6, wallH: 2.1, roofH: 2.2, roof: 'shingleGable', old: true }), K.x + 26, K.z - 14, -0.4);
+    markBuilding(K.x + 26, K.z - 14, 4.5, 6, -0.4);
 
     // Brežģa kalns: the 2017 observation tower, the summit oak, the Jāņi pyre
     add(observationTower(), B.x, B.z, 0.2);
+    markBuilding(B.x, B.z, 4, 4, 0.2);
     addRaw(gravelEllipse(B.x + 55, B.z - 60, 12, 7, -0.58, 0x8d7c5f));
     add(infoSign(), B.x + 48, B.z - 52, -0.7);
     add(picnicTable(), B.x + 24, B.z - 18, -0.45);
     add(fireRing(), B.x + 10, B.z - 8, 0.25);
     add(outhouse(), B.x + 38, B.z - 36, 0.55);
-    bgSettlement(g, 5, smokes);
+    markBuilding(B.x + 38, B.z - 36, 1.4, 1.4, 0.55);
+    bgSettlement(g, 5, smokes, stageFootprints);
     roadRibbons(g, 5);
     add(pyre(), B.x + 22, B.z + 10, 0.4);
     fires.push([B.x + 22, heightAt(B.x + 22, B.z + 10) + 0.9, B.z + 10, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
@@ -1521,6 +1795,8 @@ export function buildEra(era, ctx) {
   }
 
   g.traverse((o) => { if (o.isMesh && o.castShadow === undefined) o.castShadow = true; });
+  if (era < 3) refreshFootprints();
+  g.userData.stageFootprintCount = stageFootprints.length;
   wildSpawns(era, spawns);
   return { group: g, ticks, smokes, fires, spawns };
 }

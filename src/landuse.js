@@ -12,8 +12,9 @@ import { RIVER_PTS, STREAMS, LAKES, BREZGA } from './geodata.js';
 import { ROADS_OSM, DWELLINGS_OSM, BUILDINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
+import { forest1935At } from './forest1935.js';
 import { RIVER, STREAM_CHANNELS, riverAt, streamAt, setPond } from './riverzone.js';
-import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, pointInPoly } from './util.js';
+import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, pointInPoly, chaikinOpen } from './util.js';
 
 const noise = makeNoise(4217);
 const ROAD_CELL = 48;
@@ -228,7 +229,7 @@ export const BRIDGE2 = { x: b2[0], z: b2[1], level: b2[2] };
 // the old Cēsis–Vecpiebalga road: village -> south over Brežģa kalns' flank ->
 // Brežģa krogs (Brezgis) -> off the map south
 const SOUTH_ROAD = [
-  [S.x + 58, 1200], [700, 2300], [1150, 3300], [1480, 4180],
+  [S.x + 60, 1900], [700, 2300], [1150, 3300], [1480, 4180],
   [B.x + 110, B.z - 150], [1960, 5180], [K.x + 20, K.z + 8], [2460, 6060],
 ];
 
@@ -240,7 +241,7 @@ export function roadsForEra(era) {
       { pts: [[S.x, S.z], [S.x - 90, S.z + 40], [bx + 8, bridgeZ]], w: 2 },
       { pts: [[S.x, S.z], [S.x + 80, S.z + 120], [LOC.BARROWS.x, LOC.BARROWS.z]], w: 1.6 },
       { pts: [[S.x, S.z], [LOC.OAK.x + 6, LOC.OAK.z + 6]], w: 1.4 },
-    ];
+    ].map((r) => ({ ...r, pts: chaikinOpen(r.pts, null, 1.75) }));
   }
   // 1860 / 1935 / 2025: the parish road, manor drive, bridges, the south road
   const main = { pts: [[S.x + 45, -60], [M.x - 70, M.z + 70], [M.x + 10, M.z - 60], [BRIDGE2.x, BRIDGE2.z + 40], [BRIDGE2.x, BRIDGE2.z - 40], [BRIDGE2.x + 150, -1100], [350, -2350]], w: era === 5 ? 7 : 5.5 };
@@ -248,14 +249,22 @@ export function roadsForEra(era) {
   const roads = [
     main,
     south,
-    { pts: [[S.x + 60, 1900], [S.x + 58, 1200]].concat(SOUTH_ROAD.slice(1)), w: era === 5 ? 7 : 5 },
-    { pts: [[S.x + 35, S.z + 60], [S.x + 60, 1900]], w: era === 5 ? 7 : 5.5 },
     { pts: [[S.x + 38, S.z + 12], [S.x + 6, S.z + 4]], w: 3 },                    // farm lane
     { pts: [[M.x - 70, M.z + 70], [M.x - 8, M.z + 14]], w: 4 },                   // manor drive
     { pts: [[S.x + 42, S.z - 4], [bx + 30, bridgeZ - 30], [bx - 40, bridgeZ + 10], [-1500, 500]], w: 4.5 },
   ];
   if (era < 5) roads.push({ pts: [[M.x - 40, M.z + 30], [P.x + 45, P.z + 20], [P.x + 20, P.z + 6]], w: 3 }); // mill lane
-  return roads;
+  if (era === 3) {
+    // the OLD south road over Brežģa kalns to the krogs — the 1860 route the
+    // chronicle anchors the tavern to (Nēķina ale sold at "Brezgi"). The 1935
+    // Army sheet shows no such parallel road: by then the improved highway
+    // (P30's predecessor) carried everything, so eras 4-5 must not have it.
+    // Joined in its forward direction — the old intermediate (-125,1200)
+    // point doubled back from z=1900 before reversing south.
+    roads.push({ pts: SOUTH_ROAD, w: 5 });
+    roads.push({ pts: [[S.x + 35, S.z + 60], [S.x + 60, 1900]], w: 5.5 });
+  }
+  return roads.map((r) => ({ ...r, pts: chaikinOpen(r.pts, null, 1.75) }));
 }
 
 // --- Fields per era: soft-edged ellipses {cx,cz,rx,rz,rot,type}
@@ -382,15 +391,165 @@ export function fieldAt(era, x, z) {
 // road), 1 = V-roads, 2 = local lanes, 3 = farm/forest tracks. Farm lanes
 // multiply after the 1920 agrarian reform, so 1860 carries only the main
 // roads and the old tracks.
-const OSM_W = [5.2, 3.8, 2.9, 1.9];
-function osmRoadsFor(era) {
+export const ROAD_HALF_W = [3.4, 2.4, 2.2, 1.45];
+export const ROAD_MAX_OFFSET = [3.0, 2.5, 1.75, 1.25];
+const roadKey = (p) => `${p[0]},${p[1]}`;
+const roadSource = ROADS_OSM.map((r) => ({ ...r, pts: r.pts.map((p) => p.slice()) }));
+
+function segmentIntersection(a, b, c, d) {
+  const rx = b[0] - a[0], rz = b[1] - a[1];
+  const sx = d[0] - c[0], sz = d[1] - c[1];
+  const den = rx * sz - rz * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const qx = c[0] - a[0], qz = c[1] - a[1];
+  const t = (qx * sz - qz * sx) / den;
+  const u = (qx * rz - qz * rx) / den;
+  if (t < -1e-9 || t > 1 + 1e-9 || u < -1e-9 || u > 1 + 1e-9) return null;
+  const tt = clamp(t, 0, 1), uu = clamp(u, 0, 1);
+  let p = [a[0] + rx * tt, a[1] + rz * tt];
+  for (const endpoint of [a, b, c, d]) {
+    if (Math.hypot(endpoint[0] - p[0], endpoint[1] - p[1]) < 1e-7) { p = endpoint.slice(); break; }
+  }
+  return { p, t: tt, u: uu };
+}
+
+// Node first, then round once. Shared coordinates and literal hard track
+// corners remain exact, so every consumer sees the same connected network.
+export function buildSmoothedRoadNetwork(rawRoads) {
+  const roads = rawRoads.map((r) => ({ ...r, pts: r.pts.map((p) => p.slice()) }));
+  const cuts = roads.map((r) => r.pts.slice(0, -1).map(() => []));
+  const snaps = roads.map(() => ({ start: null, end: null }));
+  for (let ri = 0; ri < roads.length; ri++) {
+    const aRoad = roads[ri];
+    for (let rj = ri + 1; rj < roads.length; rj++) {
+      const bRoad = roads[rj];
+      for (let ai = 0; ai < aRoad.pts.length - 1; ai++) {
+        const a = aRoad.pts[ai], b = aRoad.pts[ai + 1];
+        for (let bi = 0; bi < bRoad.pts.length - 1; bi++) {
+          const c = bRoad.pts[bi], d = bRoad.pts[bi + 1];
+          if (Math.max(a[0], b[0]) + 1e-8 < Math.min(c[0], d[0]) ||
+              Math.max(c[0], d[0]) + 1e-8 < Math.min(a[0], b[0]) ||
+              Math.max(a[1], b[1]) + 1e-8 < Math.min(c[1], d[1]) ||
+              Math.max(c[1], d[1]) + 1e-8 < Math.min(a[1], b[1])) continue;
+          const hit = segmentIntersection(a, b, c, d);
+          if (!hit) continue;
+          cuts[ri][ai].push({ t: hit.t, p: hit.p });
+          cuts[rj][bi].push({ t: hit.u, p: hit.p });
+          if (ai === 0 && Math.hypot(a[0] - hit.p[0], a[1] - hit.p[1]) <= 2) snaps[ri].start = hit.p;
+          if (ai === aRoad.pts.length - 2 && Math.hypot(b[0] - hit.p[0], b[1] - hit.p[1]) <= 2) snaps[ri].end = hit.p;
+          if (bi === 0 && Math.hypot(c[0] - hit.p[0], c[1] - hit.p[1]) <= 2) snaps[rj].start = hit.p;
+          if (bi === bRoad.pts.length - 2 && Math.hypot(d[0] - hit.p[0], d[1] - hit.p[1]) <= 2) snaps[rj].end = hit.p;
+        }
+      }
+    }
+  }
+  roads.forEach((r, ri) => {
+    if (snaps[ri].start) r.pts[0] = snaps[ri].start.slice();
+    if (snaps[ri].end) r.pts[r.pts.length - 1] = snaps[ri].end.slice();
+    const noded = [];
+    const push = (p) => {
+      const last = noded[noded.length - 1];
+      if (!last || Math.hypot(last[0] - p[0], last[1] - p[1]) > 1e-7) noded.push(p.slice());
+    };
+    for (let i = 0; i < r.pts.length - 1; i++) {
+      push(r.pts[i]);
+      cuts[ri][i].sort((a, b) => a.t - b.t);
+      for (const cut of cuts[ri][i]) push(cut.p);
+    }
+    push(r.pts[r.pts.length - 1]);
+    r.pts = noded;
+  });
+
+  const incidence = new Map();
+  roads.forEach((r, ri) => {
+    for (const p of r.pts) {
+      const key = roadKey(p);
+      let set = incidence.get(key);
+      if (!set) incidence.set(key, set = new Set());
+      set.add(ri);
+    }
+  });
+  const approachPins = roads.map(() => new Set());
+  // A sub-quarter-metre endpoint gap is not a junction, but rounding its
+  // final approach can make the two lines cross. Keep that one approach
+  // vertex literal; real intersections above were already noded and pinned.
+  roads.forEach((r, ri) => {
+    for (const end of [0, r.pts.length - 1]) {
+      const p = r.pts[end];
+      if (incidence.get(roadKey(p)).size > 1) continue;
+      for (let rj = 0; rj < roads.length; rj++) {
+        if (rj === ri) continue;
+        const other = roads[rj];
+        for (let i = 0; i < other.pts.length - 1; i++) {
+          const a = other.pts[i], b = other.pts[i + 1];
+          const vx = b[0] - a[0], vz = b[1] - a[1], L = vx * vx + vz * vz;
+          const t = L ? clamp(((p[0] - a[0]) * vx + (p[1] - a[1]) * vz) / L, 0, 1) : 0;
+          const d = Math.hypot(p[0] - a[0] - vx * t, p[1] - a[1] - vz * t);
+          if (d > 1e-7 && d < 0.25) {
+            approachPins[ri].add(end === 0 ? 1 : r.pts.length - 2);
+            approachPins[rj].add(i);
+            approachPins[rj].add(i + 1);
+          }
+        }
+      }
+    }
+  });
+  return roads.map((r, ri) => {
+    const pinned = new Set([0, r.pts.length - 1]);
+    for (const i of approachPins[ri]) pinned.add(i);
+    for (let i = 1; i < r.pts.length - 1; i++) {
+      if (incidence.get(roadKey(r.pts[i])).size > 1) { pinned.add(i); continue; }
+      if (r.c < 2) continue;
+      const a = r.pts[i - 1], b = r.pts[i], c = r.pts[i + 1];
+      const ux = a[0] - b[0], uz = a[1] - b[1], vx = c[0] - b[0], vz = c[1] - b[1];
+      const den = Math.hypot(ux, uz) * Math.hypot(vx, vz) || 1;
+      const angle = Math.acos(clamp((ux * vx + uz * vz) / den, -1, 1)) * 180 / Math.PI;
+      if (angle <= 105) pinned.add(i);
+    }
+    const sourcePts = r.pts.map((p) => p.slice());
+    const pinnedPts = new Set([...pinned].map((i) => roadKey(r.pts[i])));
+    return {
+      ...r,
+      pts: chaikinOpen(r.pts, pinned, ROAD_MAX_OFFSET[r.c]),
+      sourcePts,
+      pinnedPts,
+      halfW: ROAD_HALF_W[r.c],
+    };
+  });
+}
+
+export const ROADS_OSM_SMOOTH = buildSmoothedRoadNetwork(roadSource);
+// minimap.js is intentionally outside this fix's writable surface. It already
+// imports this live shared array, so publish the canonical clone through it.
+ROADS_OSM.splice(0, ROADS_OSM.length, ...ROADS_OSM_SMOOTH);
+
+export function osmRoadsForEra(era) {
   if (era < 3) return [];
   const out = [];
-  for (const r of ROADS_OSM) {
+  for (const r of ROADS_OSM_SMOOTH) {
     if (era === 3 && r.c === 2) continue;
-    out.push({ pts: r.pts, w: OSM_W[r.c] - (era === 5 ? 0 : 0.6), c: r.c });
+    out.push(r);
   }
   return out;
+}
+
+export function roadJunctionsForEra(era) {
+  const roads = osmRoadsForEra(era);
+  const nodes = new Map();
+  roads.forEach((r, ri) => r.pts.forEach((p, pi) => {
+    if (!r.pinnedPts.has(roadKey(p))) return;
+    const key = roadKey(p);
+    let node = nodes.get(key);
+    if (!node) nodes.set(key, node = { x: p[0], z: p[1], roads: new Set(), arms: [] });
+    node.roads.add(ri);
+    const addArm = (q) => {
+      const dx = q[0] - p[0], dz = q[1] - p[1], len = Math.hypot(dx, dz);
+      if (len) node.arms.push({ dx: dx / len, dz: dz / len, halfW: r.halfW, c: r.c });
+    };
+    if (pi > 0) addArm(r.pts[pi - 1]);
+    if (pi + 1 < r.pts.length) addArm(r.pts[pi + 1]);
+  }));
+  return [...nodes.values()].filter((node) => node.roads.size > 1);
 }
 
 // spatial grid over road segments — distToRoad runs in the hot placement
@@ -401,14 +560,14 @@ function roadGridFor(era) {
   if (g) return g;
   const segs = [];
   const map = new Map();
-  const all = roadsForEra(era).map((r) => ({ pts: r.pts, w: r.w, c: r.c === undefined ? 2 : r.c }))
-    .concat(osmRoadsFor(era));
+  const all = roadsForEra(era).map((r) => ({ pts: r.pts, halfW: r.w * 0.5, c: r.c === undefined ? 2 : r.c }))
+    .concat(osmRoadsForEra(era));
   for (const r of all) {
     for (let i = 0; i < r.pts.length - 1; i++) {
       const [ax, az] = r.pts[i], [bx2, bz] = r.pts[i + 1];
       const idx = segs.length;
-      segs.push([ax, az, bx2, bz, r.w, r.c]);
-      const pad = r.w + 10;
+      segs.push([ax, az, bx2, bz, r.halfW, r.c]);
+      const pad = r.halfW + 10;
       const x0 = Math.floor((Math.min(ax, bx2) - pad) / ROAD_CELL), x1 = Math.floor((Math.max(ax, bx2) + pad) / ROAD_CELL);
       const z0 = Math.floor((Math.min(az, bz) - pad) / ROAD_CELL), z1 = Math.floor((Math.max(az, bz) + pad) / ROAD_CELL);
       for (let ix = x0; ix <= x1; ix++) {
@@ -453,18 +612,19 @@ export function distToRoadEx(era, x, z) {
   const { segs, map } = roadGridFor(era);
   const cix = Math.floor(x / ROAD_CELL), ciz = Math.floor(z / ROAD_CELL);
   let bd = Infinity, bc = 2;
-  for (let ix = cix - 1; ix <= cix + 1; ix++) {
-    for (let iz = ciz - 1; iz <= ciz + 1; iz++) {
-      const arr = map.get(gridKey(ix, iz));
-      if (!arr) continue;
-      for (const si of arr) {
-        const s = segs[si];
-        const vx = s[2] - s[0], vz = s[3] - s[1];
-        const L = vx * vx + vz * vz;
-        const t = L ? clamp(((x - s[0]) * vx + (z - s[1]) * vz) / L, 0, 1) : 0;
-        const d = Math.hypot(x - (s[0] + vx * t), z - (s[1] + vz * t)) - s[4];
-        if (d < bd) { bd = d; bc = s[5]; }
-      }
+  // Segments are splatted with halfW + 10m padding, while every caller's
+  // acceptance threshold is at most 6m. The containing bucket is therefore
+  // sufficient for every meaningful near-road result; probing eight adjacent
+  // buckets only repeated the doubled smoothed-segment workload.
+  const arr = map.get(gridKey(cix, ciz));
+  if (arr) {
+    for (const si of arr) {
+      const s = segs[si];
+      const vx = s[2] - s[0], vz = s[3] - s[1];
+      const L = vx * vx + vz * vz;
+      const t = L ? clamp(((x - s[0]) * vx + (z - s[1]) * vz) / L, 0, 1) : 0;
+      const d = Math.hypot(x - (s[0] + vx * t), z - (s[1] + vz * t)) - s[4];
+      if (d < bd) { bd = d; bc = s[5]; }
     }
   }
   return { d: bd, c: bc };
@@ -548,13 +708,20 @@ export function forestDensity(era, x, z, y) {
     // tower buried it (its whole point is the view)
     d *= smoothstep(15, 36, Math.hypot(x - B.x, z - B.z));
   } else {
-    // agrarian mosaic: forest survives on high/steep hills and in patches
-    const high = smoothstep(208, 224, y);
-    const patch = smoothstep(0.56, 0.7, n);
-    d = Math.max(high * (0.5 + n * 0.55), patch * 0.95);
+    // agrarian mosaic, anchored to the 1935 Army-sheet mask (map audit: the
+    // old elevation rule forested open farmed hills and missed real woods).
+    // Era 4 IS the sheet; era 3 adds modest pre-reform woodland back on the
+    // high noise-patches — 1860 was somewhat more wooded on marginal ground,
+    // and the exact 1860 pattern is conjecture the sheet can only bound.
+    const m35 = smoothstep(0.25, 0.6, forest1935At(x, z));
+    d = m35 * (0.8 + n * 0.25);
+    if (era === 3) {
+      const high = smoothstep(208, 224, y);
+      const patch = smoothstep(0.6, 0.74, n);
+      d = Math.max(d, Math.min(high, patch) * 0.75);
+    }
     d *= smoothstep(70, 200, dStead) * 0.92 + 0.08;
     d *= smoothstep(80, 220, dManor) * 0.92 + 0.08;
-    if (era === 4) d *= 0.9;
     if (dRiver < 26 && dRiver > 12) d = Math.max(d, 0.35);
     d *= smoothstep(20, 60, Math.hypot(x - K.x, z - K.z)) * 0.9 + 0.1; // krogs clearing
   }

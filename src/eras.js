@@ -15,11 +15,11 @@ import {
 } from './buildings.js';
 import { MAT } from './textures.js';
 import { heightAt, meshHeightAt } from './terrain.js';
-import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI } from './landuse.js';
+import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W } from './landuse.js';
 import { riverAt, streamAt, lakeAt, pondAt } from './riverzone.js';
 import { registerFootprints } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
-import { BUILDINGS_OSM, DWELLINGS_OSM, ROADS_OSM } from './geodata-osm.js';
+import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { mulberry32, pointInPoly, chaikinPoly } from './util.js';
 import { HM_OFF_X, HM_OFF_Z, HM_SPAN } from './heightmap.js';
 
@@ -85,7 +85,7 @@ function utilityPoles(group, modern) {
   const stops = [];
   {
     let best = null, bestLen = 0;
-    for (const r of ROADS_OSM) {
+    for (const r of osmRoadsForEra(modern ? 5 : 4)) {
       if (r.c !== 0) continue;
       let L = 0;
       for (let k = 0; k < r.pts.length - 1; k++) L += Math.hypot(r.pts[k + 1][0] - r.pts[k][0], r.pts[k + 1][1] - r.pts[k][1]);
@@ -181,8 +181,15 @@ function roadRibbons(group, era) {
       positions: [], colors: [], indices: [],
     },
   };
+  const patchSurf = {
+    asphalt: { mat: mkMat(0x393c40, -4), positions: [], indices: [], count: 0 },
+    gravel: { mat: mkMat(0x8d7c5f, -4), positions: [], indices: [], count: 0 },
+    darkGravel: { mat: mkMat(0x7d6f56, -4), positions: [], indices: [], count: 0 },
+    dirt: { mat: mkMat(0x736b47, -4), positions: [], indices: [], count: 0 },
+  };
   const bridgeMat = era === 5 ? new THREE.MeshLambertMaterial({ color: 0x9a9a94 }) : MAT.darkWood;
-  const bridgeFixtures = [];
+  const bridgeFixtures = [], bridgeCandidates = [], bridgeSites = [];
+  let roadRowCount = 0, bridgeRunCount = 0, fixtureClusterCount = 0;
   const dashPos = [], dashIdx = [];   // painted centreline on today's P30
   const roadRows = (r) => {
     const pts = [];
@@ -270,24 +277,45 @@ function roadRibbons(group, era) {
     const run = bridgeAt(runs, i);
     if (run) return bridgeYAt(run, dists, i);
     const [x, z] = pts[i];
-    return meshHeightAt(x, z) + 0.2;
+    return meshHeightAt(x, z) + 0.16;
   };
-  const addBridgeFixtures = (runs, pts, dists, half) => {
+  const queueBridgeFixtures = (runs, pts, dists, half, c) => {
     for (const run of runs) {
       const [x0, z0] = pts[run.from], [x1, z1] = pts[run.to];
-      const len = Math.max(1, Math.hypot(x1 - x0, z1 - z0));
-      const dx = (x1 - x0) / len, dz = (z1 - z0) / len;
-      const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
-      const y0 = bridgeYAt(run, dists, run.from), y1 = bridgeYAt(run, dists, run.to);
-      const yMid = (y0 + y1) / 2;
-      for (const side of [-1, 1]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.35, 0.25), bridgeMat);
-        rail.position.set(mx - dz * side * (half + 0.18), yMid + 0.18, mz + dx * side * (half + 0.18));
-        rail.rotation.y = -Math.atan2(dz, dx);
-        rail.castShadow = rail.receiveShadow = true;
-        bridgeFixtures.push(rail);
+      bridgeCandidates.push({ run, pts, dists, half, c, x: (x0 + x1) / 2, z: (z0 + z1) / 2 });
+    }
+  };
+  const finishBridgeFixtures = () => {
+    const clusters = [];
+    for (const candidate of bridgeCandidates) {
+      let cluster = clusters.find((q) => Math.hypot(q.x - candidate.x, q.z - candidate.z) <= 40);
+      if (!cluster) clusters.push(cluster = { x: candidate.x, z: candidate.z, candidates: [] });
+      cluster.candidates.push(candidate);
+      const n = cluster.candidates.length;
+      cluster.x += (candidate.x - cluster.x) / n;
+      cluster.z += (candidate.z - cluster.z) / n;
+    }
+    for (const cluster of clusters) {
+      cluster.candidates.sort((a, b) => a.c - b.c || b.run.len - a.run.len);
+      const { run, pts, dists, half } = cluster.candidates[0];
+      for (let i = run.from; i < run.to; i++) {
+        const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
+        const len = Math.max(0.001, Math.hypot(x1 - x0, z1 - z0));
+        const dx = (x1 - x0) / len, dz = (z1 - z0) / len;
+        const y0 = bridgeYAt(run, dists, i), y1 = bridgeYAt(run, dists, i + 1);
+        for (const side of [-1, 1]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(len + 0.08, 0.35, 0.25), bridgeMat);
+          rail.position.set((x0 + x1) / 2 - dz * side * (half + 0.18), (y0 + y1) / 2 + 0.18,
+            (z0 + z1) / 2 + dx * side * (half + 0.18));
+          rail.rotation.y = -Math.atan2(dz, dx);
+          rail.castShadow = rail.receiveShadow = true;
+          bridgeFixtures.push(rail);
+        }
       }
-      for (const [x, z, y] of [[x0, z0, y0], [x1, z1, y1]]) {
+      const ends = [run.from, run.to];
+      for (const i of ends) {
+        const [x, z] = pts[i], [dx, dz] = tangentAt(pts, i);
+        const y = bridgeYAt(run, dists, i);
         const ab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.1, half * 2 + 0.9), bridgeMat);
         ab.position.set(x, y - 0.52, z);
         ab.rotation.y = -Math.atan2(dz, dx);
@@ -295,57 +323,62 @@ function roadRibbons(group, era) {
         bridgeFixtures.push(ab);
       }
     }
+    fixtureClusterCount = clusters.length;
   };
-  const pushCamberedRow = (positions, x, z, dx, dz, half, deckY = null) => {
-    if (deckY !== null) {
-      positions.push(
-        x - dz * half, deckY, z + dx * half,
-        x, deckY, z,
-        x + dz * half, deckY, z - dx * half);
-      return;
+  const CROWN_RISE = [0.095, 0.067, 0.058, 0.04];
+  const pushCamberedRow = (positions, x, z, dx, dz, half, c, deckY = null) => {
+    const skirt = 0.3, crownY = deckY !== null ? deckY : meshHeightAt(x, z) + 0.16;
+    const edgeY = deckY !== null ? deckY : crownY - CROWN_RISE[c];
+    for (const off of [-half - skirt, -half, 0, half, half + skirt]) {
+      let y = off === 0 ? crownY : edgeY;
+      if (Math.abs(off) > half) y = deckY !== null ? deckY - 0.35
+        : Math.min(edgeY - 0.08, meshHeightAt(x + dz * off, z - dx * off) + 0.02);
+      positions.push(x + dz * off, y, z - dx * off);
     }
-    positions.push(
-      x - dz * half, meshHeightAt(x - dz * half, z + dx * half) - 0.42, z + dx * half,
-      x, meshHeightAt(x, z) + 0.2, z,
-      x + dz * half, meshHeightAt(x + dz * half, z - dx * half) - 0.42, z - dx * half);
   };
   const pushShoulderRow = (positions, x, z, dx, dz, half, deckY = null) => {
-    const out = half + 0.9;
-    for (const off of [-out, -half, 0, half, out]) {
-      const crown = off === 0;
-      const edge = Math.abs(off) >= half;
-      const y = deckY !== null
-        ? deckY
-        : meshHeightAt(x + dz * off, z - dx * off) + (crown ? 0.2 : edge ? -0.42 : -0.1);
-      positions.push(
-        x + dz * off,
-        y,
-        z - dx * off);
+    const crownY = deckY !== null ? deckY : meshHeightAt(x, z) + 0.16;
+    const edgeY = deckY !== null ? deckY : crownY - CROWN_RISE[0];
+    for (const off of [-half - 1.2, -half - 0.9, -half, half, half + 0.9, half + 1.2]) {
+      let y = edgeY - Math.max(0, Math.abs(off) - half) * 0.025;
+      if (Math.abs(off) > half + 0.9) y = deckY !== null ? deckY - 0.35
+        : Math.min(y - 0.08, meshHeightAt(x + dz * off, z - dx * off) + 0.02);
+      positions.push(x + dz * off, y, z - dx * off);
     }
   };
   const pushDirtRow = (positions, colors, x, z, dx, dz, half, deckY = null) => {
     const rut = half * 0.45;
     const rows = [
-      [-half, -0.42, [0.45, 0.42, 0.28]],
-      [-rut, 0.06, [0.36, 0.30, 0.22]],
-      [0, 0.2, [0.45, 0.42, 0.28]],
-      [rut, 0.06, [0.36, 0.30, 0.22]],
-      [half, -0.42, [0.45, 0.42, 0.28]],
+      [-half - 0.25, null, [0.45, 0.42, 0.28]],
+      [-half, -CROWN_RISE[3], [0.45, 0.42, 0.28]],
+      [-rut, -CROWN_RISE[3] * 0.45, [0.36, 0.30, 0.22]],
+      [0, 0, [0.45, 0.42, 0.28]],
+      [rut, -CROWN_RISE[3] * 0.45, [0.36, 0.30, 0.22]],
+      [half, -CROWN_RISE[3], [0.45, 0.42, 0.28]],
+      [half + 0.25, null, [0.45, 0.42, 0.28]],
     ];
+    const crownY = deckY !== null ? deckY : meshHeightAt(x, z) + 0.16;
     for (const [off, lift, rgb] of rows) {
-      const y = deckY !== null ? deckY : meshHeightAt(x + dz * off, z - dx * off) + lift;
+      let y = deckY !== null ? deckY : crownY + (lift ?? -CROWN_RISE[3] - 0.08);
+      if (lift === null) y = deckY !== null ? deckY - 0.35
+        : Math.min(y, meshHeightAt(x + dz * off, z - dx * off) + 0.02);
       positions.push(x + dz * off, y, z - dx * off);
       colors.push(...rgb);
     }
   };
-  for (const r of ROADS_OSM) {
-    if (era === 3 && r.c === 2) continue;
-    const half = [3.6, 3.0, 2.3, 1.7][r.c] || 1.7;
+  for (const r of osmRoadsForEra(era)) {
+    const half = ROAD_HALF_W[r.c];
     const pts = roadRows(r);
     if (pts.length < 2) continue;
+    roadRowCount += pts.length;
     const dists = roadDists(pts);
     const runs = bridgeRuns(pts, dists);
-    if (r.c <= 1) addBridgeFixtures(runs, pts, dists, half);
+    bridgeRunCount += runs.length;
+    for (const run of runs) {
+      const a = pts[run.from], b = pts[run.to];
+      bridgeSites.push({ x: (a[0] + b[0]) / 2, z: (a[1] + b[1]) / 2 });
+    }
+    if (r.c <= 1) queueBridgeFixtures(runs, pts, dists, half, r.c);
     if (r.c === 3) {
       const { positions, colors, indices } = surf.dirt;
       const base = positions.length / 3;
@@ -354,7 +387,7 @@ function roadRibbons(group, era) {
         const [dx, dz] = tangentAt(pts, i);
         const run = bridgeAt(runs, i);
         pushDirtRow(positions, colors, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
-        if (i > 0) addIndices(indices, base, i, 5);
+        if (i > 0) addIndices(indices, base, i, 7);
       }
       continue;
     }
@@ -367,7 +400,7 @@ function roadRibbons(group, era) {
           const [dx, dz] = tangentAt(pts, i);
           const run = bridgeAt(runs, i);
           pushShoulderRow(positions, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
-          if (i > 0) addIndices(indices, base, i, 5);
+          if (i > 0) addIndices(indices, base, i, 6, [0, 1, 3, 4]);
         }
       }
       {
@@ -377,9 +410,9 @@ function roadRibbons(group, era) {
           const [x, z] = pts[i];
           const [dx, dz] = tangentAt(pts, i);
           const run = bridgeAt(runs, i);
-          pushCamberedRow(positions, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
+          pushCamberedRow(positions, x, z, dx, dz, half, r.c, run ? bridgeYAt(run, dists, i) : null);
           if (i > 0) {
-            addIndices(indices, base, i, 3);
+            addIndices(indices, base, i, 5, [1, 2]);
             // dashed centreline on the paved P30: ~3.4m of paint per 18m cycle
             // (the full-span 9m dashes read like runway markings from the air)
             if (i % 2 === 0) {
@@ -407,9 +440,52 @@ function roadRibbons(group, era) {
       const [x, z] = pts[i];
       const [dx, dz] = tangentAt(pts, i);
       const run = bridgeAt(runs, i);
-      pushCamberedRow(positions, x, z, dx, dz, half, run ? bridgeYAt(run, dists, i) : null);
-      if (i > 0) addIndices(indices, base, i, 3);
+      pushCamberedRow(positions, x, z, dx, dz, half, r.c, run ? bridgeYAt(run, dists, i) : null);
+      if (i > 0) addIndices(indices, base, i, 5);
     }
+  }
+  finishBridgeFixtures();
+  const convexHull = (points) => {
+    const pp = [...new Map(points.map((p) => [`${p[0].toFixed(7)},${p[1].toFixed(7)}`, p])).values()]
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    if (pp.length < 3) return pp;
+    const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const lower = [], upper = [];
+    for (const p of pp) {
+      while (lower.length > 1 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    for (let i = pp.length - 1; i >= 0; i--) {
+      const p = pp[i];
+      while (upper.length > 1 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  };
+  for (const node of roadJunctionsForEra(era)) {
+    const edgePoints = [[node.x, node.z]];
+    let dominant = 3;
+    for (const arm of node.arms) {
+      dominant = Math.min(dominant, arm.c);
+      const reach = Math.max(2, arm.halfW * 1.15);
+      edgePoints.push(
+        [node.x + arm.dx * reach - arm.dz * arm.halfW, node.z + arm.dz * reach + arm.dx * arm.halfW],
+        [node.x + arm.dx * reach + arm.dz * arm.halfW, node.z + arm.dz * reach - arm.dx * arm.halfW]);
+    }
+    const hull = convexHull(edgePoints);
+    if (hull.length < 3) continue;
+    const key = era === 5 && dominant === 0 ? 'asphalt'
+      : dominant <= 1 ? 'gravel' : dominant === 2 ? 'darkGravel' : 'dirt';
+    const patch = patchSurf[key], base = patch.positions.length / 3;
+    patch.count++;
+    const yAt = (x, z) => {
+      const water = crossingAt(x, z);
+      return Math.max(meshHeightAt(x, z) + 0.18, water === null ? -Infinity : water + 1.9);
+    };
+    patch.positions.push(node.x, yAt(node.x, node.z), node.z);
+    for (const [x, z] of hull) patch.positions.push(x, yAt(x, z), z);
+    for (let i = 0; i < hull.length; i++) patch.indices.push(base, base + 1 + i, base + 1 + (i + 1) % hull.length);
   }
   for (const fixture of bridgeFixtures) group.add(fixture);
   if (dashPos.length) {
@@ -432,9 +508,40 @@ function roadRibbons(group, era) {
     geo.setIndex(indices);
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = `road-ribbon-${key}`;
     mesh.receiveShadow = true;
     group.add(mesh);
   }
+  for (const key of ['asphalt', 'gravel', 'darkGravel', 'dirt']) {
+    const { mat, positions, indices } = patchSurf[key];
+    if (!positions.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = `road-junction-${key}`;
+    mesh.userData.patchCount = patchSurf[key].count;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  const bridgeClusters = [];
+  for (const site of bridgeSites) {
+    let cluster = bridgeClusters.find((q) => Math.hypot(q.x - site.x, q.z - site.z) <= 40);
+    if (!cluster) bridgeClusters.push(cluster = { x: site.x, z: site.z, count: 0 });
+    cluster.count++;
+    cluster.x += (site.x - cluster.x) / cluster.count;
+    cluster.z += (site.z - cluster.z) / cluster.count;
+  }
+  group.userData.roadNetwork = {
+    rows: roadRowCount,
+    bridgeRuns: bridgeRunCount,
+    bridgeClusters: bridgeClusters.map((q) => [q.x, q.z]),
+    fixtureClusters: fixtureClusterCount,
+    junctionPatches: Object.values(patchSurf).reduce((sum, p) => sum + p.count, 0),
+    halfWidths: ROAD_HALF_W.slice(),
+    crossfall: CROWN_RISE.map((rise, c) => rise / ROAD_HALF_W[c]),
+  };
 }
 
 // ---------------------------------------------------------------------------

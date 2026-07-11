@@ -105,6 +105,32 @@ export function distToPolyline(x, z, pts) {
   return bd;
 }
 
+// One open Chaikin pass with fixed endpoints and optional pinned interior
+// vertices. Unlike chaikinPoly this never closes a route, and the adaptive
+// offset keeps a surveyed centreline inside its class-specific tolerance.
+export function chaikinOpen(pts, pinned = null, maxOffset = Infinity) {
+  if (pts.length < 3) return pts.map((p) => p.slice());
+  const out = [pts[0].slice()];
+  const isPinned = (i) => pinned instanceof Set ? pinned.has(i) : !!pinned?.(i, pts[i]);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+    if (isPinned(i)) { out.push(b.slice()); continue; }
+    let alpha = 0.25;
+    let qx = lerp(b[0], a[0], alpha), qz = lerp(b[1], a[1], alpha);
+    let rx = lerp(b[0], c[0], alpha), rz = lerp(b[1], c[1], alpha);
+    const vx = rx - qx, vz = rz - qz;
+    const L = vx * vx + vz * vz;
+    const t = L ? clamp(((b[0] - qx) * vx + (b[1] - qz) * vz) / L, 0, 1) : 0;
+    const dev = Math.hypot(b[0] - (qx + vx * t), b[1] - (qz + vz * t));
+    alpha *= Math.min(1, maxOffset / Math.max(dev, 1e-6));
+    qx = lerp(b[0], a[0], alpha); qz = lerp(b[1], a[1], alpha);
+    rx = lerp(b[0], c[0], alpha); rz = lerp(b[1], c[1], alpha);
+    out.push([qx, qz], [rx, rz]);
+  }
+  out.push(pts[pts.length - 1].slice());
+  return out;
+}
+
 export function splineLength(pts, samples = 200) {
   let len = 0, prev = sampleSpline(pts, 0);
   for (let i = 1; i <= samples; i++) {

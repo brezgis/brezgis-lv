@@ -3,9 +3,10 @@
 // mill pond that exists only while the manor's watermill does (eras 2-3).
 import * as THREE from 'three';
 import { STREAMS, LAKES } from './geodata.js';
-import { RIVER, STREAM_CHANNELS, channelRows, bankCharAt, LAKE_SHORES, lakeAt, riverAt } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, channelRows, bankCharAt, bankCharSideAt, CONFLUENCES,
+  LAKE_SHORES, lakeAt, riverAt, streamAt, inConfluenceMask } from './riverzone.js';
 import { LOC } from './landuse.js';
-import { canvasTexture, makeNoise, chaikinPoly, lerp } from './util.js';
+import { canvasTexture, makeNoise, chaikinPoly, lerp, smoothstep } from './util.js';
 import { meshHeightAt } from './terrain.js';
 
 function waterNormalTex() {
@@ -99,7 +100,7 @@ function ribbon(rows, mat, uvScale = 60, edgeDrop = 0.85) {
   return new THREE.Mesh(geo, mat);
 }
 
-export function skirtRows(rows) {
+export function skirtRows(rows, chan = rows[0]?.chan || RIVER) {
   if (!rows.length) return [];
   const SEG = Math.max(1, rows.length - 1);
   const bankNoise = makeNoise(881);
@@ -108,24 +109,50 @@ export function skirtRows(rows) {
   for (let i = 0; i < rows.length; i++) {
     const t = i / SEG;
     const row = rows[i];
+    const left = bankCharSideAt(row.x, row.z, 1, chan);
+    const right = bankCharSideAt(row.x, row.z, -1, chan);
     const ch = bankCharAt(row.x, row.z);
     const W_IN = row.hw + 1.6;
     // organic shoreline: the sand band waxes and wanes (~45m wavelength)
-    let wOut = W_IN + (1.1 + bankNoise.fbm(t * 380, 3.7, 3) * 4.4)
-      * (1 - 0.28 * ch.mud) * (1 + 0.35 * ch.bar);
+    const baseBand = 1.1 + bankNoise.fbm(t * 380, 3.7, 3) * 4.4;
+    let wOutLeft = W_IN + baseBand * (1 - 0.28 * left.mud) * (1 + 0.35 * left.bar) * left.apron;
+    let wOutRight = W_IN + baseBand * (1 - 0.28 * right.mud) * (1 + 0.35 * right.bar) * right.apron;
     if (i > 0) {
       const dTheta = Math.acos(Math.min(1, Math.max(-1, row.dx * pdx + row.dz * pdz)));
-      const radius = dTheta > 1e-4 ? (RIVER.length / SEG) / dTheta : 1e9;
-      wOut = Math.min(wOut, Math.max(W_IN + 0.4, radius * 0.85));
+      const radius = dTheta > 1e-4 ? (chan.length / SEG) / dTheta : 1e9;
+      const limit = Math.max(W_IN + 0.4, radius * 0.85);
+      wOutLeft = Math.min(wOutLeft, limit);
+      wOutRight = Math.min(wOutRight, limit);
     }
     pdx = row.dx; pdz = row.dz;
-    out.push({ W_IN, wOut, ch });
+    // Tributary skirts taper cleanly into receivers and wet hollow ends.
+    const taper = chan === RIVER ? 1 : 1 - row.mouthFactor;
+    wOutLeft = W_IN + (wOutLeft - W_IN) * taper;
+    wOutRight = W_IN + (wOutRight - W_IN) * taper;
+    // Receiver apron notch: collapse only the bank the tributary enters.
+    if (chan === RIVER) {
+      for (const mouth of CONFLUENCES) {
+        if (mouth.type !== 'river' || mouth.receiver !== RIVER) continue;
+        const along = Math.abs(row.s - mouth.receiverS);
+        const throat = mouth.channel.samples[mouth.channel.samples.length - 1][3] + 4;
+        if (along < throat) {
+          const k = smoothstep(throat, throat * 0.65, along);
+          if (mouth.bankSide > 0) wOutLeft = lerp(wOutLeft, W_IN, k);
+          else wOutRight = lerp(wOutRight, W_IN, k);
+        }
+      }
+    }
+    out.push({ W_IN, wOut: Math.max(wOutLeft, wOutRight), wOutLeft, wOutRight, ch, left, right });
   }
   // smooth the clamp: abrupt width changes twist the quads
   for (let pass = 0; pass < 3; pass++) {
     for (let i = 1; i < out.length - 1; i++) {
-      const avg = (out[i - 1].wOut + out[i].wOut + out[i + 1].wOut) / 3;
-      out[i].wOut = Math.max(out[i].W_IN + 0.4, Math.min(out[i].wOut, avg));
+      for (const key of ['wOutLeft', 'wOutRight']) {
+        const avg = (out[i - 1][key] + out[i][key] + out[i + 1][key]) / 3;
+        const mayCollapse = rows[i].lake || rows[i].mouthFactor > 0 || chan === RIVER;
+        out[i][key] = Math.max(out[i].W_IN + (mayCollapse ? 0 : 0.4), Math.min(out[i][key], avg));
+      }
+      out[i].wOut = Math.max(out[i].wOutLeft, out[i].wOutRight);
     }
   }
   let lakeK = rows.map((row) => (row.lake ? 1 : 0));
@@ -141,10 +168,110 @@ export function skirtRows(rows) {
     lakeK = next;
   }
   for (let i = 0; i < out.length; i++) {
-    if (rows[i].lake) out[i].wOut = out[i].W_IN;
-    else out[i].wOut = out[i].W_IN + (out[i].wOut - out[i].W_IN) * (1 - lakeK[i]);
+    if (rows[i].lake) out[i].wOutLeft = out[i].wOutRight = out[i].W_IN;
+    else {
+      out[i].wOutLeft = out[i].W_IN + (out[i].wOutLeft - out[i].W_IN) * (1 - lakeK[i]);
+      out[i].wOutRight = out[i].W_IN + (out[i].wOutRight - out[i].W_IN) * (1 - lakeK[i]);
+    }
+    out[i].wOut = Math.max(out[i].wOutLeft, out[i].wOutRight);
   }
   return out;
+}
+
+// Reusable tributary bank builder. It consumes the exact same channelRows
+// array as ribbon(), so the inner edge is welded by construction; skirtRows
+// supplies side-specific geomorphology and receiver tapering.
+function buildChannelBank(rows, chan, material, edgeDrop, name) {
+  const widths = skirtRows(rows, chan);
+  const positions = [], colors = [], uvs = [], indices = [];
+  const mix3 = (a, b, k) => [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i], w = widths[i];
+    for (const side of [-1, 1]) {
+      const ch = side > 0 ? w.left : w.right;
+      const wOut = side > 0 ? w.wOutLeft : w.wOutRight;
+      const nx = -row.dz * side, nz = row.dx * side;
+      const ix = row.x + nx * w.W_IN, iz = row.z + nz * w.W_IN;
+      const ox = row.x + nx * wOut, oz = row.z + nz * wOut;
+      const mx = lerp(ix, ox, 0.34), mz = lerp(iz, oz, 0.34);
+      const collapsed = Math.abs(wOut - w.W_IN) < 1e-6;
+      const rimY = row.y - edgeDrop;
+      const midY = collapsed ? rimY : Math.min(Math.max(meshHeightAt(mx, mz) + 0.025, row.y), row.y + 0.24);
+      const outY = collapsed ? rimY : Math.min(Math.max(meshHeightAt(ox, oz) + 0.025, row.y - 0.28), row.y + 0.42);
+      positions.push(ix, rimY, iz, mx, midY, mz, ox, outY, oz);
+      const wet = mix3(mix3([0.57, 0.50, 0.37], [0.27, 0.24, 0.17], ch.mud), [0.54, 0.52, 0.45], ch.bar * 0.65);
+      const dry = mix3(mix3([0.72, 0.64, 0.46], [0.55, 0.52, 0.44], ch.bar), [0.31, 0.27, 0.20], ch.erosion * 0.72);
+      const fringe = mix3([0.53, 0.58, 0.35], [0.37, 0.42, 0.25], ch.mud * 0.5);
+      colors.push(...wet, ...dry, ...fringe);
+      uvs.push(ix * 0.18, iz * 0.18, mx * 0.18, mz * 0.18, ox * 0.18, oz * 0.18);
+    }
+    if (i > 0) {
+      const a = (i - 1) * 6;
+      for (const [o0, o1] of [[0, 1], [1, 2], [4, 3], [5, 4]]) {
+        indices.push(a + o0, a + o1, a + o1 + 6, a + o0, a + o1 + 6, a + o0 + 6);
+      }
+    }
+  }
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3, b = indices[i + 1] * 3, c = indices[i + 2] * 3;
+    const abx = positions[b] - positions[a], abz = positions[b + 2] - positions[a + 2];
+    const acx = positions[c] - positions[a], acz = positions[c + 2] - positions[a + 2];
+    if (abz * acx - abx * acz < 0) [indices[i + 1], indices[i + 2]] = [indices[i + 2], indices[i + 1]];
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  const nrm = new Float32Array(positions.length);
+  for (let i = 0; i < nrm.length; i += 3) nrm[i + 1] = 1;
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.receiveShadow = true;
+  mesh.name = name;
+  return mesh;
+}
+
+// Sparse cohesive outer-bend lips and slump noses. Anchors reuse skirt row
+// radii; all faces remain outside the ribbon and mouth reaches are excluded.
+function buildBankDetails(rows, chan) {
+  const widths = skirtRows(rows, chan);
+  const positions = [], colors = [], indices = [];
+  let made = 0;
+  for (let i = 4; i + 2 < rows.length - 4; i += 11) {
+    const a = rows[i], b = rows[i + 2];
+    if (a.lake || b.lake || a.mouthFactor || b.mouthFactor || inConfluenceMask(a.x, a.z, 8)) continue;
+    if (CONFLUENCES.some((m) => m.receiver === chan && Math.abs(a.s - m.receiverS) < 22)) continue;
+    const left = widths[i].left, right = widths[i].right;
+    const side = left.erosion > right.erosion ? 1 : -1;
+    const ch = side > 0 ? left : right;
+    if (ch.erosion < 0.62 || ch.bar > 0.55) continue;
+    const base = positions.length / 3;
+    for (const [row, wi] of [[a, widths[i]], [b, widths[i + 2]]]) {
+      const nx = -row.dz * side, nz = row.dx * side;
+      const wOut = side > 0 ? wi.wOutLeft : wi.wOutRight;
+      const landX = row.x + nx * wOut, landZ = row.z + nz * wOut;
+      const lipR = wi.W_IN + Math.min(0.55, Math.max(0.18, (wOut - wi.W_IN) * 0.22));
+      const lipX = row.x + nx * lipR, lipZ = row.z + nz * lipR;
+      const topY = Math.max(row.y + 0.08, Math.min(meshHeightAt(landX, landZ) + 0.04, row.y + 0.55));
+      positions.push(landX, topY, landZ, lipX, topY - 0.02, lipZ, lipX, row.y - 0.18, lipZ);
+      colors.push(0.25, 0.31, 0.15, 0.30, 0.36, 0.18, 0.20, 0.15, 0.10);
+    }
+    indices.push(
+      base, base + 3, base + 4, base, base + 4, base + 1,
+      base + 1, base + 4, base + 5, base + 1, base + 5, base + 2);
+    // Every fourth lip gets a short, safely landward slump wedge.
+    if ((made++ & 3) === 0) indices.push(base, base + 2, base + 5, base, base + 5, base + 3);
+  }
+  if (!positions.length) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  mesh.name = `${chan.name || 'channel'}:bankdetails`;
+  return mesh;
 }
 
 export function buildWater() {
@@ -197,8 +324,9 @@ export function buildWater() {
     const inner = [[], []], outer = [[], []];
     for (let i = 0; i < riverRows.length; i++) {
       const { x, z, y, dx, dz } = riverRows[i];
-      const { W_IN, wOut } = widths[i];
+      const { W_IN, wOutLeft, wOutRight } = widths[i];
       [-1, 1].forEach((side, si) => {
+        const wOut = side > 0 ? wOutLeft : wOutRight;
         const nx = -dz * side, nz = dx * side;
         inner[si].push([x + nx * W_IN, y, z + nz * W_IN]);
         outer[si].push([x + nx * wOut, y, z + nz * wOut]);
@@ -206,7 +334,8 @@ export function buildWater() {
     }
     for (let si = 0; si < 2; si++) {
       for (let i = 1; i < riverRows.length; i++) {
-        if (widths[i].wOut === widths[i].W_IN || widths[i - 1].wOut === widths[i - 1].W_IN) continue;
+        const key = si ? 'wOutLeft' : 'wOutRight';
+        if (widths[i][key] === widths[i].W_IN || widths[i - 1][key] === widths[i - 1].W_IN) continue;
         const idx2 = (inner[si][i][0] - inner[si][i - 1][0]);
         const idz2 = (inner[si][i][2] - inner[si][i - 1][2]);
         const odx = (outer[si][i][0] - outer[si][i - 1][0]);
@@ -236,22 +365,23 @@ export function buildWater() {
     ];
     for (let i = 0; i < riverRows.length; i++) {
       const t = i / Math.max(1, riverRows.length - 1);
-      const ch = widths[i].ch;
       const jitter = (colorNoise.fbm(t * 590, 7, 2) / 0.75 - 0.5) * 0.08;
-      const wetC = mixC(mixC(bandC[0], [0.30, 0.27, 0.19], ch.mud), [0.58, 0.55, 0.47], ch.bar * 0.7);
-      const dryC = mixC(mixC(bandC[1], [0.62, 0.58, 0.50], ch.bar), [0.52, 0.46, 0.34], ch.mud * 0.6);
-      const fringeC = mixC(bandC[2], [0.45, 0.52, 0.30], 0.45 + 0.3 * ch.mud);
-      const rowC = [wetC, dryC, fringeC];
       const y = riverRows[i].y;
       const rimY = y - 0.35;
-      const collapsed = widths[i].wOut === widths[i].W_IN;
       for (const si of [0, 1]) {
+        const ch = si ? widths[i].left : widths[i].right;
+        const wetC = mixC(mixC(bandC[0], [0.30, 0.27, 0.19], ch.mud), [0.58, 0.55, 0.47], ch.bar * 0.7);
+        const dryC = mixC(mixC(bandC[1], [0.62, 0.58, 0.50], ch.bar), [0.34, 0.29, 0.22], ch.erosion * 0.7);
+        const fringeC = mixC(bandC[2], [0.38, 0.43, 0.27], 0.3 + 0.45 * ch.mud);
+        const rowC = [wetC, dryC, fringeC];
         const inn = inner[si][i], out = outer[si][i];
         const mx = inn[0] + (out[0] - inn[0]) * 0.3;
         const mz = inn[2] + (out[2] - inn[2]) * 0.3;
         // outer edge DRAPES onto the rendered terrain (clamped so it neither
         // dives into a carved dip nor flies up a bank) — a fixed +0.07 rim
         // floated a tan wall over the shore shelf and read as a dyke
+        const key = si ? 'wOutLeft' : 'wOutRight';
+        const collapsed = widths[i][key] === widths[i].W_IN;
         const gOut = collapsed ? rimY : Math.min(Math.max(meshHeightAt(out[0], out[2]) + 0.03, y - 0.33), y + 0.5);
         const gMid = collapsed ? rimY : Math.min(Math.max(meshHeightAt(mx, mz) + 0.03, y + 0.03), y + 0.3);
         positions.push(
@@ -326,16 +456,23 @@ export function buildWater() {
     skirt.name = 'bankskirt';
     group.add(skirt);
   }
+  const riverDetails = buildBankDetails(riverRows, RIVER);
+  if (riverDetails) group.add(riverDetails);
 
   // --- streams
   const streamMat = makeWaterMaterial(0x314f58, 0.92, normalMap);
   mats.push(streamMat);
+  const streamBankMat = new THREE.MeshLambertMaterial({
+    map: sandTex, vertexColors: true, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
   for (let i = 0; i < STREAM_CHANNELS.length; i++) {
     const chan = STREAM_CHANNELS[i];
     const rows = channelRows(chan, channelSeg(chan));
     const st = ribbon(rows, streamMat, 90, 0.5);
     st.name = STREAMS[i].name || 'stream';
     group.add(st);
+    group.add(buildChannelBank(rows, chan, streamBankMat, 0.5, `${st.name}:bankskirt`));
   }
 
   // --- LAKE BANK COLLARS: the wet-sand shore band the river always had.
@@ -356,7 +493,7 @@ export function buildWater() {
       let nxs = -(poly[1][1] - poly[N - 1][1]), nzs = poly[1][0] - poly[N - 1][0];
       const nl0 = Math.hypot(nxs, nzs) || 1;
       const outSign = lakeAt(poly[0][0] + (nxs / nl0) * 3, poly[0][1] + (nzs / nl0) * 3) ? -1 : 1;
-      const positions = [], colors = [], uvsA = [], indices = [];
+      const positions = [], colors = [], uvsA = [], indices = [], collapsedRows = [];
       let s = 0;
       for (let i = 0; i <= N; i++) {
         const i0 = i % N;
@@ -371,7 +508,10 @@ export function buildWater() {
           * (1 - 0.35 * ch.mud) * (1 + 0.45 * ch.bar);
         // a river mouth brings its own treatment — collapse the collar there
         const rv = riverAt(cur[0], cur[1]);
-        if (rv && rv.d < rv.hw + 4) w = 0.02;
+        const st = streamAt(cur[0], cur[1]);
+        const collapsed = (rv && rv.d < rv.hw + 4) || (st && st.d < st.hw + 4);
+        if (collapsed) w = 0;
+        collapsedRows.push(!!collapsed);
         const midX = cur[0] + nx * w * 0.35, midZ = cur[1] + nz * w * 0.35;
         const outX = cur[0] + nx * w, outZ = cur[1] + nz * w;
         const gMid = Math.min(Math.max(meshHeightAt(midX, midZ) + 0.03, lake.level + 0.02), lake.level + 0.35);
@@ -385,7 +525,7 @@ export function buildWater() {
         const fringe = mix3([0.60, 0.65, 0.42], [0.45, 0.52, 0.30], 0.55 + 0.3 * ch.mud);
         colors.push(...wet, ...dry, ...fringe);
         uvsA.push(cur[0] * 0.18, cur[1] * 0.18, midX * 0.18, midZ * 0.18, outX * 0.18, outZ * 0.18);
-        if (i > 0) {
+        if (i > 0 && !collapsedRows[i] && !collapsedRows[i - 1]) {
           const a2 = (i - 1) * 3;
           for (const [o0, o1] of [[0, 1], [1, 2]]) {
             indices.push(a2 + o0, a2 + o1, a2 + o1 + 3, a2 + o0, a2 + o1 + 3, a2 + o0 + 3);

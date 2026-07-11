@@ -5,7 +5,9 @@
 // width; (2) no sunken pans just outside the shore shelf; (3) the vegetation
 // rule holds everywhere inside the channel; (4) the bank skirt is welded to
 // the ribbon and collapsed inside lakes; (5) wading levels are sane.
-import { RIVER, STREAM_CHANNELS, channelRows, lakeAt, riverAt, streamAt, vegExcluded, waterLevelAt } from '../src/riverzone.js';
+import { RIVER, STREAM_CHANNELS, CONFLUENCES, LAKE_SHORES, channelRows, lakeAt,
+  lakeShoreDistAt, riverAt, streamAt, confluenceAt, inConfluenceMask,
+  bankCharSideAt, vegExcluded, waterLevelAt } from '../src/riverzone.js';
 import { skirtRows } from '../src/water.js';
 import { heightAt } from '../src/terrain.js';
 import { LOC } from '../src/landuse.js';
@@ -15,6 +17,144 @@ const failures = [];
 function check(ok, label, detail) {
   if (ok) pass++;
   else { fail++; if (failures.length < 12) failures.push(`${label} ${detail}`); }
+}
+
+// (6) canonical profiles: no spline overshoot rises, no mesh-only width
+// smoothing, and the contiguous Pīsla records share exact endpoint state.
+{
+  for (const chan of [RIVER, ...STREAM_CHANNELS]) {
+    for (let i = 1; i < chan.samples.length; i++) {
+      check(chan.samples[i][2] <= chan.samples[i - 1][2] + 1e-7,
+        'level-rise', `${chan.name} sample ${i}`);
+    }
+    const rows = channelRows(chan, Math.min(2600, chan.pts.length * 7));
+    for (let i = 1; i < rows.length; i++) {
+      const ds = Math.hypot(rows[i].x - rows[i - 1].x, rows[i].z - rows[i - 1].z) || 1;
+      check(Math.abs(rows[i].hw - rows[i - 1].hw) <= 0.50001,
+        'width-step', `${chan.name} row ${i} dW=${Math.abs(rows[i].hw - rows[i - 1].hw).toFixed(3)}`);
+      if (!rows[i].lake && !rows[i - 1].lake) check((rows[i - 1].y - rows[i].y) / ds <= 0.04001,
+        'level-grade', `${chan.name} row ${i}`);
+    }
+  }
+  const a = STREAM_CHANNELS[0].samples.at(-1), b = STREAM_CHANNELS[1].samples[0];
+  check(Math.abs(a[2] - b[2]) < 1e-6 && Math.abs(a[3] - b[3]) < 1e-6,
+    'pisla-join', `level ${a[2]}/${b[2]} width ${a[3]}/${b[3]}`);
+}
+
+// (7) receiver model and mouth oracle. The query follows the canonical
+// tributary profile; once it overlaps the receiver, waterLevelAt reports the
+// visible receiver sheet rather than the submerged tributary ribbon.
+{
+  const expected = ['continuation', 'river', 'river', 'wetHollow'];
+  CONFLUENCES.forEach((mouth, i) => check(mouth.type === expected[i],
+    'receiver', `stream ${i}: ${mouth.type}, expected ${expected[i]}`));
+  for (const mouth of CONFLUENCES.filter((m) => m.type === 'river')) {
+    const chan = mouth.channel;
+    const rows = channelRows(chan, Math.min(2600, chan.pts.length * 7));
+    check(rows.at(-1).y <= mouth.receivingLevel - 0.249,
+      'mouth-submerge', `stream ${mouth.streamIndex} y=${rows.at(-1).y.toFixed(3)} recv=${mouth.receivingLevel.toFixed(3)}`);
+    const approach = rows.filter((r) => r.s >= chan.length - mouth.approachDistance - mouth.blendEndOffset);
+    for (let k = 0; k < 20; k++) {
+      const row = approach[Math.round(k * (approach.length - 1) / 19)];
+      const st = streamAt(row.x, row.z);
+      check(st && Math.abs(st.level - row.y) <= 0.05001,
+        'mouth-query', `stream ${mouth.streamIndex} s=${row.s.toFixed(1)} q=${st?.level.toFixed(3)} row=${row.y.toFixed(3)}`);
+      const rv = riverAt(row.x, row.z);
+      const visible = rv && rv.d < rv.hw + 1.5 ? Math.max(row.y, rv.level) : row.y;
+      check(Math.abs(waterLevelAt(row.x, row.z) - visible) <= 0.05001,
+        'mouth-waterlevel', `stream ${mouth.streamIndex} s=${row.s.toFixed(1)}`);
+    }
+  }
+  for (const [x, z] of [[-1493.02, 3159.80], [-1492.92, 3159.57], [1495.77, -547.66], [1496.00, -547.76]]) {
+    check(inConfluenceMask(x, z) && confluenceAt(x, z), 'mouth-mask', `@${x},${z}`);
+  }
+  const wet = STREAM_CHANNELS[3];
+  check(wet.samples.at(-1)[3] <= wet.samples[wet.samples.length - 9][3] * 0.66,
+    'wet-hollow-width', `${wet.samples.at(-1)[3].toFixed(2)}`);
+  check(wet.samples.at(-1)[2] < wet.samples[wet.samples.length - 9][2] - 0.25,
+    'wet-hollow-level', `${wet.samples.at(-1)[2].toFixed(2)}`);
+}
+
+// (8) near-shore distance is exact against the polygon actually rendered.
+{
+  for (const lake of LAKE_SHORES) {
+    const edgeLengths = [], poly = lake.poly;
+    let perimeter = 0;
+    for (let i = 0; i < poly.length; i++) {
+      perimeter += Math.hypot(poly[(i + 1) % poly.length][0] - poly[i][0], poly[(i + 1) % poly.length][1] - poly[i][1]);
+      edgeLengths.push(perimeter);
+    }
+    for (let n = 0; n < 200; n++) {
+      const target = perimeter * n / 200;
+      let i = edgeLengths.findIndex((s) => s >= target);
+      if (i < 0) i = edgeLengths.length - 1;
+      const before = i ? edgeLengths[i - 1] : 0, span = edgeLengths[i] - before || 1;
+      const a = poly[i], b = poly[(i + 1) % poly.length], u = (target - before) / span;
+      const x = a[0] + (b[0] - a[0]) * u, z = a[1] + (b[1] - a[1]) * u;
+      check(lakeShoreDistAt(x, z) <= 0.3, 'shore-exact', `${lake.name} @${x.toFixed(1)},${z.toFixed(1)}`);
+    }
+  }
+}
+
+// (9) every stream skirt uses its own channel length, welds to the ribbon,
+// and collapses structurally at receivers and lake crossings. Gauja notches
+// collapse the receiver-side apron at both tributary throats.
+{
+  for (const chan of STREAM_CHANNELS) {
+    const rows = channelRows(chan, Math.min(2600, chan.pts.length * 7));
+    const sk = skirtRows(rows, chan);
+    rows.forEach((row, i) => {
+      check(Math.abs(sk[i].W_IN - (row.hw + 1.6)) < 1e-6, 'stream-weld', `${chan.name} row ${i}`);
+      check(Number.isFinite(sk[i].wOutLeft) && Number.isFinite(sk[i].wOutRight), 'stream-skirt-finite', `${chan.name} row ${i}`);
+      if (row.lake) check(sk[i].wOutLeft === sk[i].W_IN && sk[i].wOutRight === sk[i].W_IN,
+        'stream-lake-collapse', `${chan.name} row ${i}`);
+    });
+    for (let i = 1; i < rows.length; i++) for (const side of [-1, 1]) {
+      const key = side > 0 ? 'wOutLeft' : 'wOutRight';
+      const ix = (j, w) => rows[j].x - rows[j].dz * side * w;
+      const iz = (j, w) => rows[j].z + rows[j].dx * side * w;
+      const idx = ix(i, sk[i].W_IN) - ix(i - 1, sk[i - 1].W_IN);
+      const idz = iz(i, sk[i].W_IN) - iz(i - 1, sk[i - 1].W_IN);
+      const odx = ix(i, sk[i][key]) - ix(i - 1, sk[i - 1][key]);
+      const odz = iz(i, sk[i][key]) - iz(i - 1, sk[i - 1][key]);
+      check(idx * odx + idz * odz >= -1e-6, 'stream-skirt-fold', `${chan.name} row ${i}`);
+    }
+    if (chan.confluence.type !== 'continuation') check(
+      Math.abs(sk.at(-1).wOutLeft - sk.at(-1).W_IN) < 1e-6 && Math.abs(sk.at(-1).wOutRight - sk.at(-1).W_IN) < 1e-6,
+      'stream-mouth-collapse', chan.name);
+  }
+  const rows = channelRows(RIVER, Math.min(2600, RIVER.pts.length * 7));
+  const sk = skirtRows(rows, RIVER);
+  for (const mouth of CONFLUENCES.filter((m) => m.type === 'river')) {
+    let i = 0;
+    for (let j = 1; j < rows.length; j++) if (Math.abs(rows[j].s - mouth.receiverS) < Math.abs(rows[i].s - mouth.receiverS)) i = j;
+    const width = mouth.bankSide > 0 ? sk[i].wOutLeft : sk[i].wOutRight;
+    check(width - sk[i].W_IN < 0.25, 'receiver-notch', `stream ${mouth.streamIndex} band=${(width - sk[i].W_IN).toFixed(3)}`);
+  }
+  const outlet = streamAt(1419.7, -2417.3);
+  check(outlet && outlet.d < outlet.hw + 4, 'lake-outlet-collapse', `d=${outlet?.d.toFixed(2)}`);
+}
+
+// (10) geomorphic character opposes the two banks on bends but converges
+// to the historical noise field on straight reaches.
+{
+  const ranked = RIVER.samples.map((p, i) => ({ p, i, k: Math.abs(RIVER.curvature[i]) }))
+    .filter((q) => q.i > 8 && q.i < RIVER.samples.length - 9)
+    .sort((a, b) => b.k - a.k).slice(0, 5);
+  for (const q of ranked) {
+    const innerSide = RIVER.curvature[q.i] > 0 ? 1 : -1;
+    const inner = bankCharSideAt(q.p[0], q.p[1], innerSide, RIVER);
+    const outer = bankCharSideAt(q.p[0], q.p[1], -innerSide, RIVER);
+    check(inner.bar > outer.bar, 'bend-bar', `sample ${q.i}`);
+    check(outer.erosion > inner.erosion, 'bend-erosion', `sample ${q.i}`);
+  }
+  const straight = RIVER.samples.map((p, i) => ({ p, i, k: Math.abs(RIVER.curvature[i]) }))
+    .filter((q) => q.i > 8 && q.i < RIVER.samples.length - 9 && q.k < 0.00015).slice(0, 20);
+  for (const q of straight) {
+    const l = bankCharSideAt(q.p[0], q.p[1], 1, RIVER), r = bankCharSideAt(q.p[0], q.p[1], -1, RIVER);
+    check(Math.abs(l.bar - r.bar) < 0.08 && Math.abs(l.erosion - r.erosion) < 0.08,
+      'straight-noise', `sample ${q.i}`);
+  }
 }
 
 // perpendicular from neighbouring samples

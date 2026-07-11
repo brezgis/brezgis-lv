@@ -576,7 +576,7 @@ export function paintEra(era) {
       const ri = distToRoadEx(era, x, z);
       if (ri.d < 2.5) {
         const t = smoothstep(2.5, -1, ri.d);
-        if (era === 5 && ri.c <= 1) {
+        if (era === 5 && ri.c === 0) {   // P30 only — class-1 V-roads stay gravel like their ribbons
           const lane = 0.30 + n2 * 0.03;
           r = lerp(r, lane, t); g = lerp(g, lane + 0.008, t); b = lerp(b, lane + 0.02, t);
         } else if (ri.c === 3) {

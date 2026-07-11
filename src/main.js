@@ -83,12 +83,12 @@ async function boot() {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 12000);
-  const steadY = () => heightAt(S.x, S.z);
 
   await progress('Sculpting the Vidzeme Upland from real elevation data…');
   initTextures();
   const terrain = buildTerrain();
   scene.add(terrain);
+  const steadY = heightAt(S.x, S.z);
 
   await progress('Filling the Gauja and Dabaru lake…');
   const water = buildWater();
@@ -126,7 +126,7 @@ async function boot() {
   let envAge = 1e9;
 
   const effects = new Effects(scene);
-  effects.setFireflyCenter(S.x - 40, steadY(), S.z + 30);
+  effects.setFireflyCenter(S.x - 40, steadY, S.z + 30);
   const mistPts = [];
   for (let i = 4; i < RIVER_PTS.length - 4; i += 9) {
     const [x, z, y] = RIVER_PTS[i];
@@ -145,8 +145,8 @@ async function boot() {
   const ambience = new Ambience();
 
   // camera start: from the south-east, farmstead in front, valley behind
-  camera.position.set(S.x + 68, steadY() + 24, S.z + 88);
-  camera.lookAt(S.x, steadY() + 4, S.z);
+  camera.position.set(S.x + 68, steadY + 24, S.z + 88);
+  camera.lookAt(S.x, steadY + 4, S.z);
 
   // Minecraft-style rig: fly + walk only; 'cinema' idles until first input
   const rig = new Rig(camera, canvas);
@@ -186,7 +186,7 @@ async function boot() {
   scene.add(shadowProxy);
 
   // ------- collision: era buildings/fences as AABBs + tree trunks ---------
-  const COLL = { cell: 14, map: new Map(), list: [] };
+  const COLL = { cell: 14, map: new Map(), list: [], ix0: 0, ix1: -1, iz0: 0, iz1: -1, offX: 0, offZ: 0, w: 0 };
   const _box = new THREE.Box3();
   function rebuildColliders(group, era) {
     COLL.map.clear();
@@ -223,12 +223,22 @@ async function boot() {
     for (const [x, z, r] of veg.getColliders(era)) {
       COLL.list.push({ circ: true, x, z, r });
     }
+    if (!COLL.list.length) { COLL.ix0 = COLL.iz0 = 0; COLL.ix1 = COLL.iz1 = -1; COLL.w = 0; return; }
+    let ix0 = Infinity, ix1 = -Infinity, iz0 = Infinity, iz1 = -Infinity;
+    COLL.list.forEach((c) => {
+      const x0 = c.circ ? c.x - c.r : c.x0, x1 = c.circ ? c.x + c.r : c.x1;
+      const z0 = c.circ ? c.z - c.r : c.z0, z1 = c.circ ? c.z + c.r : c.z1;
+      ix0 = Math.min(ix0, Math.floor(x0 / COLL.cell)); ix1 = Math.max(ix1, Math.floor(x1 / COLL.cell));
+      iz0 = Math.min(iz0, Math.floor(z0 / COLL.cell)); iz1 = Math.max(iz1, Math.floor(z1 / COLL.cell));
+    });
+    COLL.ix0 = ix0; COLL.ix1 = ix1; COLL.iz0 = iz0; COLL.iz1 = iz1;
+    COLL.offX = -ix0; COLL.offZ = -iz0; COLL.w = iz1 - iz0 + 1;
     COLL.list.forEach((c, idx) => {
       const x0 = c.circ ? c.x - c.r : c.x0, x1 = c.circ ? c.x + c.r : c.x1;
       const z0 = c.circ ? c.z - c.r : c.z0, z1 = c.circ ? c.z + c.r : c.z1;
       for (let ix = Math.floor(x0 / COLL.cell); ix <= Math.floor(x1 / COLL.cell); ix++) {
         for (let iz = Math.floor(z0 / COLL.cell); iz <= Math.floor(z1 / COLL.cell); iz++) {
-          const k = ix + ':' + iz;
+          const k = (ix + COLL.offX) * COLL.w + iz + COLL.offZ;
           let a = COLL.map.get(k);
           if (!a) COLL.map.set(k, a = []);
           a.push(idx);
@@ -237,11 +247,13 @@ async function boot() {
     });
   }
   const R_PLAYER = 0.38;
+  const _collHit = [0, 0];
   rig.collideFn = (px, pz, feetY) => {
     const cix = Math.floor(px / COLL.cell), ciz = Math.floor(pz / COLL.cell);
     for (let ix = cix - 1; ix <= cix + 1; ix++) {
       for (let iz = ciz - 1; iz <= ciz + 1; iz++) {
-        const arr = COLL.map.get(ix + ':' + iz);
+        if (ix < COLL.ix0 || ix > COLL.ix1 || iz < COLL.iz0 || iz > COLL.iz1) continue;
+        const arr = COLL.map.get((ix + COLL.offX) * COLL.w + iz + COLL.offZ);
         if (!arr) continue;
         for (const idx of arr) {
           const c = COLL.list[idx];
@@ -268,7 +280,8 @@ async function boot() {
         }
       }
     }
-    return [px, pz];
+    _collHit[0] = px; _collHit[1] = pz;
+    return _collHit;
   };
 
   // ------- era management -------
@@ -356,8 +369,8 @@ async function boot() {
     return best;
   };
   const PRESETS = {
-    seta: () => [[S.x + 68, yAt(S.x + 68, S.z + 88, 24), S.z + 88], [S.x, steadY() + 4, S.z]],
-    pagalms: () => [[S.x + 26, steadY() + 4.5, S.z + 24], [S.x - 6, steadY() + 2.5, S.z - 8]],
+    seta: () => [[S.x + 68, yAt(S.x + 68, S.z + 88, 24), S.z + 88], [S.x, steadY + 4, S.z]],
+    pagalms: () => [[S.x + 26, steadY + 4.5, S.z + 24], [S.x - 6, steadY + 2.5, S.z - 8]],
     upe: () => {
       // over the water, looking downstream-to-upstream: Dabaru ezers and the
       // old fort hill rise to the south
@@ -367,7 +380,7 @@ async function boot() {
     muiza: () => [[LOC.MANOR.x + 55, yAt(LOC.MANOR.x + 55, LOC.MANOR.z + 110, 16), LOC.MANOR.z + 110], [LOC.MANOR.x, yAt(LOC.MANOR.x, LOC.MANOR.z, 5), LOC.MANOR.z]],
     ezers: () => [[LOC.LAKE_VIEW.x - 600, yAt(LOC.LAKE_VIEW.x - 600, LOC.LAKE_VIEW.z + 200, 70), LOC.LAKE_VIEW.z + 200], [LOC.LAKE_VIEW.x + 200, LAKES[0] ? LAKES[0].level : 180, LOC.LAKE_VIEW.z]],
     brezga: () => [[LOC.BREZGA.x - 210, yAt(LOC.BREZGA.x - 210, LOC.BREZGA.z + 260, 55), LOC.BREZGA.z + 260], [LOC.BREZGA.x, yAt(LOC.BREZGA.x, LOC.BREZGA.z, 8), LOC.BREZGA.z]],
-    putns: () => [[S.x + 300, yAt(S.x, S.z, 780), S.z + 700], [S.x + 300, steadY(), S.z + 300]],
+    putns: () => [[S.x + 300, yAt(S.x, S.z, 780), S.z + 700], [S.x + 300, steadY, S.z + 300]],
   };
   // preset moves tween the camera, then hand control back in fly mode
   let camTween = null;
@@ -414,7 +427,7 @@ async function boot() {
 
   // ------- HUD wiring -------
   // harness compatibility stub (shot2/dbg read a controls.target)
-  const simControls = { target: new THREE.Vector3(S.x, steadY() + 4, S.z), autoRotate: false, enabled: false };
+  const simControls = { target: new THREE.Vector3(S.x, steadY + 4, S.z), autoRotate: false, enabled: false };
   window.__scene = scene;
   window.__rig = rig;
   window.__sim = {
@@ -488,6 +501,7 @@ async function boot() {
 
   const clock = new THREE.Clock();
   const wind = new THREE.Vector2(0.6, 0.25);
+  let clockText = '', clockTextEl = null;
 
   // FPS governor: shed pixel ratio, shadow rate/size, then grass density —
   // never the trees. Kicks in early (below ~34fps) so it never feels laggy
@@ -542,9 +556,9 @@ async function boot() {
       cinema.angle += dt * 0.05;
       camera.position.set(
         S.x + Math.cos(cinema.angle) * cinema.r,
-        steadY() + cinema.h,
+        steadY + cinema.h,
         S.z + Math.sin(cinema.angle) * cinema.r);
-      camera.lookAt(S.x, steadY() + 4, S.z);
+      camera.lookAt(S.x, steadY + 4, S.z);
     } else {
       rig.update(dt);
     }
@@ -591,7 +605,8 @@ async function boot() {
     const clockEl = $('day-clock');
     if (clockEl) {
       const h = Math.floor(sky.state.hour), m = Math.floor((sky.state.hour % 1) * 60);
-      clockEl.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      const text = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      if (text !== clockText || clockEl !== clockTextEl) { clockEl.textContent = text; clockText = text; clockTextEl = clockEl; }
     }
     composer.render();
   });

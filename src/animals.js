@@ -769,6 +769,7 @@ export class AnimalManager {
     a.group.name = kind;
     const rec = {
       ...a, kind, home, medium,
+      homeY: opts.fly === 'soar' ? heightAt(home.x, home.z) : null,
       speed: opts.speed ?? (kind.startsWith('chicken') || kind === 'rooster' ? 0.8 : kind === 'goose' ? 0.7 : 0.55),
       state: 'graze', timer: 1 + rng() * 5, tx: x, tz: z, heading: a.group.rotation.y,
       grazeBias: opts.grazeBias ?? (kind === 'pig' ? 0.85 : 0.68),
@@ -787,7 +788,17 @@ export class AnimalManager {
   }
 
   clear() {
-    for (const a of this.animals) this.group.remove(a.group);
+    const geometries = new Set(), materials = new Set();
+    for (const a of this.animals) {
+      a.group.traverse((o) => {
+        if (o.geometry) geometries.add(o.geometry);
+        if (Array.isArray(o.material)) o.material.forEach((m) => materials.add(m));
+        else if (o.material) materials.add(o.material);
+      });
+      this.group.remove(a.group);
+    }
+    geometries.forEach((g) => g.dispose());
+    materials.forEach((m) => m.dispose());
     this.animals.length = 0;
   }
 
@@ -937,8 +948,7 @@ export class AnimalManager {
       a.soarR = clamp(a.soarR, 35, 110);
       g.position.x = a.home.x + Math.cos(a.soarA) * a.soarR;
       g.position.z = a.home.z + Math.sin(a.soarA) * a.soarR;
-      const ground = heightAt(a.home.x, a.home.z);
-      g.position.y = ground + a.alt[0] + (Math.sin(t * 0.04 + a.phase) + 1) * 0.5 * (a.alt[1] - a.alt[0]);
+      g.position.y = a.homeY + a.alt[0] + (Math.sin(t * 0.04 + a.phase) + 1) * 0.5 * (a.alt[1] - a.alt[0]);
       g.rotation.y = -a.soarA + (a.phase > 5 ? 0 : Math.PI);
       g.rotation.z = (a.phase > 5 ? -1 : 1) * 0.22;
       this.flap(a, t, 3, Math.sin(t * 0.11 + a.phase) > 0.9 ? 0.4 : 0.02);

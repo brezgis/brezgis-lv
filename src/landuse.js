@@ -16,6 +16,10 @@ import { RIVER, STREAM_CHANNELS, riverAt, streamAt, setPond } from './riverzone.
 import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, pointInPoly } from './util.js';
 
 const noise = makeNoise(4217);
+const ROAD_CELL = 48;
+const GRID_OFF = Math.ceil((HM_SPAN / 2 + Math.max(Math.abs(HM_OFF_X), Math.abs(HM_OFF_Z))) / ROAD_CELL) + 2;
+const GRID_W = GRID_OFF * 2 + 1;
+const gridKey = (ix, iz) => (ix + GRID_OFF) * GRID_W + iz + GRID_OFF;
 
 // --- coarse water-distance field (30 m cells) — makes distToRiver/streams O(1)
 const WD_RES = 30;
@@ -310,7 +314,7 @@ function fieldsIndexed(era) {
     const R = Math.max(fl.rx, fl.rz);
     for (let ix = Math.floor((fl.cx - R) / FIELD_CELL); ix <= Math.floor((fl.cx + R) / FIELD_CELL); ix++) {
       for (let iz = Math.floor((fl.cz - R) / FIELD_CELL); iz <= Math.floor((fl.cz + R) / FIELD_CELL); iz++) {
-        const k = ix + ':' + iz;
+        const k = gridKey(ix, iz);
         let arr = map.get(k);
         if (!arr) map.set(k, arr = []);
         arr.push(i);
@@ -360,7 +364,7 @@ function rawFieldsForEra(era) {
 }
 export function fieldAt(era, x, z) {
   const { fields, map } = fieldsIndexed(era);
-  const arr = map.get(Math.floor(x / FIELD_CELL) + ':' + Math.floor(z / FIELD_CELL));
+  const arr = map.get(gridKey(Math.floor(x / FIELD_CELL), Math.floor(z / FIELD_CELL)));
   if (!arr) return null;
   for (const i of arr) {
     const f = fields[i];
@@ -391,7 +395,6 @@ function osmRoadsFor(era) {
 
 // spatial grid over road segments — distToRoad runs in the hot placement
 // loops and the real network is ~1400 segments
-const ROAD_CELL = 48;
 const roadGrids = new Map();
 function roadGridFor(era) {
   let g = roadGrids.get(era);
@@ -410,7 +413,7 @@ function roadGridFor(era) {
       const z0 = Math.floor((Math.min(az, bz) - pad) / ROAD_CELL), z1 = Math.floor((Math.max(az, bz) + pad) / ROAD_CELL);
       for (let ix = x0; ix <= x1; ix++) {
         for (let iz = z0; iz <= z1; iz++) {
-          const k = ix + ':' + iz;
+          const k = gridKey(ix, iz);
           let a = map.get(k);
           if (!a) map.set(k, a = []);
           a.push(idx);
@@ -452,7 +455,7 @@ export function distToRoadEx(era, x, z) {
   let bd = Infinity, bc = 2;
   for (let ix = cix - 1; ix <= cix + 1; ix++) {
     for (let iz = ciz - 1; iz <= ciz + 1; iz++) {
-      const arr = map.get(ix + ':' + iz);
+      const arr = map.get(gridKey(ix, iz));
       if (!arr) continue;
       for (const si of arr) {
         const s = segs[si];

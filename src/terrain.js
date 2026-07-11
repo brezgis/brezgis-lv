@@ -440,6 +440,7 @@ export function buildTerrain() {
 // ---- per-era painting ------------------------------------------------------
 const c = new THREE.Color();
 let satMaterial = null, colorMaterial = null;
+const eraColorCache = [];
 export function paintEra(era) {
   if (!colorMaterial) colorMaterial = terrainMesh.material;
   // era 5: the real Sentinel-2 drape replaces painted colours entirely
@@ -457,6 +458,12 @@ export function paintEra(era) {
   terrainMesh.material = colorMaterial;
   const pos = terrainMesh.geometry.attributes.position;
   const col = terrainMesh.geometry.attributes.color;
+  const cached = eraColorCache[era];
+  if (cached) {
+    col.array.set(cached);
+    col.needsUpdate = true;
+    return;
+  }
 
   if (era === 0) {
     // Younger Dryas tundra: till, gravel, moss, dryas heath — no meadow green
@@ -505,6 +512,7 @@ export function paintEra(era) {
       r += high * 0.08; g += high * 0.07; b += high * 0.07;
       col.setXYZ(i, r, g, b);
     }
+    eraColorCache[era] = new Float32Array(col.array);
     col.needsUpdate = true;
     return;
   }
@@ -662,5 +670,6 @@ export function paintEra(era) {
 
     col.setXYZ(i, c.set(r, g, b).r, c.g, c.b);
   }
+  eraColorCache[era] = new Float32Array(col.array);
   col.needsUpdate = true;
 }

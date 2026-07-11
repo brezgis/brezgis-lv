@@ -159,8 +159,8 @@ export class Effects {
   }
 
   clearDynamic() {
-    for (const s of this.smokes) this.group.remove(s.pts);
-    for (const f of this.fires) { this.group.remove(f.light); this.group.remove(f.flame); }
+    for (const s of this.smokes) { this.group.remove(s.pts); s.pts.geometry.dispose(); s.pts.material.dispose(); }
+    for (const f of this.fires) { this.group.remove(f.light); this.group.remove(f.flame); f.flame.material.dispose(); }
     this.smokes = [];
     this.fires = [];
   }

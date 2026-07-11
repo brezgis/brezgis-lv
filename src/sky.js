@@ -15,7 +15,7 @@ const DAY_SECONDS = 900; // slow sun = smooth shadows; Rit still flows
 // ---- sun transmittance (drives the directional light colour) ---------------
 const Rp = 6371e3, Ra = 6451e3, Hr = 8500, Hm = 1400;
 const BR = [5.8e-6, 13.5e-6, 33.1e-6], BM = 8e-6;
-function sunTransmittanceJS(sunY) {
+function sunTransmittanceJS(sunY, out) {
   const sy = Math.max(sunY, -0.08), sxz = Math.sqrt(Math.max(0, 1 - sy * sy));
   const oy = Rp + 200;
   const b = oy * sy, c = oy * oy - Ra * Ra;
@@ -28,11 +28,10 @@ function sunTransmittanceJS(sunY) {
     odR += Math.exp(-h / Hr) * seg;
     odM += Math.exp(-h / Hm) * seg;
   }
-  return [
-    Math.exp(-(BR[0] * odR + BM * 1.1 * odM)),
-    Math.exp(-(BR[1] * odR + BM * 1.1 * odM)),
-    Math.exp(-(BR[2] * odR + BM * 1.1 * odM)),
-  ];
+  out[0] = Math.exp(-(BR[0] * odR + BM * 1.1 * odM));
+  out[1] = Math.exp(-(BR[1] * odR + BM * 1.1 * odM));
+  out[2] = Math.exp(-(BR[2] * odR + BM * 1.1 * odM));
+  return out;
 }
 
 // ---- shader cumulus ---------------------------------------------------------
@@ -298,6 +297,8 @@ export function buildSky(scene, renderer) {
   const state = { t: 0.3, hour: 4 + 0.3 * 19, sunLow: 0, paused: false, sunColor: new THREE.Color(), ambient: 0.8 };
   const fogSun = new THREE.Color();
   const _snapFocus = new THREE.Vector3();
+  const sd = new THREE.Vector3();
+  const tr = [0, 0, 0];
   const sunWorld = new THREE.Vector3();
   const qInv = new THREE.Quaternion();
   const sunLocal = new THREE.Vector3();
@@ -310,7 +311,7 @@ export function buildSky(scene, renderer) {
     // sharpened arc: real 57°N midsummer feel — long shallow evenings,
     // sun ~4° at 21:40, setting ~22:20, glow (not night) at the loop ends
     const el = Math.pow(Math.max(0, Math.sin(t * Math.PI)), 1.4) * 0.95 - 0.035;
-    const sd = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
+    sd.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
     sky.material.uniforms.sunPosition.value.copy(sd);
     state.sunLow = 1 - smoothstep(0.05, 0.28, el);
     // reposition the shadow rig ONLY on map-refresh frames: sampling a stale
@@ -329,7 +330,7 @@ export function buildSky(scene, renderer) {
     }
 
     // direct light: physically-reddened by transmittance
-    const tr = sunTransmittanceJS(sd.y);
+    sunTransmittanceJS(sd.y, tr);
     sun.color.setRGB(tr[0], tr[1], tr[2]);
     sun.intensity = 3.0 * clamp((sd.y + 0.03) / 0.1, 0, 1) * (0.4 + 0.6 * clamp(sd.y * 3 + 0.2, 0, 1));
     state.sunColor.copy(sun.color);

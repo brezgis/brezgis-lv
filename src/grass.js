@@ -237,6 +237,10 @@ export function buildGrass(scene) {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.instanceMatrix.onUpload(() => mesh.instanceMatrix.clearUpdateRanges());
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    mesh.instanceColor.onUpload(() => mesh.instanceColor.clearUpdateRanges());
     scene.add(mesh);
     return { ...b, mesh, cap, idx: i, lastX: 1e9, lastZ: 1e9, lastEra: -1, on: true, budget: 1, altK: 1 };
   });
@@ -448,16 +452,19 @@ export function buildGrass(scene) {
       if (job.i - startI >= maxInstances || cells >= maxCells) break;
     }
     const mesh = job.band.mesh;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    const count = job.i - startI;
+    if (count > 0) {
+      mesh.instanceMatrix.addUpdateRange(startI * 16, count * 16);
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.instanceColor.addUpdateRange(startI * 3, count * 3);
+      mesh.instanceColor.needsUpdate = true;
+    }
     return job.cursor >= job.cellsArr.length || job.i >= job.cap;
   }
 
   function finishBandJob(job) {
     const mesh = job.band.mesh;
     mesh.count = job.i;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   function regenerate(band, cx, cz, era) {

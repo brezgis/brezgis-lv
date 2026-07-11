@@ -18,7 +18,7 @@
 //  * No imports from landuse.js (landuse imports us); geodata + util only.
 import { RIVER_PTS, STREAMS, LAKES } from './geodata.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
-import { clamp, lerp, makeNoise, sampleSpline, pointInPoly, chaikinPoly, smoothstep } from './util.js';
+import { clamp, lerp, makeNoise, sampleSpline, sampleSplineEven, pointInPoly, chaikinPoly, smoothstep } from './util.js';
 
 // ---------------------------------------------------------------- lakes ----
 // Smoothed shores + bboxes. The prune grid marks each 8m cell as outside /
@@ -48,6 +48,7 @@ const LG_Z0 = lgMinZ - 2 * LG_RES;
 const LG_N = Math.ceil((Math.max(lgMaxX - lgMinX, lgMaxZ - lgMinZ) + 4 * LG_RES) / LG_RES);
 // 0 = open land, 1+k = interior of lake k, 101+k = shoreline cell of lake k
 const lgIdx = new Uint8Array(LG_N * LG_N);
+const lgEdge = new Uint8Array(LG_N * LG_N);
 (function rasterise() {
   LAKE_SHORES.forEach((lake, k) => {
     const { poly } = lake;
@@ -80,6 +81,8 @@ const lgIdx = new Uint8Array(LG_N * LG_N);
       const steps = Math.max(1, Math.ceil(Math.hypot(xj - xi, zj - zi) / (LG_RES * 0.5)));
       for (let s = 0; s <= steps; s++) {
         const x = xi + ((xj - xi) * s) / steps, z = zi + ((zj - zi) * s) / steps;
+        const egx = Math.round((x - LG_X0) / LG_RES), egz = Math.round((z - LG_Z0) / LG_RES);
+        if (egx >= 0 && egz >= 0 && egx < LG_N && egz < LG_N) lgEdge[egz * LG_N + egx] = 1;
         mark(Math.floor((x - LG_X0) / LG_RES), Math.floor((z - LG_Z0) / LG_RES));
       }
     }
@@ -94,7 +97,7 @@ const lgIdx = new Uint8Array(LG_N * LG_N);
 const lgDist = new Float32Array(LG_N * LG_N).fill(1e9);
 (function chamfer() {
   const N = LG_N;
-  for (let i = 0; i < N * N; i++) { if (lgIdx[i] > 100) lgDist[i] = 0; }
+  for (let i = 0; i < N * N; i++) { if (lgEdge[i]) lgDist[i] = 0; }
   // forward pass
   for (let gz = 0; gz < N; gz++) for (let gx = 0; gx < N; gx++) {
     const i = gz * N + gx;
@@ -164,6 +167,24 @@ function widthLaw(s, chan) {
   return clamp(chan.baseHW + swell + nibble, chan.minHW, chan.maxHW);
 }
 
+function evenSpline(pts, step, gap = step) {
+  const raw = sampleSplineEven(pts, step), out = [raw[0]];
+  let prev = raw[0], acc = gap * 0.5;
+  for (let i = 1; i < raw.length; i++) {
+    const p = raw[i];
+    let dl = Math.hypot(p[0] - prev[0], p[1] - prev[1]);
+    while (acc + dl >= gap) {
+      const u = (gap - acc) / dl;
+      prev = prev.map((v, k) => lerp(v, p[k], u));
+      out.push(prev); dl = Math.hypot(p[0] - prev[0], p[1] - prev[1]); acc = 0;
+    }
+    acc += dl; prev = p;
+  }
+  const last = raw[raw.length - 1], tail = out[out.length - 1];
+  if (Math.hypot(last[0] - tail[0], last[1] - tail[1]) > 1e-6) out.push(last);
+  return out;
+}
+
 // ------------------------------------------------------------- channels ----
 // samples: arrays [x, z, level, halfWidth] every ~4m of arc — array-shaped
 // on purpose so landuse's splat/bucket code digests them unchanged.
@@ -180,20 +201,22 @@ function buildChannel(pts, opts) {
   const arc = new Float32Array(PN + 1);
   let prev = sampleSpline(pts, 0), cum = 0;
   const STEP = 4;
-  let acc = 0;
-  chan.samples.push([prev[0], prev[1], prev[2], widthLaw(0, chan)]);
   for (let i = 1; i <= PN; i++) {
     const p = sampleSpline(pts, i / PN);
     const dl = Math.hypot(p[0] - prev[0], p[1] - prev[1]);
-    cum += dl; acc += dl;
+    cum += dl;
     arc[i] = cum;
-    if (acc >= STEP) {
-      chan.samples.push([p[0], p[1], p[2], widthLaw(cum, chan)]);
-      acc = 0;
-    }
     prev = p;
   }
-  chan.samples.push([prev[0], prev[1], prev[2], widthLaw(cum, chan)]);
+  const even = evenSpline(pts, STEP, opts.sampleGap || STEP);
+  cum = 0; prev = even[0];
+  chan.samples.push([prev[0], prev[1], prev[2], widthLaw(0, chan)]);
+  for (let i = 1; i < even.length; i++) {
+    const p = even[i];
+    cum += Math.hypot(p[0] - prev[0], p[1] - prev[1]);
+    chan.samples.push([p[0], p[1], p[2], widthLaw(cum, chan)]);
+    prev = p;
+  }
   chan.arc = arc;
   chan.length = cum;
   return chan;
@@ -201,7 +224,7 @@ function buildChannel(pts, opts) {
 
 export const RIVER = buildChannel(RIVER_PTS, {
   baseHW: 10.2, swellAmp: 3.4, swellL: 110, nibbleAmp: 1.0, nibbleL: 26,
-  minHW: 7.6, maxHW: 13.2, seedY: 3.7,
+  minHW: 7.6, maxHW: 13.2, seedY: 3.7, sampleGap: 5.6,
 });
 export const STREAM_CHANNELS = STREAMS.map((s, i) => buildChannel(s.pts, {
   baseHW: 2.1, swellAmp: 0.55, swellL: 60, nibbleAmp: 0.25, nibbleL: 14,
@@ -318,11 +341,14 @@ export function bankCharAt(x, z) {
 export function channelRows(chan, SEG) {
   const rows = [];
   const isStream = chan !== RIVER;
-  for (let i = 0; i <= SEG; i++) {
-    const t = i / SEG;
-    const [x, z, y] = sampleSpline(chan.pts, t);
-    const [xa, za] = sampleSpline(chan.pts, Math.max(0, t - 0.004));
-    const [x2, z2] = sampleSpline(chan.pts, Math.min(1, t + 0.004));
+  const step = Math.min(chan.length / SEG, 10);
+  const samples = evenSpline(chan.pts, step);
+  let s = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const [x, z, y] = samples[i];
+    const [xa, za] = samples[Math.max(0, i - 1)];
+    const [x2, z2] = samples[Math.min(samples.length - 1, i + 1)];
+    if (i) s += Math.hypot(x - samples[i - 1][0], z - samples[i - 1][1]);
     let dx = x2 - xa, dz = z2 - za;
     const len = Math.hypot(dx, dz) || 1;
     dx /= len; dz /= len;
@@ -336,7 +362,7 @@ export function channelRows(chan, SEG) {
       const rv = riverAt(x, z);
       if (rv && rv.d < rv.hw + 1.5) yRow = Math.min(yRow, rv.level - 0.3);
     }
-    rows.push({ x, z, y: yRow, dx, dz, hw: halfWidthAtT(chan, t), lake });
+    rows.push({ x, z, y: yRow, dx, dz, hw: widthLaw(s, chan), lake });
   }
   return rows;
 }

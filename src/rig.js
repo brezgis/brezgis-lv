@@ -55,6 +55,10 @@ export class Rig {
     this.keys = new Set();
     this.vel = new THREE.Vector3();
     this.basePos = new THREE.Vector3();
+    this._fwd = new THREE.Vector3();
+    this._right = new THREE.Vector3();
+    this._wish = new THREE.Vector3();
+    this._rot = new THREE.Euler(0, 0, 0, 'YXZ');
     this.velY = 0;
     this.grounded = false;
     this.stride = 0;
@@ -142,7 +146,7 @@ export class Rig {
 
   // read the current camera pose into the rig (after intro/preset moves)
   adoptCamera() {
-    const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+    const e = this._rot.setFromQuaternion(this.camera.quaternion, 'YXZ');
     this.yaw = this.yawT = e.y;
     this.pitch = this.pitchT = e.x;
     this.basePos.copy(this.camera.position);
@@ -183,9 +187,9 @@ export class Rig {
     this.yaw += (this.yawT - this.yaw) * lk;
     this.pitch += (this.pitchT - this.pitch) * lk;
 
-    const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
-    const wish = new THREE.Vector3();
+    const fwd = this._fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const right = this._right.set(-fwd.z, 0, fwd.x);
+    const wish = this._wish.set(0, 0, 0);
     if (this.keys.has('KeyW')) wish.add(fwd);
     if (this.keys.has('KeyS')) wish.sub(fwd);
     if (this.keys.has('KeyD')) wish.add(right);
@@ -214,7 +218,7 @@ export class Rig {
         }
       }
       this.camera.position.copy(this.basePos);
-      this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+      this.camera.quaternion.setFromEuler(this._rot.set(this.pitch, this.yaw, 0, 'YXZ'));
       return;
     }
 
@@ -265,7 +269,7 @@ export class Rig {
     this.camera.position.copy(this.basePos);
     this.camera.position.y += bobY;
     this.camera.position.addScaledVector(right, bobX);
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, Math.sin(this.stride) * 0.0032 * this.bobK, 'YXZ'));
+    this.camera.quaternion.setFromEuler(this._rot.set(this.pitch, this.yaw, Math.sin(this.stride) * 0.0032 * this.bobK, 'YXZ'));
   }
 }
 

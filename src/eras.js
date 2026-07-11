@@ -977,7 +977,7 @@ const LAKE_MAIN = (() => {
   return best;
 })();
 const inMainLake = (x, z) => pointInPoly(x, z, LAKE_MAIN.shore);
-const inRiver = (x, z) => distToRiver(x, z) < 7.2;
+const inRiver = (x, z) => { const rv = riverAt(x, z); return !!rv && rv.d < rv.hw; };
 const RIVER_REACH = (t) => {
   const i = Math.min(RIVER_PTS.length - 1, Math.round(RIVER_PTS.length * t));
   const p = RIVER_PTS[i];
@@ -1001,6 +1001,7 @@ function wildSpawns(era, spawns) {
     spawns.push(['arcticHare', 3, { x: S2.x - 200, z: S2.z + 250, r: 120 }, { ...HOP_HARE, hopLen: 1.5 }]);
     spawns.push(['arcticFox', 1, { x: S2.x + 100, z: S2.z - 300, r: 160 }, { speed: 1.1, grazeBias: 0.45 }]);
     spawns.push(['ptarmigan', 6, { x: S2.x - 320, z: S2.z + 60, r: 60 }]);
+    spawns.push(['swanWhooper', 2, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.04, inWater: inMainLake, speed: 0.4 }]);
     return;
   }
   // the river never emptied: fish, ducks, swans, frogs, dragonflies always

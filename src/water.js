@@ -31,14 +31,14 @@ function waterNormalTex() {
   return tex;
 }
 
-function makeWaterMaterial(color, opacity) {
+function makeWaterMaterial(color, opacity, normalMap) {
   const m = new THREE.MeshPhongMaterial({
     color,
     shininess: 190,
     specular: 0xb9c6d0,
     transparent: true,
     opacity,
-    normalMap: waterNormalTex(),
+    normalMap,
     normalScale: new THREE.Vector2(0.26, 0.26),
     side: THREE.DoubleSide, // river ribbons follow flow direction; don't let winding cull them
   });
@@ -151,10 +151,11 @@ export function buildWater() {
   const group = new THREE.Group();
   group.name = 'water';
   const mats = [];
+  const normalMap = waterNormalTex();
   let sandTex = null;                    // baked in the river-skirt block, reused by lake collars
 
   // --- lakes from OSM polygons
-  const lakeMat = makeWaterMaterial(0x2f4c58, 0.90);
+  const lakeMat = makeWaterMaterial(0x2f4c58, 0.90, normalMap);
   mats.push(lakeMat);
   // OSM lake outlines are sparse polygons — Chaikin-smooth the shoreline
   // or the basins read as blocky cut gems
@@ -174,7 +175,7 @@ export function buildWater() {
   }
 
   // --- the Gauja
-  const riverMat = makeWaterMaterial(0x2e4a55, 0.90);
+  const riverMat = makeWaterMaterial(0x2e4a55, 0.90, normalMap);
   mats.push(riverMat);
   // rim 0.35: the 0.5m dark wall showed through the transparent surface
   // from the far bank as a black outline around every reach
@@ -327,7 +328,7 @@ export function buildWater() {
   }
 
   // --- streams
-  const streamMat = makeWaterMaterial(0x314f58, 0.92);
+  const streamMat = makeWaterMaterial(0x314f58, 0.92, normalMap);
   mats.push(streamMat);
   for (let i = 0; i < STREAM_CHANNELS.length; i++) {
     const chan = STREAM_CHANNELS[i];
@@ -417,7 +418,7 @@ export function buildWater() {
   }
 
   // --- mill pond on the Gauja bend (added/removed by era manager; eras 2-3)
-  const pondMat = makeWaterMaterial(0x2f4e57, 0.94);
+  const pondMat = makeWaterMaterial(0x2f4e57, 0.94, normalMap);
   mats.push(pondMat);
   const pondGeo = new THREE.CircleGeometry(1, 28);
   pondGeo.rotateX(-Math.PI / 2);
@@ -426,6 +427,8 @@ export function buildWater() {
   const pondLevel = LOC.POND_LEVEL;
   pond.position.set(LOC.POND.x + 4, pondLevel, LOC.POND.z);
   pond.name = 'pond';
+  pond.visible = false;
+  group.add(pond);
 
   function tick(t) {
     for (const m of mats) {

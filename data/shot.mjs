@@ -11,7 +11,7 @@ try {
   await page.setViewport({ width: 1600, height: 1000 });
   page.on('console', (m) => console.log('[console]', m.type(), m.text().slice(0, 300)));
   page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 500)));
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await new Promise((r) => setTimeout(r, +wait));
   for (const act of actions.split(',').filter(Boolean)) {
     const [kind, arg] = act.split(':');

@@ -1,4 +1,4 @@
-You are an adversarial fauna validator for a Three.js heritage sim at /home/anna/projects/village (repo cwd). A new wildlife system just landed: ~20 species with era-gating and water/air/hop behaviours. Your job: find REAL defects — wrong habitat, wrong era, broken movement, floating/buried bodies, anachronisms.
+You are an adversarial fauna validator for a Three.js heritage sim at ~/projects/village (repo cwd). A new wildlife system just landed: ~20 species with era-gating and water/air/hop behaviours. Your job: find REAL defects — wrong habitat, wrong era, broken movement, floating/buried bodies, anachronisms.
 
 Evidence pack in research/audit-codex/fauna/ :
 - e{0,1,2,4,5}_probe.txt — each contains TWO `[fauna] [...]` JSON dumps taken ~8s apart (every animal's kind + x,y,z). Diff them to verify movement (land animals graze and may legitimately be still; air/fish should move).

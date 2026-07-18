@@ -1,4 +1,4 @@
-You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at /home/anna/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
+You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at ~/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
 
 Evidence: research/audit-codex/fauna/floor_e5.png (forest floor at Brežģa kalns), moles_e4.png (meadow). You have vision — LOOK at them. You can also run node (NOT Chrome) to validate placement code computationally, e.g. sample the same grid logic and check: molehills never on fields (fieldAt) or in water; mushrooms/anthills only under forest (forestDensity > 0.4); litter only under broadleaf stands; all objects y-anchored to heightAt (no floaters).
 

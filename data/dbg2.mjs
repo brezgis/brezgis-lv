@@ -28,7 +28,7 @@ try {
   page.on('console', (m) => {
     if (m.type() === 'error' || m.text().startsWith('[boot]')) console.log('[console]', m.text().slice(0, 300));
   });
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 90000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 90000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 60000 });
   await new Promise((r) => setTimeout(r, 2500));
   for (const step of script.split(';').filter(Boolean)) {

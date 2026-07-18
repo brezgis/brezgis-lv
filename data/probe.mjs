@@ -6,7 +6,7 @@ const browser = await puppeteer.launch({
 try {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 300)));
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
   const info = await page.evaluate(() => {
     const out = [];

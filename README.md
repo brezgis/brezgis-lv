@@ -1,19 +1,23 @@
 # Brezgi — a Latvian village through time
 
+![The ~AD 950 scene: a Latgalian farmstead on the Gauja terrace, with the era timeline below](docs/screenshot.png)
+
 An interactive Three.js reconstruction of the landscape around the Brezgi
 farmstead site in **Taurenes pagasts** (formerly Nēķenes pagasts / Nötkenshof),
-Vidzeme, Latvia — the same spot of earth shown at four moments in time:
+Vidzeme, Latvia — the same spot of earth shown at six moments in time:
 
 | Era | Scene |
 |---|---|
+| ~10,800 BC | Younger Dryas tundra, reindeer and melting dead ice |
 | ~AD 50 | Near-wilderness: aurochs grazing the Gauja terrace, a hunters' camp |
 | ~AD 950 | A Latgalian farmstead, modelled on the Āraiši lake-fortress evidence |
 | 1860 | The Brezgi viensēta under Nēķens manor |
 | 1935 | Taurene, independent Latvia — the manor is now the school |
+| 2025 | Satellite-mapped land cover, the Brežģa kalns tower and modern parish |
 
 ## Real geography
 
-- **Terrain**: real elevation model, 4.8 × 4.8 km centred on Taurene
+- **Terrain**: real elevation model, 8.8 × 8.8 km covering Taurene and Brezģis
   (57.15944 N, 25.66472 E), from AWS Open Data terrain tiles → `data/fetch-terrain.mjs`
 - **Water**: the actual mapped course of the Gauja, the outline of Taurenes
   ezers, and the Dzērbe stream, from OpenStreetMap → `data/bake-geodata.mjs`
@@ -29,7 +33,9 @@ node data/bake-geodata.mjs     # (optional) re-bake river/lake geometry
 node build.mjs                 # bundle -> artifact/brezgi-taurene.html
 ```
 
-Open `artifact/brezgi-taurene.html` in a browser.
+Open `artifact/brezgi-taurene.html` straight from disk (everything is inlined
+into that one file), or run `node serve.mjs` and visit
+`http://localhost:4119`.
 
 **Controls**: drag to look, scroll to zoom. Press **WASD or the arrow keys**
 to start walking (Shift sprints, Space jumps, V toggles flight, O returns to
@@ -79,3 +85,7 @@ on `window.__sim`.)
 
 Cited research notes live in `research/`; the interpretive write-up with
 sources is `WRITEUP.md` and is embedded in the app under **Chronicle & sources**.
+
+## License
+
+[MIT](LICENSE).

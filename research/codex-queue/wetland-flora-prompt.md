@@ -1,5 +1,5 @@
 # QUEUED codex job (OpenAI credits ran dry Jul 9 ~23:00; reset Jul 10 1:15 AM)
-# Launch with:  codex exec --full-auto -C /home/anna/projects/village "$(cat research/codex-queue/wetland-flora-prompt.md)"
+# Launch with:  codex exec --full-auto -C ~/projects/village "$(cat research/codex-queue/wetland-flora-prompt.md)"
 # Scope: src/vegetation.js ONLY (phase 1 of the original prompt — the settlement
 # registry — was hand-implemented in src/footprints.js; the green-stick shrub and
 # square litter fixes are also already done). Only the flora suite remains:
@@ -58,4 +58,4 @@ sprinkle. Follow the reed pass's structure and register meshes the same way.
      LOC.CHURCH.z, 0)` → true.
    - flora placement replica: counts within caps; every cattail's ground below its water
      level + 0.35; every sedge/iris above water − 0.05; zero flora inside `buildingAt`.
-Report → `/tmp/claude-1002/-home-anna-projects-village/671efde6-07a1-41ec-96c2-3335fd16cd54/scratchpad/codex-settle.md`.
+Report → `/tmp/village-scratch/codex-settle.md`.

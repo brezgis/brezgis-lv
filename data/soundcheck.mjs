@@ -7,7 +7,7 @@ try {
   const page = await browser.newPage();
   let errs = 0;
   page.on('pageerror', (e) => { errs++; console.log('[pageerror]', e.message.slice(0, 300)); });
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
   await page.evaluate(() => document.getElementById('sound-btn').click());
   await new Promise((r) => setTimeout(r, 2500));

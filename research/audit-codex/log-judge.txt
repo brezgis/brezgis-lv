@@ -2,7 +2,7 @@ warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.
 Reading additional input from stdin...
 OpenAI Codex v0.139.0
 --------
-workdir: /home/anna/projects/village
+workdir: ~/projects/village
 model: gpt-5.5
 provider: openai
 approval: never
@@ -20,9 +20,9 @@ I’ll validate this from the actual repo state: first I’m reading the finding
   • Run motion and code-fix verification
   • Write final verdict JSON
 exec
-/bin/bash -lc "sed -n '1,240p' research/audit-codex/findings-fauna.json" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,240p' research/audit-codex/findings-fauna.json" in ~/projects/village
 exec
-/bin/bash -lc 'rg --files research/audit-codex | sort' in /home/anna/projects/village
+/bin/bash -lc 'rg --files research/audit-codex | sort' in ~/projects/village
  succeeded in 0ms:
 {
   "findings": [
@@ -119,10 +119,10 @@ research/audit-codex/uncertain.json
 research/audit-codex/verdicts.json
 
 exec
-/bin/bash -lc 'git status --short' in /home/anna/projects/village
+/bin/bash -lc 'git status --short' in ~/projects/village
  succeeded in 0ms:
 exec
-/bin/bash -lc "sed -n '1,240p' research/audit-codex/findings-detail.json" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,240p' research/audit-codex/findings-detail.json" in ~/projects/village
  succeeded in 0ms:
 {
   "findings": [
@@ -197,7 +197,7 @@ The still screenshots look broadly consistent with the requested fixes, but a fe
   → Run motion and code-fix verification
   • Write final verdict JSON
 exec
-/bin/bash -lc "sed -n '360,590p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '360,590p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
       kind: 'needleSpray', scale: [0.3, 0.42],
       leaf: { len: 0.4, width: 0.05, shapePow: 1, fold: 0, curl: 0, needleCount: 40, brush: 0 },
@@ -432,7 +432,7 @@ exec
           // each child mound revalidates — a 3m offset crossed into fields,
 
 exec
-/bin/bash -lc "sed -n '600,820p' src/animals.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '600,820p' src/animals.js" in ~/projects/village
  succeeded in 0ms:
       ...a, kind, home, medium,
       speed: opts.speed ?? (kind.startsWith('chicken') || kind === 'rooster' ? 0.8 : kind === 'goose' ? 0.7 : 0.55),
@@ -657,7 +657,7 @@ exec
           g.rotation.y = a.heading;
 
 exec
-/bin/bash -lc 'node data/faunatest.mjs' in /home/anna/projects/village
+/bin/bash -lc 'node data/faunatest.mjs' in ~/projects/village
  succeeded in 480ms:
 PASS fishPerch    moved 20.3m over 40s (need ≥3)
 PASS duckM        moved 10.7m over 40s (need ≥3)
@@ -673,7 +673,7 @@ PASS wolf         moved 24.2m over 40s (need ≥4)
 ALL PASS
 
 exec
-/bin/bash -lc "sed -n '720,770p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '720,770p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
         const widen = Math.min(1.3, Math.sqrt(stride)) * (era <= 2 ? 1.18 : 1);
         const fp = { entries: new Array(n), byCell: new Map(), widen };
@@ -728,7 +728,7 @@ exec
         dummy.updateMatrix();
 
 exec
-/bin/bash -lc "sed -n '548,590p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '548,590p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
           if (rng() < 0.05) {
             const mx = x + (rng() - 0.5) * 9, mz = z + (rng() - 0.5) * 9;
@@ -775,7 +775,7 @@ exec
           // each child mound revalidates — a 3m offset crossed into fields,
 
 exec
-/bin/bash -lc "sed -n '590,630p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '590,630p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
           // each child mound revalidates — a 3m offset crossed into fields,
           // lake shores and the river bank from a valid seed
@@ -854,7 +854,7 @@ const moleEnd = veg.indexOf('lists.molehill.push', moleStart);
 const moleBlock = veg.slice(moleStart, moleEnd);
 requireCheck('molehill child validation', moleStart >= 0 && moleEnd > moleStart && /forestDensity/.test(moleBlock) && /distToRiver/.test(moleBlock) && /fieldAt/.test(moleBlock) && /LAKE_SHORES/.test(moleBlock) && /pointInPoly/.test(moleBlock), 'per-child forest/water/field checks missing');
 if (process.exitCode) process.exit(process.exitCode);
-NODE" in /home/anna/projects/village
+NODE" in ~/projects/village
  succeeded in 0ms:
 PASS animals distance cull block found
 PASS animals cull has no continue
@@ -871,7 +871,7 @@ PASS molehill child validation
 codex
 The structural Node check confirms the requested edits are present: micro prop pushes are now guarded by `okMicro`, and molehill children re-check final coordinates for meadow, river/field, and lake conditions before being added. Next I’m checking whether any of that still leaves visible or code-level residual issues for the verdict file.
 exec
-/bin/bash -lc "rg -n \"function forestDensity|const forestDensity|export function forestDensity|LAKE_SHORES|POND_LEVEL|pointInPoly|fieldAt|distToRiver|riverLevelNear\" src data -g '*.js' -g '*.mjs'" in /home/anna/projects/village
+/bin/bash -lc "rg -n \"function forestDensity|const forestDensity|export function forestDensity|LAKE_SHORES|POND_LEVEL|pointInPoly|fieldAt|distToRiver|riverLevelNear\" src data -g '*.js' -g '*.mjs'" in ~/projects/village
  succeeded in 0ms:
 src/water.js:315:  const pondLevel = LOC.POND_LEVEL;
 data/faunatest.mjs:5:import { distToRiver, LOC } from '../src/landuse.js';
@@ -947,7 +947,7 @@ src/landuse.js:479:  const dRiver = distToRiver(x, z);
 src/landuse.js:514:  if (fieldAt(era, x, z)) return 0;
 
 exec
-/bin/bash -lc "sed -n '1,220p' data/faunatest.mjs" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' data/faunatest.mjs" in ~/projects/village
  succeeded in 0ms:
 // Fauna behaviour test: ticks AnimalManager directly (no renderer, no rAF —
 // headless Chrome throttles rAF so screenshot probes cannot observe motion).
@@ -1028,7 +1028,7 @@ console.log(moveFails + habitatFails === 0 ? 'ALL PASS' : `FAILURES: ${moveFails
 process.exit(moveFails + habitatFails === 0 ? 0 : 1);
 
 exec
-/bin/bash -lc "sed -n '1,160p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,160p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
 // Vegetation: LAAS-pipeline trees (real branched bark tubes + captured
 // twig-atlas cluster cards) in two tiers — FULL (bark+cards, casts shadow)
@@ -1192,7 +1192,7 @@ function barkTex(kind) {
       }
 
 exec
-/bin/bash -lc "sed -n '1,220p' src/terrain.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' src/terrain.js" in ~/projects/village
  succeeded in 0ms:
 // Terrain: real Taurene DEM -> carved, painted, walkable ground.
 // The height field is shared by every era (the land itself is the constant);
@@ -1416,7 +1416,7 @@ export function slopeAt(x, z) {
 }
 
 exec
-/bin/bash -lc "sed -n '450,525p' src/landuse.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '450,525p' src/landuse.js" in ~/projects/village
  succeeded in 0ms:
     for (let iz = ciz - 1; iz <= ciz + 1; iz++) {
       const arr = map.get(ix + ':' + iz);
@@ -1496,7 +1496,7 @@ export const FIELD_COLORS = {
   barley: [0.46, 0.53, 0.27],
 
 exec
-/bin/bash -lc "sed -n '800,910p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '800,910p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
         dummy.updateMatrix();
         mesh.setMatrixAt(n++, dummy.matrix);
@@ -1611,7 +1611,7 @@ exec
           // reeds hug the waterline — spread across the floodplain they read
 
 exec
-/bin/bash -lc "rg -n \"okMicro|molehill|shroomB|litter|anthill|placementsFor|microProps\" research src data -g '*.js' -g '*.mjs' -g '*.txt'" in /home/anna/projects/village
+/bin/bash -lc "rg -n \"okMicro|molehill|shroomB|litter|anthill|placementsFor|microProps\" research src data -g '*.js' -g '*.mjs' -g '*.txt'" in ~/projects/village
  succeeded in 0ms:
 src/vegetation.js:389:  const anthillGeo = new THREE.SphereGeometry(1, 9, 6);
 src/vegetation.js:390:  anthillGeo.scale(0.75, 0.6, 0.75);
@@ -1658,7 +1658,7 @@ research/audit-codex/log-movement.txt:3711:  "evidence": "placementsFor builds f
 research/audit-codex/log-movement.txt:3712:  "fix_hint": "Make far-tier truncation spatially unbiased: if arr.length > cap, stride-subsample (keep every arr.length/cap-th entry) or sort by distance to the POI set before truncating; alternatively scale the keep-probability in placementsFor by cap/expected per species, or raise CAPS for eras 1-2 densities.",
 research/audit-codex/log-movement.txt:3715:  "why": "Every element of the finding checks out against the current code and a fresh runtime probe. (1) Code: src/vegetation.js placementsFor fills far lists by scanning the 9m grid with iz ascending = z ascending, i.e. south-to-north (lines 369-372, z range [-2640,6040] from HM_SPAN=8800/HM_OFF_Z=1700), and setEra truncates to the first n=Math.min(arr.length, farM.instanceMatrix.count) entries (line 528) with no stride-subsample or spatial sort \u2014 unlike grass.js:287-299 which deliberately sorts centre-out so overflow drops the rim, never one side. (2) Runtime: my independent puppeteer probe on artifact/brezgi-taurene.html reproduced the reviewer's numbers exactly \u2014 era 1 far meshes saturated at cap (spruce 175000, pine 125000, birch 150000, oak 42000) with max placed z of 4352/3775/4072/1846 respectively; era 2 cutoffs 4982/4406/4902/2215; Bre\u017e\u0123a kalns is at z=4969 and Krogs at z=5270, so both lie beyond most cutoffs. Eras 3/4 do not saturate and their far placements reach z=6040, confirming the paradox that agrarian eras show more northern forest than the primeval eras. (3) Visual: my own fresh screenshots (verify-north-era1.png vs verify-north-era3.png, cam 1728,1100,3500 toward the hill, fog disabled) show era 1's north as bare meadow with exactly two isolated FULL_R=260m full-detail tree discs around the BREZGA and KROGS POIs, while era 3 from the identical viewpoint is visibly more forested. Severity high is fair: the flagship primeval era silently deforests roughly the northern third of the map including the two family-heritage POIs the sim is named for."
 research/audit-codex/log-movement.txt:3835:  "why": "Independently reproduced the defect two ways. (1) Code replication: ran vegetation.js placementsFor(era=1) verbatim in Node against the real terrain/landuse modules; far-tier lists overflow the CAPS (vegetation.js:221-225) \u2014 spruce 222,717/175,000, pine 173,577/125,000, birch 191,126/150,000, oak 85,391/42,000 \u2014 and setEra's truncation (vegetation.js:528, n=Math.min(arr.length, cap)) drops the tail of a z-ascending grid scan (vegetation.js:369-372), so max placed z = spruce 4352 / pine 3775 / birch 4072 / oak 1846 on a map spanning z=-2640..6040 \u2014 matching the original reviewer's numbers digit-for-digit. Probes: (1728,4600) 699 far trees generated, 0 placed; (1728,5500) 741 generated, 0 placed; BREZGA (1728,4969) and KROGS (2320,5270) sit inside the dropped block with only their 260 m full-detail rings. (2) Own screenshot (scratchpad/audit/vf_brezga_south.png, era 1 looking south from above Bre\u017e\u0123a kalns): two isolated tree patches at the POIs and bare plain to the horizon, while landuse.js:421 intends near-closed canopy (d=0.68+0.4*n) and the on-screen story panel describes heavy mixed forest. Only nitpick: the truncation is in setEra, not fillTier as cited \u2014 substance unaffected."
-research/audit-codex/log-movement.txt:3901:  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/claude-1002/-home-anna-projects-village/8ce52bd6-2012-41d8-9a38-2c512e1e1885/scratchpad/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
+research/audit-codex/log-movement.txt:3901:  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/village-scratch/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
 research/audit-codex/log-judge.txt:15:You are the final JUDGE for the fauna+detail validation loop in this repo. Fixes were applied for all findings in research/audit-codex/findings-fauna.json and findings-detail.json. Round-2 evidence: research/audit-codex/fauna/r2_*.png (VIEW them — pond ducks, lake swans, butterfly meadow, river motion, molehill lake/field spots, forest props, bolete macro, litter slope). Movement is validated by 'node data/faunatest.mjs' (RUN it yourself — ticks the AnimalManager 40 sim-seconds; screenshot probes cannot observe motion because headless Chrome throttles rAF). Also verify with node that the code fixes landed: src/animals.js distance cull no longer skips simulation (no 'continue' after visibility set), flutter has guaranteed drift; src/vegetation.js has okMicro final-position gate + per-child molehill validation. Write research/audit-codex/verdicts-round2.json: [{"finding":"<title>","verdict":"FIXED|NOT-FIXED|PARTIAL","reason":"..."}] covering all 6 findings from both files, plus a "new_issues" array for anything you see in the r2 shots that is broken (empty if clean). Print DONE.
 research/audit-codex/log-judge.txt:93:research/audit-codex/fauna/r2_litter_slope_e1.png
 research/audit-codex/log-judge.txt:94:research/audit-codex/fauna/r2_molehill_field_e3.png
@@ -1754,19 +1754,19 @@ research/audit-codex/log-verify.txt:3262:function placementsFor(era){
 research/audit-codex/log-verify.txt:3311: const lists=placementsFor(era);
 research/audit-codex/log-verify.txt:3610:function placementsFor(era){
 research/audit-codex/log-verify.txt:3642:for(const era of [1,5]){ const lists=placementsFor(era); console.log('ERA',era); for(const k of ['spruce','pine','birch','oak','alder','linden','apple','shrub','snag']){ const full=lists[k].full.length, far=lists[k].far.length, drop=Math.max(0,far-CAPS[k][1]); if(full||far||drop){ const dropped=drop?lists[k].far.slice(CAPS[k][1]):[]; const zmin=dropped.length?Math.min(...dropped.map(a=>a[2])):null; const zmax=dropped.length?Math.max(...dropped.map(a=>a[2])):null; console.log(k,{full,far,drop,zmin:zmin&&+zmin.toFixed(1),zmax:zmax&&+zmax.toFixed(1)}); }} let inN=0,outN=0,inArea=0,outArea=0; for(const p of POIS){ for(const k of SP_KEYS){ for(const a of lists[k].full.concat(lists[k].far)){ const d=Math.hypot(a[0]-p.x,a[2]-p.z); if(d>=220&&d<260) inN++; if(d>=260&&d<300) outN++; }} inArea+=Math.PI*(260*260-220*220); outArea+=Math.PI*(300*300-260*260);} console.log('annulus',{inN,outN,inPerHa:+(inN/inArea*10000).toFixed(1),outPerHa:+(outN/outArea*10000).toFixed(1)}); console.log('full selected',Object.fromEntries(['spruce','pine','birch','oak'].map(k=>[k,lists[k].full.length]))); }
-research/audit-codex/log-detail.txt:15:You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at /home/anna/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
+research/audit-codex/log-detail.txt:15:You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at ~/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
 research/audit-codex/log-detail.txt:17:Evidence: research/audit-codex/fauna/floor_e5.png (forest floor at Brežģa kalns), moles_e4.png (meadow). You have vision — LOOK at them. You can also run node (NOT Chrome) to validate placement code computationally, e.g. sample the same grid logic and check: molehills never on fields (fieldAt) or in water; mushrooms/anthills only under forest (forestDensity > 0.4); litter only under broadleaf stands; all objects y-anchored to heightAt (no floaters).
-research/audit-codex/log-detail.txt:31:/bin/bash -lc 'rg -n "still life|molehill|placementsFor|microProps|fieldAt|forestDensity|heightAt|grass.js|draw order|draw-order|draw" src research/audit-codex -S' in /home/anna/projects/village
-research/audit-codex/log-detail.txt:43:research/audit-codex/prompt-detail.md:1:You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at /home/anna/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
+research/audit-codex/log-detail.txt:31:/bin/bash -lc 'rg -n "still life|molehill|placementsFor|microProps|fieldAt|forestDensity|heightAt|grass.js|draw order|draw-order|draw" src research/audit-codex -S' in ~/projects/village
+research/audit-codex/log-detail.txt:43:research/audit-codex/prompt-detail.md:1:You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at ~/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
 research/audit-codex/log-detail.txt:44:research/audit-codex/prompt-detail.md:3:Evidence: research/audit-codex/fauna/floor_e5.png (forest floor at Brežģa kalns), moles_e4.png (meadow). You have vision — LOOK at them. You can also run node (NOT Chrome) to validate placement code computationally, e.g. sample the same grid logic and check: molehills never on fields (fieldAt) or in water; mushrooms/anthills only under forest (forestDensity > 0.4); litter only under broadleaf stands; all objects y-anchored to heightAt (no floaters).
-research/audit-codex/log-detail.txt:85:research/audit-codex/log-detail.txt:15:You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at /home/anna/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
+research/audit-codex/log-detail.txt:85:research/audit-codex/log-detail.txt:15:You are an adversarial reviewer of the new forest-floor "still life" layer in the Three.js sim at ~/projects/village: ant mounds, molehills, chanterelle/boletus mushrooms, fallen cones, twigs, leaf litter (src/vegetation.js — search for "still life" and "molehill"). Placement rules live in placementsFor; instancing/fill near "microProps".
 research/audit-codex/log-detail.txt:86:research/audit-codex/log-detail.txt:17:Evidence: research/audit-codex/fauna/floor_e5.png (forest floor at Brežģa kalns), moles_e4.png (meadow). You have vision — LOOK at them. You can also run node (NOT Chrome) to validate placement code computationally, e.g. sample the same grid logic and check: molehills never on fields (fieldAt) or in water; mushrooms/anthills only under forest (forestDensity > 0.4); litter only under broadleaf stands; all objects y-anchored to heightAt (no floaters).
 research/audit-codex/log-detail.txt:88:research/audit-codex/confirmed.json:4:  "area": "src/vegetation.js \u2014 far tier fill (setEra) + placementsFor grid",
 research/audit-codex/log-detail.txt:89:research/audit-codex/confirmed.json:6:  "evidence": "placementsFor builds far lists by scanning the 9m grid south-to-north (vegetation.js:369-372), and setEra keeps only the first `n = Math.min(arr.length, farM.instanceMatrix.count)` entries (vegetation.js:528) \u2014 no centre-out sort like grass.js uses. Runtime probe on the built artifact (artifact/brezgi-taurene.html via window.__scene): era 1 far meshes ALL saturated at cap \u2014 spruce 175000/175000, pine 125000/125000, birch 150000/150000, oak 42000/42000 \u2014 with the last-filled instance at z=4345/3775/4072/1846 respectively while the map spans to z=6040 (Bre\u017e\u0123a kalns z=4969, Krogs z=5270). Era 2 same, cutoffs 4982/4399/4894/2215. Screenshots (scratchpad/audit/brezga-north-era1.png, brezga-north-era2.png, era 1 nofog from (1728,1100,3700) toward Bre\u017e\u0123a kalns): the 'near-closed-canopy primeval forest' era shows bare meadow with exactly two isolated 260m tree discs \u2014 the FULL_R full-detail circles around the BREZGA and KROGS POIs whose lists don't overflow \u2014 because every far impostor north of the cutoff was silently dropped. Paradoxically eras 3/4 (agrarian) have MORE forest around Bre\u017e\u0123a kalns than AD 50.",
 research/audit-codex/log-detail.txt:90:research/audit-codex/confirmed.json:7:  "fix_hint": "Make far-tier truncation spatially unbiased: if arr.length > cap, stride-subsample (keep every arr.length/cap-th entry) or sort by distance to the POI set before truncating; alternatively scale the keep-probability in placementsFor by cap/expected per species, or raise CAPS for eras 1-2 densities.",
 research/audit-codex/log-detail.txt:91:research/audit-codex/confirmed.json:10:  "why": "Every element of the finding checks out against the current code and a fresh runtime probe. (1) Code: src/vegetation.js placementsFor fills far lists by scanning the 9m grid with iz ascending = z ascending, i.e. south-to-north (lines 369-372, z range [-2640,6040] from HM_SPAN=8800/HM_OFF_Z=1700), and setEra truncates to the first n=Math.min(arr.length, farM.instanceMatrix.count) entries (line 528) with no stride-subsample or spatial sort \u2014 unlike grass.js:287-299 which deliberately sorts centre-out so overflow drops the rim, never one side. (2) Runtime: my independent puppeteer probe on artifact/brezgi-taurene.html reproduced the reviewer's numbers exactly \u2014 era 1 far meshes saturated at cap (spruce 175000, pine 125000, birch 150000, oak 42000) with max placed z of 4352/3775/4072/1846 respectively; era 2 cutoffs 4982/4406/4902/2215; Bre\u017e\u0123a kalns is at z=4969 and Krogs at z=5270, so both lie beyond most cutoffs. Eras 3/4 do not saturate and their far placements reach z=6040, confirming the paradox that agrarian eras show more northern forest than the primeval eras. (3) Visual: my own fresh screenshots (verify-north-era1.png vs verify-north-era3.png, cam 1728,1100,3500 toward the hill, fog disabled) show era 1's north as bare meadow with exactly two isolated FULL_R=260m full-detail tree discs around the BREZGA and KROGS POIs, while era 3 from the identical viewpoint is visibly more forested. Severity high is fair: the flagship primeval era silently deforests roughly the northern third of the map including the two family-heritage POIs the sim is named for."
 research/audit-codex/log-detail.txt:116:research/audit-codex/confirmed.json:130:  "why": "Independently reproduced the defect two ways. (1) Code replication: ran vegetation.js placementsFor(era=1) verbatim in Node against the real terrain/landuse modules; far-tier lists overflow the CAPS (vegetation.js:221-225) \u2014 spruce 222,717/175,000, pine 173,577/125,000, birch 191,126/150,000, oak 85,391/42,000 \u2014 and setEra's truncation (vegetation.js:528, n=Math.min(arr.length, cap)) drops the tail of a z-ascending grid scan (vegetation.js:369-372), so max placed z = spruce 4352 / pine 3775 / birch 4072 / oak 1846 on a map spanning z=-2640..6040 \u2014 matching the original reviewer's numbers digit-for-digit. Probes: (1728,4600) 699 far trees generated, 0 placed; (1728,5500) 741 generated, 0 placed; BREZGA (1728,4969) and KROGS (2320,5270) sit inside the dropped block with only their 260 m full-detail rings. (2) Own screenshot (scratchpad/audit/vf_brezga_south.png, era 1 looking south from above Bre\u017e\u0123a kalns): two isolated tree patches at the POIs and bare plain to the horizon, while landuse.js:421 intends near-closed canopy (d=0.68+0.4*n) and the on-screen story panel describes heavy mixed forest. Only nitpick: the truncation is in setEra, not fillTier as cited \u2014 substance unaffected."
-research/audit-codex/log-detail.txt:119:research/audit-codex/confirmed.json:196:  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/claude-1002/-home-anna-projects-village/8ce52bd6-2012-41d8-9a38-2c512e1e1885/scratchpad/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
+research/audit-codex/log-detail.txt:119:research/audit-codex/confirmed.json:196:  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/village-scratch/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
 research/audit-codex/log-detail.txt:182:src/vegetation.js:392:  const molehillGeo = new THREE.SphereGeometry(1, 7, 5);
 research/audit-codex/log-detail.txt:183:src/vegetation.js:393:  molehillGeo.scale(0.24, 0.13, 0.24);
 research/audit-codex/log-detail.txt:184:src/vegetation.js:394:  const molehills = makeInstanced(molehillGeo, plainM(0x41321f), 1400, false);
@@ -1791,7 +1791,7 @@ research/audit-codex/log-detail.txt:284:research/audit-codex/log-movement.txt:37
 research/audit-codex/log-detail.txt:285:research/audit-codex/log-movement.txt:3712:  "fix_hint": "Make far-tier truncation spatially unbiased: if arr.length > cap, stride-subsample (keep every arr.length/cap-th entry) or sort by distance to the POI set before truncating; alternatively scale the keep-probability in placementsFor by cap/expected per species, or raise CAPS for eras 1-2 densities.",
 research/audit-codex/log-detail.txt:286:research/audit-codex/log-movement.txt:3715:  "why": "Every element of the finding checks out against the current code and a fresh runtime probe. (1) Code: src/vegetation.js placementsFor fills far lists by scanning the 9m grid with iz ascending = z ascending, i.e. south-to-north (lines 369-372, z range [-2640,6040] from HM_SPAN=8800/HM_OFF_Z=1700), and setEra truncates to the first n=Math.min(arr.length, farM.instanceMatrix.count) entries (line 528) with no stride-subsample or spatial sort \u2014 unlike grass.js:287-299 which deliberately sorts centre-out so overflow drops the rim, never one side. (2) Runtime: my independent puppeteer probe on artifact/brezgi-taurene.html reproduced the reviewer's numbers exactly \u2014 era 1 far meshes saturated at cap (spruce 175000, pine 125000, birch 150000, oak 42000) with max placed z of 4352/3775/4072/1846 respectively; era 2 cutoffs 4982/4406/4902/2215; Bre\u017e\u0123a kalns is at z=4969 and Krogs at z=5270, so both lie beyond most cutoffs. Eras 3/4 do not saturate and their far placements reach z=6040, confirming the paradox that agrarian eras show more northern forest than the primeval eras. (3) Visual: my own fresh screenshots (verify-north-era1.png vs verify-north-era3.png, cam 1728,1100,3500 toward the hill, fog disabled) show era 1's north as bare meadow with exactly two isolated FULL_R=260m full-detail tree discs around the BREZGA and KROGS POIs, while era 3 from the identical viewpoint is visibly more forested. Severity high is fair: the flagship primeval era silently deforests roughly the northern third of the map including the two family-heritage POIs the sim is named for."
 research/audit-codex/log-detail.txt:311:research/audit-codex/log-movement.txt:3835:  "why": "Independently reproduced the defect two ways. (1) Code replication: ran vegetation.js placementsFor(era=1) verbatim in Node against the real terrain/landuse modules; far-tier lists overflow the CAPS (vegetation.js:221-225) \u2014 spruce 222,717/175,000, pine 173,577/125,000, birch 191,126/150,000, oak 85,391/42,000 \u2014 and setEra's truncation (vegetation.js:528, n=Math.min(arr.length, cap)) drops the tail of a z-ascending grid scan (vegetation.js:369-372), so max placed z = spruce 4352 / pine 3775 / birch 4072 / oak 1846 on a map spanning z=-2640..6040 \u2014 matching the original reviewer's numbers digit-for-digit. Probes: (1728,4600) 699 far trees generated, 0 placed; (1728,5500) 741 generated, 0 placed; BREZGA (1728,4969) and KROGS (2320,5270) sit inside the dropped block with only their 260 m full-detail rings. (2) Own screenshot (scratchpad/audit/vf_brezga_south.png, era 1 looking south from above Bre\u017e\u0123a kalns): two isolated tree patches at the POIs and bare plain to the horizon, while landuse.js:421 intends near-closed canopy (d=0.68+0.4*n) and the on-screen story panel describes heavy mixed forest. Only nitpick: the truncation is in setEra, not fillTier as cited \u2014 substance unaffected."
-research/audit-codex/log-detail.txt:314:research/audit-codex/log-movement.txt:3901:  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/claude-1002/-home-anna-projects-village/8ce52bd6-2012-41d8-9a38-2c512e1e1885/scratchpad/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
+research/audit-codex/log-detail.txt:314:research/audit-codex/log-movement.txt:3901:  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/village-scratch/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
 research/audit-codex/log-detail.txt:321:research/audit-codex/log-verify.txt:706:   359	  function placementsFor(era) {
 research/audit-codex/log-detail.txt:335:research/audit-codex/log-verify.txt:869:   522	    const lists = placementsFor(era);
 research/audit-codex/log-detail.txt:370:research/audit-codex/log-verify.txt:3262:function placementsFor(era){
@@ -1962,7 +1962,7 @@ research/audit-codex/log-river.txt:2576:   757	    const lists = placementsFor(e
 research/audit-codex/log-river.txt:2947:research/audit-codex/confirmed.json:130:  "why": "Independently reproduced the defect two ways. (1) Code replication: ran vegetation.js placementsFor(era=1) verbatim in Node against the real terrain/landuse modules; far-tier lists overflow the CAPS (vegetation.js:221-225) \u2014 spruce 222,717/175,000, pine 173,577/125,000, birch 191,126/150,000, oak 85,391/42,000 \u2014 and setEra's truncation (vegetation.js:528, n=Math.min(arr.length, cap)) drops the tail of a z-ascending grid scan (vegetation.js:369-372), so max placed z = spruce 4352 / pine 3775 / birch 4072 / oak 1846 on a map spanning z=-2640..6040 \u2014 matching the original reviewer's numbers digit-for-digit. Probes: (1728,4600) 699 far trees generated, 0 placed; (1728,5500) 741 generated, 0 placed; BREZGA (1728,4969) and KROGS (2320,5270) sit inside the dropped block with only their 260 m full-detail rings. (2) Own screenshot (scratchpad/audit/vf_brezga_south.png, era 1 looking south from above Bre\u017e\u0123a kalns): two isolated tree patches at the POIs and bare plain to the horizon, while landuse.js:421 intends near-closed canopy (d=0.68+0.4*n) and the on-screen story panel describes heavy mixed forest. Only nitpick: the truncation is in setEra, not fillTier as cited \u2014 substance unaffected."
 
 exec
-/bin/bash -lc "sed -n '910,950p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '910,950p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
           // reeds hug the waterline — spread across the floodplain they read
           // as dark shadowy clumps littering the meadow
@@ -2007,7 +2007,7 @@ exec
       // out of the water on the inside of bends
 
 exec
-/bin/bash -lc 'cat package.json' in /home/anna/projects/village
+/bin/bash -lc 'cat package.json' in ~/projects/village
  succeeded in 0ms:
 {
   "name": "village",
@@ -2032,7 +2032,7 @@ exec
 }
 
 exec
-/bin/bash -lc "rg -n \"export function|return \\{|setEra|createVegetation|function makeInstanced\" src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "rg -n \"export function|return \\{|setEra|createVegetation|function makeInstanced\" src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
 30:export function windifyVeg(material) {
 62:export function windify(material) {
@@ -2045,7 +2045,7 @@ exec
 codex
 The code-level fix check passes. One thing I’m not treating as an automatic pass is the forest micro-prop issue: the original requested final-position water/field/forest exclusions, so I’m checking the generated instances rather than only checking that the helper exists.
 exec
-/bin/bash -lc "sed -n '200,250p' src/vegetation.js && sed -n '1048,1065p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '200,250p' src/vegetation.js && sed -n '1048,1065p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
   m.customDepthMaterial = null; // set on the mesh, not the material
   return m;
@@ -2113,7 +2113,7 @@ export function buildVegetation(scene, renderer) {
 }
 
 exec
-/bin/bash -lc "sed -n '630,690p' src/vegetation.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '630,690p' src/vegetation.js" in ~/projects/village
  succeeded in 0ms:
       for (let i = 0; i < 18; i++) {
         const a = rng() * Math.PI * 2, rr = 34 + rng() * 38;
@@ -2284,7 +2284,7 @@ for (const era of [1,2,3,4,5]) {
   }
 }
 console.log('"'litter edge penetration >1cm', litterBad, 'of', count, 'worst', worst);
-NODE" in /home/anna/projects/village
+NODE" in ~/projects/village
  succeeded in 18120ms:
 rendered micro violations 0 []
 rendered molehill violations 0 []
@@ -2297,21 +2297,21 @@ litter edge penetration >1cm 239 of 486 worst {
   maxPen: 0.352,
   maxFloat: 0.451
 }
-(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/terrain.js is not specified and it doesn't parse as CommonJS.
+(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/terrain.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 codex
 The generated-instance audit comes back clean for molehills and forest micro props after stride caps: zero rendered placements in the excluded lake/pond/field/river/low-forest predicates I checked. It did find a residual on litter contact: the fix tilts and shrinks the disc, but many rendered litter discs still have terrain protruding through the edge.
 exec
-/bin/bash -lc 'which magick' in /home/anna/projects/village
+/bin/bash -lc 'which magick' in ~/projects/village
  exited 1 in 0ms:
 exec
-/bin/bash -lc 'which convert' in /home/anna/projects/village
+/bin/bash -lc 'which convert' in ~/projects/village
  exited 1 in 0ms:
 exec
-/bin/bash -lc 'file research/audit-codex/fauna/r2_*.png' in /home/anna/projects/village
+/bin/bash -lc 'file research/audit-codex/fauna/r2_*.png' in ~/projects/village
  succeeded in 0ms:
 research/audit-codex/fauna/r2_bolete_e3.png:             PNG image data, 1600 x 1000, 8-bit/color RGB, non-interlaced
 research/audit-codex/fauna/r2_butterfly_e1.png:          PNG image data, 1600 x 1000, 8-bit/color RGB, non-interlaced
@@ -2344,7 +2344,7 @@ for (const [src,dst,x,y,w,h] of crops) {
   writeFileSync(dst, PNG.sync.write(out));
   console.log(dst);
 }
-NODE" in /home/anna/projects/village
+NODE" in ~/projects/village
  succeeded in 289ms:
 /tmp/r2_pond_ducks_crop.png
 /tmp/r2_swan_crop.png
@@ -2353,7 +2353,7 @@ NODE" in /home/anna/projects/village
 /tmp/r2_litter_crop.png
 
 exec
-/bin/bash -lc 'rg -n "duck|goose|chicken|POND|pond" src/eras.js src/animals.js' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "duck|goose|chicken|POND|pond" src/eras.js src/animals.js' in ~/projects/village
  succeeded in 0ms:
 src/animals.js:259:function duck(male = true) {
 src/animals.js:513:  chicken: () => fowl({ size: 0.16, color: [0xc8b490, 0x8a5a30, 0xd8d3c4][(rng() * 3) | 0] }),
@@ -2378,7 +2378,7 @@ src/eras.js:761:    spawns.push(['goose', modern ? 3 : 4, { x: S.x - 10, z: S.z 
 codex
 The pond screenshot has a visible bird on grass near the dock. I’m checking whether that is actually one of the pond water ducks or just unrelated land fowl, because the verdict should distinguish the original motion fix from a contact/habitat issue.
 exec
-/bin/bash -lc "sed -n '520,580p' src/eras.js && sed -n '740,770p' src/eras.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '520,580p' src/eras.js && sed -n '740,770p' src/eras.js" in ~/projects/village
  succeeded in 0ms:
   const wideMeadow = { x: S2.x + 150, z: S2.z + 500, r: 160 };
   const forestN = { x: S2.x + 150, z: S2.z - 800, r: 140 };
@@ -2501,16 +2501,16 @@ for (let i = 0; i < 40 * 60; i++) {
   }
 }
 console.log({ outside, samples, worst });
-NODE' in /home/anna/projects/village
+NODE' in ~/projects/village
  succeeded in 425ms:
 { outside: 0, samples: 160, worst: null }
-(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/animals.js is not specified and it doesn't parse as CommonJS.
+(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/animals.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 exec
-/bin/bash -lc "sed -n '1,220p' research/audit-codex/fauna/r2_e1_probe.txt" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' research/audit-codex/fauna/r2_e1_probe.txt" in ~/projects/village
  succeeded in 0ms:
 [console] [boot] +0.40s — Filling the Gauja and Dabaru lake…
 [console] [boot] +0.52s — Raising the sky…
@@ -2525,7 +2525,7 @@ saved research/audit-codex/fauna/r2_river_motion_e1.png
 codex
 The pond-specific simulation stayed inside the pond ellipse in my direct check, so I’m not going to mark the fauna motion finding down on that ambiguous screenshot crop. The remaining concrete residual is the litter contact geometry.
 exec
-/bin/bash -lc "sed -n '1,220p' research/audit-codex/verdicts.json" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' research/audit-codex/verdicts.json" in ~/projects/village
  succeeded in 0ms:
 {
   "verdicts": [
@@ -2607,7 +2607,7 @@ exec
 codex
 I’m writing the verdict file now. I’ll mark the two fauna findings fixed, the molehill/forest-prop/bolete findings fixed, and the litter finding partial because the submitted mitigation does not eliminate terrain penetration in the rendered instance audit.
 exec
-/bin/bash -lc "test -e research/audit-codex/verdicts-round2.json; printf '%s\\n' "'$?' in /home/anna/projects/village
+/bin/bash -lc "test -e research/audit-codex/verdicts-round2.json; printf '%s\\n' "'$?' in ~/projects/village
  succeeded in 0ms:
 1
 
@@ -2615,7 +2615,7 @@ codex
 `verdicts-round2.json` does not exist yet, so I’m adding it rather than modifying an existing verdict artifact.
 apply patch
 patch: completed
-/home/anna/projects/village/research/audit-codex/verdicts-round2.json
+~/projects/village/research/audit-codex/verdicts-round2.json
 diff --git a/research/audit-codex/verdicts-round2.json b/research/audit-codex/verdicts-round2.json
 new file mode 100644
 index 0000000000000000000000000000000000000000..bc934bd573d2ef4eb58c5fcf19b8770a32181d2f
@@ -2703,14 +2703,14 @@ index 0000000000000000000000000000000000000000..bc934bd573d2ef4eb58c5fcf19b8770a
 codex
 The verdict JSON is in place. I’m doing a quick parse check now so the file is valid JSON before I close this out.
 exec
-/bin/bash -lc "node --input-type=module -e \"const fs=require('node:fs'); JSON.parse(fs.readFileSync('research/audit-codex/verdicts-round2.json','utf8')); console.log('JSON OK')\"" in /home/anna/projects/village
+/bin/bash -lc "node --input-type=module -e \"const fs=require('node:fs'); JSON.parse(fs.readFileSync('research/audit-codex/verdicts-round2.json','utf8')); console.log('JSON OK')\"" in ~/projects/village
  exited 1 in 0ms:
-file:///home/anna/projects/village/[eval1]:1
+file://~/projects/village/[eval1]:1
 const fs=require('node:fs'); JSON.parse(fs.readFileSync('research/audit-codex/verdicts-round2.json','utf8')); console.log('JSON OK')
          ^
 
 ReferenceError: require is not defined in ES module scope, you can use import instead
-    at file:///home/anna/projects/village/[eval1]:1:10
+    at file://~/projects/village/[eval1]:1:10
     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:272:26)
     at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:268:20)
@@ -2719,12 +2719,12 @@ ReferenceError: require is not defined in ES module scope, you can use import in
 Node.js v22.22.0
 
 exec
-/bin/bash -lc 'git status --short research/audit-codex/verdicts-round2.json' in /home/anna/projects/village
+/bin/bash -lc 'git status --short research/audit-codex/verdicts-round2.json' in ~/projects/village
  succeeded in 0ms:
 ?? research/audit-codex/verdicts-round2.json
 
 exec
-/bin/bash -lc "sed -n '1,220p' research/audit-codex/verdicts-round2.json" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' research/audit-codex/verdicts-round2.json" in ~/projects/village
  succeeded in 0ms:
 {
   "verdicts": [
@@ -2807,7 +2807,7 @@ index 0000000000000000000000000000000000000000..bc934bd573d2ef4eb58c5fcf19b8770a
 codex
 The first parse command used `--input-type=module` with `require`, so it failed before parsing the file. I’m rerunning the JSON check with a CommonJS one-liner.
 exec
-/bin/bash -lc "node -e \"const fs=require('node:fs'); JSON.parse(fs.readFileSync('research/audit-codex/verdicts-round2.json','utf8')); console.log('JSON OK')\"" in /home/anna/projects/village
+/bin/bash -lc "node -e \"const fs=require('node:fs'); JSON.parse(fs.readFileSync('research/audit-codex/verdicts-round2.json','utf8')); console.log('JSON OK')\"" in ~/projects/village
  succeeded in 0ms:
 JSON OK
 

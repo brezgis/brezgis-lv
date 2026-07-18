@@ -2,7 +2,7 @@ warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.
 Reading additional input from stdin...
 OpenAI Codex v0.139.0
 --------
-workdir: /home/anna/projects/village
+workdir: ~/projects/village
 model: gpt-5.5
 provider: openai
 approval: never
@@ -12,7 +12,7 @@ reasoning summaries: none
 session id: 019f4048-5f33-7c90-bac9-cfd4a9f66b11
 --------
 user
-You are an adversarial code reviewer for a Three.js heritage simulation at /home/anna/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; read-only except for writing your outputs).
+You are an adversarial code reviewer for a Three.js heritage simulation at ~/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; read-only except for writing your outputs).
 
 Adversarially review src/rig.js and the movement/collision/shadow parts of src/main.js for CORRECTNESS bugs:
 - double-Space fly/walk toggle edge cases (is the first tap after the cinema intro counted? stale timers?)
@@ -24,7 +24,7 @@ Adversarially review src/rig.js and the movement/collision/shadow parts of src/m
 - KEY_ALIAS arrow handling, LOOK_SMOOTH filtering, adoptCamera edge cases
 
 If you want to check something at runtime, there is a screenshot/probe harness:
-  cd /home/anna/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=N;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
+  cd ~/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=N;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
 and data/walktest.mjs runs an automated Minecraft-movement flow check (node data/walktest.mjs).
 
 Report ONLY defects you have concrete evidence for (file:line). Write findings to research/audit-codex/findings-movement.json:
@@ -35,9 +35,9 @@ NOTE: you run sandboxed. If node data/walktest.mjs or dbg.mjs fail due to sandbo
 codex
 I’ll inspect the movement and collision code first, then run the provided movement probe only if it’s usable in this sandbox. I’ll keep outputs limited to the requested JSON file and final DONE.
 exec
-/bin/bash -lc "pwd && rg --files src data research/audit-codex | sed -n '1,120p'" in /home/anna/projects/village
+/bin/bash -lc "pwd && rg --files src data research/audit-codex | sed -n '1,120p'" in ~/projects/village
  succeeded in 0ms:
-/home/anna/projects/village
+~/projects/village
 research/audit-codex/prompt-river.md
 research/audit-codex/log-river.txt
 research/audit-codex/log-verify.txt
@@ -86,14 +86,14 @@ src/animals.js
 src/buildings.js
 
 exec
-/bin/bash -lc 'git status --short' in /home/anna/projects/village
+/bin/bash -lc 'git status --short' in ~/projects/village
  succeeded in 0ms:
 ?? research/audit-codex/
 
 codex
 The worktree only shows the audit directory as untracked, so I’ll avoid touching source. I’m reading the relevant symbols and line numbers now so any finding can be tied to exact code.
 exec
-/bin/bash -lc 'rg -n "Space|fly|walk|collid|Box3|setFromObject|updateMatrixWorld|Instanced|shadow|camTween|pointer|Pointer|LOOK|SMOOTH|KEY_ALIAS|WADE|adoptCamera|cinema|intro|head|jump|landing|ground|camera|velocity|canJump|feet|Arrow" src/main.js src/rig.js' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "Space|fly|walk|collid|Box3|setFromObject|updateMatrixWorld|Instanced|shadow|camTween|pointer|Pointer|LOOK|SMOOTH|KEY_ALIAS|WADE|adoptCamera|cinema|intro|head|jump|landing|ground|camera|velocity|canJump|feet|Arrow" src/main.js src/rig.js' in ~/projects/village
  succeeded in 0ms:
 src/rig.js:2://   FLY  — WASD/arrows glide on the view plane, Space climbs, Shift sinks,
 src/rig.js:3://          the wheel scales speed. Sink onto the ground and you land walking.
@@ -282,7 +282,7 @@ src/main.js:525:    sky.update(dt, focus, shadowNow);
 src/main.js:529:    grass.update(focus, currentEra, camera.position);
 
 exec
-/bin/bash -lc 'nl -ba src/rig.js' in /home/anna/projects/village
+/bin/bash -lc 'nl -ba src/rig.js' in ~/projects/village
  succeeded in 0ms:
      1	// Camera rig — Minecraft-style, two modes only:
      2	//   FLY  — WASD/arrows glide on the view plane, Space climbs, Shift sinks,
@@ -543,7 +543,7 @@ exec
    257	export { EYE_HEIGHT, PLAYER_R };
 
 exec
-/bin/bash -lc 'wc -l src/main.js src/rig.js' in /home/anna/projects/village
+/bin/bash -lc 'wc -l src/main.js src/rig.js' in ~/projects/village
  succeeded in 0ms:
   558 src/main.js
   257 src/rig.js
@@ -552,7 +552,7 @@ exec
 codex
 The first pass shows the review target is concentrated in rig input state, collider construction/querying, camera tween handoff, and render-loop shadow updates. I’m opening those main.js ranges with line numbers next.
 exec
-/bin/bash -lc "nl -ba src/main.js | sed -n '1,260p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/main.js | sed -n '1,260p'" in ~/projects/village
  succeeded in 0ms:
      1	// Brezgi / Taurene time machine — entry point.
      2	import * as THREE from 'three';
@@ -816,7 +816,7 @@ exec
    260	    eraTicks = built.ticks;
 
 exec
-/bin/bash -lc 'rg -n "createEra|eraGroups|currentEra|switchEra|collider|colliders|userData|isInstancedMesh|InstancedMesh|updateMatrixWorld|castShadow|receiveShadow|shadowProxy|sky.update|needsUpdate" src/*.js' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "createEra|eraGroups|currentEra|switchEra|collider|colliders|userData|isInstancedMesh|InstancedMesh|updateMatrixWorld|castShadow|receiveShadow|shadowProxy|sky.update|needsUpdate" src/*.js' in ~/projects/village
  succeeded in 0ms:
 src/grass.js:226:    const mesh = new THREE.InstancedMesh(geos[i], mat, cap);
 src/grass.js:228:    mesh.castShadow = false;
@@ -941,7 +941,7 @@ src/main.js:525:    sky.update(dt, focus, shadowNow);
 src/main.js:529:    grass.update(focus, currentEra, camera.position);
 
 exec
-/bin/bash -lc "nl -ba src/main.js | sed -n '260,560p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/main.js | sed -n '260,560p'" in ~/projects/village
  succeeded in 0ms:
    260	    eraTicks = built.ticks;
    261	    paintEra(era);
@@ -1244,7 +1244,7 @@ exec
    558	});
 
 exec
-/bin/bash -lc "nl -ba src/eras.js | sed -n '260,420p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/eras.js | sed -n '260,420p'" in ~/projects/village
  succeeded in 0ms:
    260	      items.push({
    261	        x: x + ca * yd, z: z + sa * yd,
@@ -1409,7 +1409,7 @@ exec
    420	
 
 exec
-/bin/bash -lc "nl -ba src/eras.js | sed -n '60,120p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/eras.js | sed -n '60,120p'" in ~/projects/village
  succeeded in 0ms:
     60	  }
     61	  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
@@ -1474,7 +1474,7 @@ exec
    120	          ax + (bx - ax) * t1 + off, y1, az + (bz - az) * t1);
 
 exec
-/bin/bash -lc "nl -ba src/buildings.js | sed -n '60,100p;220,270p;450,480p;610,638p;875,900p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/buildings.js | sed -n '60,100p;220,270p;450,480p;610,638p;875,900p'" in ~/projects/village
  succeeded in 0ms:
     60	function hipRoof(w, d, h, mat, over = 0.5) {
     61	  return roofSolid(w, d, h, mat, over, Math.max(0.1, (d - w) / 2));
@@ -1658,7 +1658,7 @@ exec
 codex
 One concrete collision issue is emerging: the collider rebuild deliberately skips all InstancedMesh nodes, while several era-visible buildings/fences are instanced. I’m checking whether there are additional movement defects that are equally concrete before writing the JSON.
 exec
-/bin/bash -lc "nl -ba src/eras.js | sed -n '1,80p;120,260p;420,660p;660,760p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/eras.js | sed -n '1,80p;120,260p;420,660p;660,760p'" in ~/projects/village
  succeeded in 0ms:
      1	// The six moments in time, staged on the same ground:
      2	//   0  ~10,800 BC — Younger Dryas tundra: reindeer, dead ice, no one yet
@@ -2123,7 +2123,7 @@ exec
    659	}
 
 exec
-/bin/bash -lc "nl -ba src/buildings.js | sed -n '96,220p;638,876p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/buildings.js | sed -n '96,220p;638,876p'" in ~/projects/village
  succeeded in 0ms:
     96	// --- the log building family ------------------------------------------------
     97	export function logCabin({
@@ -2491,7 +2491,7 @@ exec
    876	  return shadowize(g);
 
 exec
-/bin/bash -lc "nl -ba src/vegetation.js | sed -n '180,220p;480,620p;640,760p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/vegetation.js | sed -n '180,220p;480,620p;640,760p'" in ~/projects/village
  succeeded in 0ms:
    180	  // leaves up close while A2C still softens the silhouettes
    181	  const m = new THREE.MeshLambertMaterial({
@@ -2798,7 +2798,7 @@ exec
    760	    const lists = placementsFor(era);
 
 exec
-/bin/bash -lc "nl -ba src/vegetation.js | sed -n '758,790p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/vegetation.js | sed -n '758,790p'" in ~/projects/village
  succeeded in 0ms:
    758	  // trunk circles for the walking player (full-detail tier + big erratics)
    759	  function getColliders(era) {
@@ -2817,7 +2817,7 @@ exec
    772	}
 
 exec
-/bin/bash -lc "rg -n \"shadow.update|update\\(|camera|shadow.camera|matrixWorld|needsUpdate|autoUpdate\" src/sky.js src/main.js" in /home/anna/projects/village
+/bin/bash -lc "rg -n \"shadow.update|update\\(|camera|shadow.camera|matrixWorld|needsUpdate|autoUpdate\" src/sky.js src/main.js" in ~/projects/village
  succeeded in 0ms:
 src/main.js:72:  renderer.shadowMap.autoUpdate = false;
 src/main.js:73:  renderer.shadowMap.needsUpdate = true;
@@ -2854,7 +2854,7 @@ src/sky.js:115:  sun.shadow.camera.near = 50; sun.shadow.camera.far = 2600;
 src/sky.js:305:  function update(dt, focus, shadowNow = true) {
 
 exec
-/bin/bash -lc "nl -ba src/sky.js | sed -n '90,150p;330,385p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/sky.js | sed -n '90,150p;330,385p'" in ~/projects/village
  succeeded in 0ms:
     90	      const i = (y * w + x) * 4;
     91	      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
@@ -2973,7 +2973,7 @@ exec
    383	}
 
 exec
-/bin/bash -lc "nl -ba src/sky.js | sed -n '300,330p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/sky.js | sed -n '300,330p'" in ~/projects/village
  succeeded in 0ms:
    300	  const _snapFocus = new THREE.Vector3();
    301	  const sunWorld = new THREE.Vector3();
@@ -3010,7 +3010,7 @@ exec
 codex
 The collider build timing itself calls `group.updateMatrixWorld(true)` before `Box3.setFromObject`, so I’m not treating that as a defect. I’m running the provided walk flow now; if Chromium is blocked I’ll fall back to code-only evidence as requested.
 exec
-/bin/bash -lc "sed -n '1,240p' data/walktest.mjs" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,240p' data/walktest.mjs" in ~/projects/village
  succeeded in 0ms:
 // Controls test, Minecraft flow: ArrowUp from the intro leaves cinema FLYING
 // and moves; forcing walk mode grounds the player and ArrowUp walks.
@@ -3022,7 +3022,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 await page.setViewport({ width: 900, height: 560 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 300)));
-await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load' });
+await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load' });
 await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
 await page.evaluate(() => {
   window.__sim.era(3);
@@ -3063,9 +3063,9 @@ if (process.argv[2]) await page.screenshot({ path: process.argv[2] });
 await browser.close();
 
 exec
-/bin/bash -lc 'node data/walktest.mjs' in /home/anna/projects/village
+/bin/bash -lc 'node data/walktest.mjs' in ~/projects/village
  exited 1 in 157ms:
-file:///home/anna/projects/village/node_modules/@puppeteer/browsers/lib/launch.js:339
+file://~/projects/village/node_modules/@puppeteer/browsers/lib/launch.js:339
                 reject(new Error([
                        ^
 
@@ -3076,7 +3076,7 @@ stderr:
 
 TROUBLESHOOTING: https://pptr.dev/troubleshooting
 
-    at ChildProcess.onClose (file:///home/anna/projects/village/node_modules/@puppeteer/browsers/lib/launch.js:339:24)
+    at ChildProcess.onClose (file://~/projects/village/node_modules/@puppeteer/browsers/lib/launch.js:339:24)
     at ChildProcess.emit (node:events:531:35)
     at ChildProcess._handle.onexit (node:internal/child_process:293:12)
 
@@ -3085,7 +3085,7 @@ Node.js v22.22.0
 codex
 The walk harness is blocked by the sandboxed Chrome launch (`setsockopt: Operation not permitted`), so I’ll record that as `wanted_checks` in the JSON. Static review is still enough to substantiate the instanced-collider issue and a couple of input/render-loop issues.
 exec
-/bin/bash -lc "sed -n '1,220p' src/textures.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' src/textures.js" in ~/projects/village
  succeeded in 0ms:
 // Procedural material library — every surface is generated, nothing loaded.
 import * as THREE from 'three';
@@ -3307,9 +3307,9 @@ export function initTextures() {
 }
 
 exec
-/bin/bash -lc "sed -n '1,160p' src/terrain.js" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,160p' src/terrain.js" in ~/projects/village
 exec
-/bin/bash -lc "find research/audit-codex -maxdepth 2 -type f -printf '%p\\n' | sort" in /home/anna/projects/village
+/bin/bash -lc "find research/audit-codex -maxdepth 2 -type f -printf '%p\\n' | sort" in ~/projects/village
  succeeded in 0ms:
 // Terrain: real Taurene DEM -> carved, painted, walkable ground.
 // The height field is shared by every era (the land itself is the constant);
@@ -3483,7 +3483,7 @@ research/audit-codex/prompt-verify.md
 research/audit-codex/uncertain.json
 
 exec
-/bin/bash -lc 'rg -n "function canvasTexture|canvasTexture|document|OffscreenCanvas|createElement" src/util.js src/textures.js' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "function canvasTexture|canvasTexture|document|OffscreenCanvas|createElement" src/util.js src/textures.js' in ~/projects/village
  succeeded in 0ms:
 src/textures.js:3:import { canvasTexture, makeNoise } from './util.js';
 src/textures.js:28:  TEX.log = canvasTexture(256, 256, (ctx, w, h) => {
@@ -3501,7 +3501,7 @@ src/util.js:43:export function canvasTexture(w, h, draw, opts = {}) {
 src/util.js:44:  const c = document.createElement('canvas');
 
 exec
-/bin/bash -lc "nl -ba src/util.js | sed -n '35,60p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/util.js | sed -n '35,60p'" in ~/projects/village
  succeeded in 0ms:
     35	  function fbm(x, y, oct = 4, lac = 2, gain = 0.5) {
     36	    let f = 0, amp = 0.5, fr = 1;
@@ -3557,19 +3557,19 @@ for (const era of [2,3,4,5]) {
   });
   console.log(JSON.stringify({era, meshes, instanced, includedNonInstanced:included, skippedInstancedPassingFilter:skippedImportant.length, sample:skippedImportant.slice(0,8)}));
 }
-NODE" in /home/anna/projects/village
+NODE" in ~/projects/village
  succeeded in 418ms:
 {"era":2,"meshes":698,"instanced":22,"includedNonInstanced":120,"skippedInstancedPassingFilter":22,"sample":[{"name":"CylinderGeometry","count":32,"w":6.7,"d":7.5,"h":1.8},{"name":"CylinderGeometry","count":28,"w":6,"d":5,"h":1.6},{"name":"CylinderGeometry","count":28,"w":4.1,"d":4.7,"h":1.6},{"name":"CylinderGeometry","count":24,"w":7.8,"d":5.4,"h":1.4},{"name":"CylinderGeometry","count":360,"w":34.3,"d":34.3,"h":3},{"name":"CylinderGeometry","count":28,"w":6.6,"d":6.7,"h":1.6},{"name":"CylinderGeometry","count":24,"w":6.1,"d":6,"h":1.4},{"name":"CylinderGeometry","count":28,"w":5.3,"d":4.9,"h":1.6}]}
 {"era":3,"meshes":217,"instanced":18,"includedNonInstanced":138,"skippedInstancedPassingFilter":9,"sample":[{"name":"CylinderGeometry","count":40,"w":12.7,"d":7.2,"h":2.3},{"name":"CylinderGeometry","count":36,"w":8.7,"d":5.7,"h":2.1},{"name":"CylinderGeometry","count":28,"w":6.6,"d":13.9,"h":1.6},{"name":"CylinderGeometry","count":28,"w":14.2,"d":16.2,"h":1.6},{"name":"CylinderGeometry","count":28,"w":5.7,"d":6.1,"h":1.6},{"name":"CylinderGeometry","count":83,"w":31.8,"d":5.2,"h":2.3},{"name":"CylinderGeometry","count":30,"w":2.2,"d":2.1,"h":0.7},{"name":"CylinderGeometry","count":48,"w":9.2,"d":9.2,"h":2.8}]}
 {"era":4,"meshes":286,"instanced":20,"includedNonInstanced":199,"skippedInstancedPassingFilter":9,"sample":[{"name":"CylinderGeometry","count":40,"w":12.7,"d":7.2,"h":2.3},{"name":"CylinderGeometry","count":36,"w":8.7,"d":5.7,"h":2.1},{"name":"CylinderGeometry","count":28,"w":6.6,"d":13.9,"h":1.6},{"name":"CylinderGeometry","count":28,"w":14.2,"d":16.2,"h":1.6},{"name":"CylinderGeometry","count":28,"w":5.7,"d":6.1,"h":1.6},{"name":"CylinderGeometry","count":83,"w":31.8,"d":5.2,"h":2.3},{"name":"CylinderGeometry","count":30,"w":2.2,"d":2.1,"h":0.7},{"name":"CylinderGeometry","count":48,"w":9.2,"d":9.2,"h":2.8}]}
 {"era":5,"meshes":210,"instanced":6,"includedNonInstanced":158,"skippedInstancedPassingFilter":2,"sample":[{"name":"CylinderGeometry","count":36,"w":8.7,"d":5.7,"h":2.1},{"name":"CylinderGeometry","count":32,"w":7.4,"d":8.2,"h":1.8}]}
-(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/eras.js is not specified and it doesn't parse as CommonJS.
+(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/eras.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 exec
-/bin/bash -lc "nl -ba src/buildings.js | sed -n '1,65p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/buildings.js | sed -n '1,65p'" in ~/projects/village
  succeeded in 0ms:
      1	// Parametric vernacular architecture of the Vidzeme countryside:
      2	// corner-notched log buildings, thatch/shingle/tile roofs, the klēts on
@@ -3640,7 +3640,7 @@ exec
 codex
 For the head-clearance question, the source has a real case: several roofs have eaves around 1.68m while the collision gate treats anything above feet+1.62m as “overhead,” despite the camera eye being feet+1.70m. I’m checking prior audit files only for context before writing the new findings file.
 exec
-/bin/bash -lc "sed -n '1,220p' research/audit-codex/uncertain.json" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' research/audit-codex/uncertain.json" in ~/projects/village
  succeeded in 0ms:
 [
  {
@@ -3701,7 +3701,7 @@ exec
  }
 ]
 exec
-/bin/bash -lc "sed -n '1,220p' research/audit-codex/confirmed.json" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,220p' research/audit-codex/confirmed.json" in ~/projects/village
  succeeded in 0ms:
 [
  {
@@ -3828,7 +3828,7 @@ exec
   "title": "Far-tier instance caps overflow and silently delete the forest across the southern map (Bre\u017e\u0123a kalns & krogs stand in bare steppe in era 1)",
   "area": "vegetation LOD / instance budgets (src/vegetation.js)",
   "severity": "high",
-  "evidence": "Era-1 in-page dump: far InstancedMesh count==capacity for spruce 175000/175000, pine 125000/125000, birch 150000/150000, oak 42000/42000 (CAPS at src/vegetation.js:221-225). fillTier far does n=Math.min(arr.length, farM.instanceMatrix.count) (src/vegetation.js:528) over a placement list built in z-ascending grid-scan order (src/vegetation.js:369-372), so the overflow is dropped as a spatial block: max placed z per species = spruce 4352, pine 3775, birch 4072, oak 1846, while the map spans z=-2640..6040 (HM_OFF_Z=1700, HM_SPAN=8800). Probes (count within r=150m, era 1): (200,-1500) 664 far trees; (1728,4600) 0; (1728,5500) 0; KROGS (2320,5270) 0 \u2014 despite landuse.js:417-421 intending d=0.68+0.4*fbm (near-closed canopy). Screenshot: /tmp/claude-1002/-home-anna-projects-village/8ce52bd6-2012-41d8-9a38-2c512e1e1885/scratchpad/audit/b3_brezga_pano.png \u2014 bare plain beyond the 260m full ring at the family hill.",
+  "evidence": "Era-1 in-page dump: far InstancedMesh count==capacity for spruce 175000/175000, pine 125000/125000, birch 150000/150000, oak 42000/42000 (CAPS at src/vegetation.js:221-225). fillTier far does n=Math.min(arr.length, farM.instanceMatrix.count) (src/vegetation.js:528) over a placement list built in z-ascending grid-scan order (src/vegetation.js:369-372), so the overflow is dropped as a spatial block: max placed z per species = spruce 4352, pine 3775, birch 4072, oak 1846, while the map spans z=-2640..6040 (HM_OFF_Z=1700, HM_SPAN=8800). Probes (count within r=150m, era 1): (200,-1500) 664 far trees; (1728,4600) 0; (1728,5500) 0; KROGS (2320,5270) 0 \u2014 despite landuse.js:417-421 intending d=0.68+0.4*fbm (near-closed canopy). Screenshot: /tmp/village-scratch/audit/b3_brezga_pano.png \u2014 bare plain beyond the 260m full ring at the family hill.",
   "fix_hint": "When lists[key].far.length exceeds the cap, subsample uniformly (keep every len/cap-th entry or reservoir-sample) instead of truncating the scan tail; optionally raise caps and console.warn when a tier saturates so regressions are visible.",
   "finder": "code-movement",
   "verdict": "CONFIRMED",
@@ -3898,7 +3898,7 @@ exec
   "title": "Era-5 forest renders as open savanna; forest edges read as clumps of 2-4 trees then long gaps (the reported '3 trees in a clump then sparse')",
   "area": "vegetation / era-5 forest density",
   "severity": "high",
-  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/claude-1002/-home-anna-projects-village/8ce52bd6-2012-41d8-9a38-2c512e1e1885/scratchpad/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
+  "evidence": "Placement replica (exact RNG-sequence copy of placementsFor, /tmp/village-scratch/audit/analyze.mjs + rect-check.mjs) measured 1,428 trees on a 35 ha test rectangle (x 300..1000, z -2400..-1900) = 41 stems/ha where the Sentinel mask marks 53% forest, i.e. ~77 stems/ha INSIDE mask forest. Cause chain: src/landuse.js:430 sets d = 0.85+0.15n inside the mask; src/vegetation.js:386-387 keeps a sample only if rng() <= d*0.97*falloff with falloff clamped to 0.7 for era>=3, so interior keep-probability is ~0.58 on the 9 m grid -> mean spacing ~11.8 m vs ~6-9 m impostor crowns -> ~35% canopy cover. Bernoulli acceptance runs plus the \u00b16.3 m jitter (vegetation.js:371-372) naturally produce 2-4 accepted samples together then 40-60 m of nothing; screenshot e5-lone-clump-ground.png (cam 300,208,-1950 tgt 425,211,-2025) shows exactly that pattern on a mask-forest boundary, and e5-lone-clump-air.png / e5-obl-village.png show see-through 'forest' with sky between all crowns. Suspects ruled out by live in-page probe (e5shots.mjs): apple-orchard far mesh count = 0 and manor-park linden far count = 0 in era 5 (both are era 3/4-only, vegetation.js:441-475), and the 167 isolated 50 m mask cells each yield ~15-18 trees, not 3. Note the code's own comment (vegetation.js:366) says 'real hemiboreal forest runs hundreds of stems/ha' \u2014 even at keep=1 the 9 m grid maxes at 123/ha.",
   "fix_hint": "For era>=3 raise the falloff clamp floor from 0.7 to ~0.95 (or skip the falloff entirely where forestMaskAt is 1) in vegetation.js:386, and/or widen the far-impostor xz scale (setEra, vegetation.js:533) from h*1.12 to ~h*1.5 so crowns close at 11-12 m spacing; consider step 7-8 m for era 5 since impostors are cheap.",
   "finder": "code-eras-osm",
   "verdict": "CONFIRMED",
@@ -3925,13 +3925,13 @@ exec
   "why": "Every claim holds against the current code and fresh screenshots. Code: src/eras.js:137 sets era-5 asphalt to 0x393c40; line 144 gives the P30 (c:0) a 6.4 m width (half=3.2); lines 169-171 contain the CCW winding fix; lines 148+173+178-179 paint the centreline on every other ~9 m resample span at 0.18 m width (half-width 0.09), i.e. ~9 m dash / ~9 m gap \u2014 exactly the oversized cadence the finding reports vs the ~3 m/9 m, 0.10-0.15 m real-world standard. Visual: my own new era-5 screenshots (v-ground-south.png, v-ground-north.png at x=52, z=1355-1460; v-air.png from 350,620,800) show a continuous dark asphalt ribbon with a crisp white dashed centreline, no backface-culled gaps from the air, and visibly long dashes up close, matching the reviewer's e5-p30-* evidence. The finding is accurate: P30 renders correctly and the only defect is the low-severity dash cadence/width nit, with a sound fix hint."
 
 exec
-/bin/bash -lc "sed -n '1,240p' research/audit-codex/log-movement.txt" in /home/anna/projects/village
+/bin/bash -lc "sed -n '1,240p' research/audit-codex/log-movement.txt" in ~/projects/village
  succeeded in 0ms:
 warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.
 Reading additional input from stdin...
 OpenAI Codex v0.139.0
 --------
-workdir: /home/anna/projects/village
+workdir: ~/projects/village
 model: gpt-5.5
 provider: openai
 approval: never
@@ -3941,7 +3941,7 @@ reasoning summaries: none
 session id: 019f4048-5f33-7c90-bac9-cfd4a9f66b11
 --------
 user
-You are an adversarial code reviewer for a Three.js heritage simulation at /home/anna/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; read-only except for writing your outputs).
+You are an adversarial code reviewer for a Three.js heritage simulation at ~/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; read-only except for writing your outputs).
 
 Adversarially review src/rig.js and the movement/collision/shadow parts of src/main.js for CORRECTNESS bugs:
 - double-Space fly/walk toggle edge cases (is the first tap after the cinema intro counted? stale timers?)
@@ -3953,7 +3953,7 @@ Adversarially review src/rig.js and the movement/collision/shadow parts of src/m
 - KEY_ALIAS arrow handling, LOOK_SMOOTH filtering, adoptCamera edge cases
 
 If you want to check something at runtime, there is a screenshot/probe harness:
-  cd /home/anna/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=N;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
+  cd ~/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=N;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
 and data/walktest.mjs runs an automated Minecraft-movement flow check (node data/walktest.mjs).
 
 Report ONLY defects you have concrete evidence for (file:line). Write findings to research/audit-codex/findings-movement.json:
@@ -3964,9 +3964,9 @@ NOTE: you run sandboxed. If node data/walktest.mjs or dbg.mjs fail due to sandbo
 codex
 I’ll inspect the movement and collision code first, then run the provided movement probe only if it’s usable in this sandbox. I’ll keep outputs limited to the requested JSON file and final DONE.
 exec
-/bin/bash -lc "pwd && rg --files src data research/audit-codex | sed -n '1,120p'" in /home/anna/projects/village
+/bin/bash -lc "pwd && rg --files src data research/audit-codex | sed -n '1,120p'" in ~/projects/village
  succeeded in 0ms:
-/home/anna/projects/village
+~/projects/village
 research/audit-codex/prompt-river.md
 research/audit-codex/log-river.txt
 research/audit-codex/log-verify.txt
@@ -4015,14 +4015,14 @@ src/animals.js
 src/buildings.js
 
 exec
-/bin/bash -lc 'git status --short' in /home/anna/projects/village
+/bin/bash -lc 'git status --short' in ~/projects/village
  succeeded in 0ms:
 ?? research/audit-codex/
 
 codex
 The worktree only shows the audit directory as untracked, so I’ll avoid touching source. I’m reading the relevant symbols and line numbers now so any finding can be tied to exact code.
 exec
-/bin/bash -lc 'rg -n "Space|fly|walk|collid|Box3|setFromObject|updateMatrixWorld|Instanced|shadow|camTween|pointer|Pointer|LOOK|SMOOTH|KEY_ALIAS|WADE|adoptCamera|cinema|intro|head|jump|landing|ground|camera|velocity|canJump|feet|Arrow" src/main.js src/rig.js' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "Space|fly|walk|collid|Box3|setFromObject|updateMatrixWorld|Instanced|shadow|camTween|pointer|Pointer|LOOK|SMOOTH|KEY_ALIAS|WADE|adoptCamera|cinema|intro|head|jump|landing|ground|camera|velocity|canJump|feet|Arrow" src/main.js src/rig.js' in ~/projects/village
  succeeded in 0ms:
 src/rig.js:2://   FLY  — WASD/arrows glide on the view plane, Space climbs, Shift sinks,
 src/rig.js:3://          the wheel scales speed. Sink onto the ground and you land walking.
@@ -4183,7 +4183,7 @@ g.traverse(o => {
   if (h > 2 && w > 5 && d > 6) console.log({i, type:o.geometry.type, minY:+b.min.y.toFixed(3), maxY:+b.max.y.toFixed(3), w:+w.toFixed(3), d:+d.toFixed(3)});
   i++;
 });
-NODE' in /home/anna/projects/village
+NODE' in ~/projects/village
  succeeded in 225ms:
 {
   i: 2,
@@ -4193,16 +4193,16 @@ NODE' in /home/anna/projects/village
   w: 5.9,
   d: 6.9
 }
-(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/buildings.js is not specified and it doesn't parse as CommonJS.
+(node:3) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/buildings.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 codex
 I’ve got enough concrete evidence now. I’m writing the requested JSON only, including the sandboxed Chrome failure as `wanted_checks` and leaving source files untouched.
 apply patch
 patch: completed
-/home/anna/projects/village/research/audit-codex/findings-movement.json
+~/projects/village/research/audit-codex/findings-movement.json
 diff --git a/research/audit-codex/findings-movement.json b/research/audit-codex/findings-movement.json
 new file mode 100644
 index 0000000000000000000000000000000000000000..6f236b62228c9b3ca2708b602978f52d1a9a1e33
@@ -4304,19 +4304,19 @@ index 0000000000000000000000000000000000000000..6f236b62228c9b3ca2708b602978f52d
 codex
 The findings file is written. I’m validating the JSON structure now and checking that only the requested output file changed.
 exec
-/bin/bash -lc "jq . research/audit-codex/findings-movement.json >/dev/null && printf 'valid json\\n'" in /home/anna/projects/village
+/bin/bash -lc "jq . research/audit-codex/findings-movement.json >/dev/null && printf 'valid json\\n'" in ~/projects/village
  exited 127 in 0ms:
 /bin/bash: line 1: jq: command not found
 
 exec
-/bin/bash -lc 'git status --short' in /home/anna/projects/village
+/bin/bash -lc 'git status --short' in ~/projects/village
  succeeded in 0ms:
  M src/landuse.js
  M src/vegetation.js
 ?? research/audit-codex/
 
 exec
-/bin/bash -lc "wc -c research/audit-codex/findings-movement.json && sed -n '1,220p' research/audit-codex/findings-movement.json" in /home/anna/projects/village
+/bin/bash -lc "wc -c research/audit-codex/findings-movement.json && sed -n '1,220p' research/audit-codex/findings-movement.json" in ~/projects/village
  succeeded in 0ms:
 4992 research/audit-codex/findings-movement.json
 {
@@ -4414,17 +4414,17 @@ index 0000000000000000000000000000000000000000..6f236b62228c9b3ca2708b602978f52d
 codex
 `jq` is not installed here, so I’ll validate the JSON with Node instead. I also see unrelated source modifications in the worktree now; I did not edit source and will leave them alone.
 exec
-/bin/bash -lc 'git status --short research/audit-codex/findings-movement.json src/rig.js src/main.js' in /home/anna/projects/village
+/bin/bash -lc 'git status --short research/audit-codex/findings-movement.json src/rig.js src/main.js' in ~/projects/village
  succeeded in 0ms:
 ?? research/audit-codex/findings-movement.json
 
 exec
-/bin/bash -lc "node -e \"JSON.parse(require('fs').readFileSync('research/audit-codex/findings-movement.json','utf8')); console.log('valid json')\"" in /home/anna/projects/village
+/bin/bash -lc "node -e \"JSON.parse(require('fs').readFileSync('research/audit-codex/findings-movement.json','utf8')); console.log('valid json')\"" in ~/projects/village
  succeeded in 0ms:
 valid json
 
 exec
-/bin/bash -lc 'git diff -- src/rig.js src/main.js' in /home/anna/projects/village
+/bin/bash -lc 'git diff -- src/rig.js src/main.js' in ~/projects/village
  succeeded in 0ms:
 diff --git a/research/audit-codex/findings-movement.json b/research/audit-codex/findings-movement.json
 new file mode 100644

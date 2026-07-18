@@ -1,17 +1,19 @@
 // Screenshot harness v2: drives the sim via window.__sim
 import puppeteer from 'puppeteer-core';
 const [,, out = 'shot.png', script = ''] = process.argv;
+const mobile = script.split(';').includes('mobile=1');
+const viewport = mobile ? { width: 390, height: 844 } : { width: 1600, height: 1000 };
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome',
   headless: 'new',
   protocolTimeout: 120000,
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=1600,1000', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-gl=angle', '--enable-gpu', `--window-size=${viewport.width},${viewport.height}`, '--no-sandbox', '--disable-dev-shm-usage'],
 });
 try {
   const page = await browser.newPage();
-  await page.setViewport({ width: 1600, height: 1000 });
+  await page.setViewport(viewport);
   page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 400)));
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
   if (process.env.PLAIN) await page.evaluate(() => { window.__plain = true; });
   await new Promise((r) => setTimeout(r, 2500));

@@ -1,7 +1,7 @@
 Reading additional input from stdin...
 OpenAI Codex v0.139.0
 --------
-workdir: /home/anna/projects/village
+workdir: ~/projects/village
 model: gpt-5.5
 provider: openai
 approval: never
@@ -11,7 +11,7 @@ reasoning summaries: none
 session id: 019f4047-0c3f-7631-95a2-e6123efedfe7
 --------
 user
-You are an adversarial code reviewer for a Three.js heritage simulation at /home/anna/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; read-only except for writing your outputs).
+You are an adversarial code reviewer for a Three.js heritage simulation at ~/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; read-only except for writing your outputs).
 
 Adversarially review the river/terrain pipeline for CORRECTNESS bugs:
 - src/terrain.js sculpt: spline-following river stamps (deep bed + SHELF carve to waterline−0.55 within 16m; pond basin; lake beds) — does the shelf ever cut a road crossing or dam a stream confluence? does microDamp fight the stamps?
@@ -21,7 +21,7 @@ Adversarially review the river/terrain pipeline for CORRECTNESS bugs:
 - src/landuse.js splat-refined distToRiver: window size vs the thresholds used by grass/vegetation exclusion — any gap where plants can stand in water?
 
 You may verify visually with the screenshot harness (headless Chrome; batch your shots):
-  cd /home/anna/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=N;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
+  cd ~/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=N;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
 (nofog=1, hide=vegetation etc. available; scene metres, origin = village centre; RIVER_PTS in src/geodata.js gives river coordinates; terrain y ~185-259.)
 You can VIEW the PNGs you take.
 
@@ -31,7 +31,7 @@ Empty array if nothing holds up. Finish by printing DONE.
 codex
 I’ll audit the pipeline against the built source and only write the requested JSON output. I’ll start by reading the terrain, water, landuse, and geodata code, then use screenshots only where the code evidence needs visual confirmation.
 exec
-/bin/bash -lc "ls -la research/audit-codex src data artifact | sed -n '1,160p'" in /home/anna/projects/village
+/bin/bash -lc "ls -la research/audit-codex src data artifact | sed -n '1,160p'" in ~/projects/village
  succeeded in 0ms:
 artifact:
 total 1332
@@ -104,14 +104,14 @@ drwxrwxr-x 9 anna anna   4096 Jul  4 18:25 ..
 -rw-rw-r-- 1 anna anna  13926 Jul  5 10:44 water.js
 
 exec
-/bin/bash -lc 'git status --short' in /home/anna/projects/village
+/bin/bash -lc 'git status --short' in ~/projects/village
  succeeded in 0ms:
 ?? research/audit-codex/
 
 exec
-/bin/bash -lc 'pwd && rg -n "function|const|export|meshHeightAt|buildTerrain|sculpt|river|RIVER|apron|shelf|micro|distToRiver|road|paint|band|lake|pond" src/terrain.js src/water.js src/landuse.js src/geodata.js' in /home/anna/projects/village
+/bin/bash -lc 'pwd && rg -n "function|const|export|meshHeightAt|buildTerrain|sculpt|river|RIVER|apron|shelf|micro|distToRiver|road|paint|band|lake|pond" src/terrain.js src/water.js src/landuse.js src/geodata.js' in ~/projects/village
  succeeded in 0ms:
-/home/anna/projects/village
+~/projects/village
 src/geodata.js:3:export const RIVER_PTS = [[380,6083,193.7],[363,6040,193.4],[342,5996,193.2],[307,5932,192.9],[293,5900,192.6],[274,5860,192.3],[263,5827,192.2],[266,5769,192.2],[270,5734,192.2],[275,5669,192.2],[273,5603,192.2],[273,5564,192.2],[274,5530,192.2],[271,5480,192.2],[279,5446,192.2],[260,5396,192.2],[242,5344,192.2],[224,5302,192.2],[233,5262,192.2],[252,5228,192.2],[268,5198,192.2],[264,5162,192.2],[264,5120,192.2],[246,5088,192.2],[214,5076,192.2],[211,5041,192.2],[206,4996,192.2],[225,4957,192.2],[243,4925,192.2],[235,4891,192.2],[242,4859,192.2],[237,4818,192.2],[243,4782,192.2],[244,4742,192.2],[245,4708,192.2],[269,4688,192.2],[305,4685,192.2],[328,4662,192.2],[343,4627,192.2],[326,4598,192.2],[320,4549,192.2],[342,4523,192.2],[366,4493,192.2],[362,4454,192.2],[359,4421,192.2],[377,4390,192.2],[378,4352,192.2],[383,4312,192.2],[385,4279,192.2],[367,4248,192.2],[346,4219,192.2],[363,4176,192.2],[368,4137,192.2],[354,4103,192.2],[334,4079,192.2],[341,4043,192.2],[358,4009,192.2],[362,3975,192.2],[337,3952,192.1],[343,3917,191.9],[329,3880,191.7],[345,3850,191.3],[353,3814,190.7],[322,3796,189.9],[297,3775,189.2],[265,3764,188.6],[258,3731,188.1],[237,3743,187.8],[222,3749,187.4],[220,3714,187.1],[193,3693,186.9],[172,3686,186.8],[165,3654,186.8],[142,3627,186.8],[117,3605,186.8],[116,3574,186.8],[94,3589,186.8],[82,3560,186.8],[55,3551,186.8],[76,3525,186.8],[57,3495,186.7],[27,3494,186.5],[5,3494,186.4],[-24,3501,186.3],[-35,3482,186.3],[-70,3474,186.3],[-78,3447,186.3],[-109,3443,186.3],[-116,3412,186.3],[-146,3419,186.3],[-176,3408,186.3],[-201,3394,186.3],[-232,3361,186.3],[-259,3358,186.3],[-278,3376,186.3],[-301,3370,186.3],[-303,3350,186.3],[-328,3354,186.3],[-342,3327,186.3],[-365,3344,186.3],[-405,3327,186.3],[-419,3340,186.3],[-441,3347,186.3],[-448,3305,186.1],[-469,3274,186],[-498,3251,185.8],[-506,3280,185.7],[-539,3298,185.6],[-569,3276,185.6],[-629,3218,185.6],[-695,3169,185.6],[-730,3134,185.6],[-781,3080,185.6],[-815,3049,185.6],[-852,3020,185.6],[-891,3002,185.6],[-965,2982,185.6],[-1010,2953,185.6],[-1047,2953,185.6],[-1081,2980,185.6],[-1117,2992,185.6],[-1148,2998,185.6],[-1175,3031,185.6],[-1211,3043,185.6],[-1239,3037,185.6],[-1272,3032,185.6],[-1297,3060,185.6],[-1331,3075,185.6],[-1353,3102,185.6],[-1370,3131,185.6],[-1398,3136,185.6],[-1423,3139,185.6],[-1445,3166,185.4],[-1480,3166,185.4],[-1489,3134,185.4],[-1472,3102,185.4],[-1460,3068,185.4],[-1460,3031,185.4],[-1444,2985,185.4],[-1437,2947,185.4],[-1393,2901,185.4],[-1352,2851,185.4],[-1321,2824,185.4],[-1298,2790,185.4],[-1262,2753,185.4],[-1223,2725,185.4],[-1191,2683,185.4],[-1091,2608,185.4],[-1058,2575,185.4],[-1033,2552,185.4],[-1007,2511,185.4],[-980,2391,185.4],[-957,2305,185.4],[-945,2241,185.3],[-953,2146,185.1],[-957,2090,185],[-945,1976,185],[-935,1920,185],[-897,1759,185],[-876,1703,185],[-853,1660,185],[-841,1590,185],[-847,1539,185],[-815,1489,185],[-779,1444,185],[-761,1415,185],[-742,1361,185],[-739,1310,185],[-727,1272,185],[-720,1199,185],[-738,1119,185],[-747,1033,185],[-747,915,185],[-730,715,185],[-692,451,185],[-680,412,185],[-643,344,185],[-627,285,185],[-617,243,185],[-587,203,185],[-544,197,185],[-499,205,185],[-439,191,185],[-407,173,185],[-375,128,185],[-373,69,185],[-393,34,185],[-410,-16,185],[-391,-70,185],[-345,-120,185],[-290,-162,185],[-248,-185,185],[-210,-229,185],[-187,-261,185],[-170,-291,185],[-148,-324,185],[-122,-361,185],[-82,-396,185],[-37,-423,185],[9,-451,185],[50,-464,185],[92,-464,185],[135,-486,185],[169,-501,185],[196,-525,185],[253,-544,185],[287,-551,185],[331,-536,185],[359,-496,185],[390,-454,185],[415,-422,185],[449,-398,185],[505,-411,185],[550,-425,185],[589,-433,185],[617,-464,185],[641,-500,185],[668,-540,185],[711,-576,185],[759,-596,185],[782,-626,185],[778,-662,185],[816,-695,185],[860,-707,185],[886,-689,185],[918,-675,185],[950,-659,185],[944,-627,185],[913,-597,185],[909,-555,185],[935,-531,185],[977,-542,185],[1016,-527,185],[1036,-470,185],[1051,-437,184.6],[1083,-413,183.5],[1125,-412,182.5],[1163,-433,181.7],[1195,-446,181.3],[1208,-410,181.1],[1223,-370,181],[1254,-356,180.7],[1283,-373,180.4],[1322,-371,180],[1343,-396,179.7],[1349,-431,179.3],[1337,-467,179.1],[1353,-490,178.8],[1394,-488,178.6],[1434,-486,178.5],[1463,-471,178.4],[1485,-451,178.4],[1502,-490,178.4],[1485,-524,178.4],[1509,-545,178.4],[1541,-527,178.3],[1572,-482,178.2],[1541,-465,178.1],[1533,-440,178],[1570,-439,178],[1610,-420,178],[1658,-413,178],[1699,-415,178],[1772,-427,178],[1842,-454,178],[1905,-482,178],[1945,-495,178],[1989,-502,178],[2038,-507,178],[2096,-505,178],[2151,-486,178],[2192,-488,178],[2203,-543,178],[2233,-570,178],[2277,-570,178],[2318,-574,178],[2358,-594,178],[2394,-613,178],[2428,-614,178],[2456,-587,178],[2477,-537,178],[2492,-500,178],[2537,-496,178],[2590,-507,178],[2609,-492,178],[2601,-457,178],[2636,-448,178],[2673,-439,178],[2708,-451,178],[2746,-458,178],[2799,-440,178],[2827,-420,178],[2848,-389,178],[2873,-360,178],[2908,-347,178],[2951,-346,178],[3000,-348,178],[3050,-367,178],[3088,-388,178],[3122,-418,178],[3164,-462,178],[3176,-514,178],[3169,-550,178],[3194,-575,178],[3223,-601,178],[3255,-608,178],[3273,-645,178],[3253,-671,178],[3283,-689,178],[3326,-669,178],[3349,-638,177.9],[3393,-624,177.7],[3411,-596,177.5],[3441,-583,177.4],[3445,-553,177.3],[3484,-551,177.2],[3517,-545,177.2],[3561,-548,177.1],[3599,-566,177],[3629,-584,176.8],[3662,-579,176.7],[3689,-591,176.6],[3693,-625,176.6],[3729,-647,176.6],[3753,-655,176.6],[3723,-698,176.6],[3749,-713,176.6],[3780,-728,176.6],[3769,-759,176.6],[3760,-793,176.6],[3765,-838,176.6],[3746,-870,176.6],[3712,-906,176.6],[3715,-959,176.6],[3729,-997,176.6],[3755,-1027,176.6],[3793,-1029,176.6],[3835,-1034,176.6],[3871,-1026,176.6],[3918,-1036,176.6],[3947,-1069,176.6],[3970,-1097,176.6],[4017,-1123,176.6],[4049,-1133,176.6],[4090,-1142,176.6],[4124,-1129,176.6],[4141,-1093,176.6],[4167,-1058,176.6],[4184,-1028,176.6],[4199,-995,176.6],[4228,-975,176.6],[4263,-980,176.6],[4286,-1017,176.6],[4311,-1051,176.3],[4329,-1088,175.8],[4354,-1123,175.5],[4386,-1144,175.4],[4421,-1149,175.3],[4446,-1164,175.3],[4454,-1199,175.3],[4457,-1229,175.3],[4484,-1206,175.3],[4493,-1155,175.3],[4521,-1139,175.3],[4566,-1151,175.3],[4621,-1159,175.3],[4656,-1185,175.3],[4681,-1214,175.3],[4712,-1241,175.3],[4750,-1239,175.3],[4778,-1219,175.2],[4780,-1254,175.2],[4784,-1293,175.2],[4818,-1301,175.2],[4841,-1272,175.2],[4869,-1249,175.2],[4883,-1217,175.2],[4892,-1201,175.2]];
 src/geodata.js:4:export const STREAMS = [{"name":"Pīsla","pts":[[-3551,4713,189.2],[-3294,4280,187.5],[-3207,4171,187.5],[-3149,4145,187.5],[-2710,4093,187],[-2450,4019,187],[-1991,3618,186.8],[-1967,3597,186.8],[-1884,3522,186.8],[-1843,3514,186.2],[-1843,3514,186.2]]},{"name":"Pīsla","pts":[[-1843,3514,186.2],[-1779,3520,186],[-1742,3535,185.8],[-1707,3554,185.8],[-1665,3454,185],[-1647,3420,185],[-1615,3350,185],[-1584,3286,185],[-1545,3220,185],[-1511,3175,185],[-1492,3150,185],[-1490,3145,185]]},{"name":"Dzērbe","pts":[[1333,-2694,184],[1418,-2429,184],[1393,-2368,184],[1354,-2326,184],[1357,-2295,184],[1364,-2235,183.9],[1383,-2214,183.9],[1383,-2184,183.9],[1334,-2143,183.9],[1315,-2108,183.9],[1313,-2080,183.9],[1392,-2031,183.5],[1430,-2017,183.5],[1443,-1989,183.2],[1444,-1949,183.2],[1421,-1923,183.2],[1366,-1933,183.2],[1318,-1909,183.2],[1288,-1859,183.2],[1260,-1816,183.2],[1226,-1753,183.2],[1206,-1698,183.2],[1203,-1639,183.2],[1219,-1583,183.2],[1247,-1574,183.2],[1247,-1545,183.2],[1271,-1510,183.2],[1300,-1496,183.2],[1348,-1401,183.2],[1340,-1369,183.2],[1312,-1334,183.2],[1300,-1285,183.2],[1287,-1257,183.2],[1253,-1217,183.2],[1236,-1182,183.2],[1210,-1156,183.2],[1120,-1121,183.2],[1080,-1106,183.2],[1050,-1082,183.2],[1043,-1054,183.2],[1083,-1014,183.2],[1124,-1015,183.2],[1151,-988,183.2],[1197,-984,183.2],[1226,-951,182.5],[1264,-917,181.8],[1277,-874,181.8],[1282,-854,181.4],[1311,-845,181.4],[1329,-814,181],[1313,-766,179.8],[1328,-740,179.5],[1347,-713,179.4],[1354,-674,179.4],[1379,-653,179.4],[1407,-635,179.3],[1423,-609,179],[1434,-596,179],[1440,-578,178.9],[1484,-545,178.8],[1493,-544,178.8]]},{"name":"","pts":[[-3149,828,203.5],[-3097,998,201.9],[-2970,1003,201.9],[-2945,1112,201.9],[-2941,1186,201.5],[-2925,1328,199.2],[-2939,1397,198.8],[-2950,1443,198.8],[-2970,1467,198.8],[-3026,1492,198.8],[-3066,1514,198],[-3111,1621,198],[-3134,1672,198],[-3164,1680,198],[-3201,1669,198],[-3284,1640,197.9],[-3340,1648,197.9],[-3378,1679,197.9],[-3405,1733,197.9],[-3466,1791,197.9],[-3491,1818,197],[-3459,1878,195.8],[-3438,1912,195.8],[-3409,1963,195.5],[-3374,1988,195.3],[-3330,2026,193.3],[-3309,2053,192.4],[-3293,2079,191.5],[-3293,2079,191.5]]}];
 src/geodata.js:5:export const LAKES = [{"name":"Ilzes ezers","level":186.5,"poly":[[-2983,2409],[-3038,2404],[-3053,2386],[-3073,2375],[-3091,2378],[-3116,2391],[-3167,2386],[-3195,2347],[-3205,2314],[-3180,2242],[-3158,2230],[-3142,2195],[-3127,2202],[-3115,2194],[-3120,2184],[-3126,2170],[-3069,2175],[-3041,2148],[-3025,2142],[-3008,2157],[-2983,2218],[-2889,2311],[-2866,2320],[-2821,2379],[-2765,2435],[-2745,2471],[-2698,2573],[-2587,2631],[-2549,2621],[-2454,2620],[-2425,2628],[-2384,2648],[-2323,2657],[-2308,2667],[-2276,2671],[-2263,2680],[-2282,2732],[-2302,2747],[-2322,2758],[-2349,2757],[-2406,2717],[-2441,2720],[-2431,2734],[-2434,2766],[-2394,2780],[-2367,2803],[-2356,2828],[-2321,2835],[-2312,2865],[-2283,2878],[-2231,2878],[-2033,2920],[-2011,2921],[-1941,2887],[-1894,2885],[-1871,2907],[-1837,2971],[-1796,3071],[-1741,3114],[-1724,3137],[-1720,3148],[-1731,3151],[-1740,3130],[-1830,3078],[-1896,3026],[-1927,3004],[-1991,2978],[-2100,2965],[-2158,2956],[-2224,2984],[-2256,2980],[-2285,2991],[-2277,3028],[-2346,3066],[-2394,3031],[-2421,3029],[-2426,3051],[-2403,3088],[-2392,3122],[-2369,3163],[-2313,3203],[-2308,3223],[-2288,3236],[-2281,3271],[-2298,3278],[-2307,3308],[-2300,3340],[-2354,3383],[-2391,3398],[-2453,3442],[-2451,3418],[-2459,3403],[-2477,3386],[-2465,3372],[-2484,3374],[-2494,3364],[-2495,3323],[-2512,3226],[-2532,3101],[-2534,3054],[-2533,3029],[-2520,3017],[-2470,3008],[-2470,2958],[-2452,2949],[-2446,2917],[-2461,2902],[-2516,2943],[-2548,2934],[-2555,2907],[-2597,2924],[-2607,2941],[-2685,2952],[-2701,2894],[-2722,2886],[-2717,2852],[-2759,2760],[-2790,2727],[-2806,2669],[-2833,2635],[-2829,2583],[-2860,2521],[-2918,2462],[-2916,2445],[-2923,2428],[-2936,2441],[-2983,2409]]},{"name":"Taurenes ezers","level":178.7,"poly":[[1685,-466],[1602,-383],[1499,-362],[1476,-293],[1480,-159],[1582,11],[1623,104],[1758,73],[1810,177],[1955,156],[2038,115],[2038,11],[2089,-93],[2017,-207],[1934,-300],[1965,-414],[2055,-491],[2038,-601],[1965,-694],[1872,-704],[1810,-642],[1851,-549],[1789,-476],[1685,-466]]},{"name":"Brenkūzis","level":186.4,"poly":[[-938,2947],[-921,2954],[-898,2952],[-888,2956],[-859,2956],[-847,2954],[-836,2948],[-820,2937],[-809,2921],[-797,2911],[-786,2905],[-776,2889],[-760,2866],[-757,2854],[-738,2837],[-713,2827],[-680,2812],[-666,2807],[-660,2801],[-648,2797],[-644,2793],[-636,2789],[-627,2774],[-622,2771],[-616,2763],[-604,2757],[-589,2746],[-575,2728],[-571,2724],[-567,2718],[-560,2714],[-549,2691],[-538,2688],[-530,2693],[-526,2702],[-508,2711],[-499,2718],[-495,2731],[-498,2746],[-509,2770],[-514,2777],[-533,2787],[-539,2788],[-543,2797],[-546,2814],[-552,2824],[-562,2831],[-571,2838],[-586,2849],[-596,2856],[-606,2867],[-619,2884],[-636,2898],[-658,2902],[-671,2904],[-696,2921],[-702,2928],[-704,2937],[-704,2943],[-700,2944],[-699,2950],[-700,2956],[-706,2962],[-708,2973],[-707,2981],[-699,3000],[-693,3003],[-689,3014],[-685,3031],[-658,3091],[-651,3094],[-643,3105],[-628,3109],[-623,3109],[-615,3114],[-606,3124],[-589,3136],[-579,3148],[-571,3158],[-564,3160],[-557,3167],[-555,3179],[-558,3190],[-559,3199],[-560,3215],[-556,3233],[-558,3251],[-561,3264],[-571,3284],[-570,3299],[-570,3308],[-570,3319],[-568,3324],[-562,3328],[-557,3335],[-565,3340],[-573,3339],[-587,3334],[-592,3334],[-598,3326],[-601,3315],[-608,3316],[-607,3323],[-607,3329],[-616,3332],[-625,3325],[-634,3330],[-652,3329],[-654,3323],[-646,3312],[-646,3305],[-655,3302],[-658,3294],[-655,3288],[-657,3281],[-662,3282],[-666,3284],[-672,3283],[-675,3275],[-677,3262],[-680,3252],[-688,3246],[-696,3244],[-704,3248],[-703,3256],[-706,3261],[-715,3258],[-719,3254],[-726,3250],[-727,3245],[-736,3240],[-740,3229],[-757,3225],[-762,3217],[-762,3206],[-764,3202],[-772,3192],[-788,3183],[-796,3183],[-803,3186],[-807,3185],[-814,3186],[-814,3177],[-812,3159],[-814,3153],[-820,3148],[-822,3139],[-826,3133],[-831,3127],[-836,3115],[-847,3110],[-860,3107],[-861,3095],[-876,3083],[-885,3068],[-885,3059],[-893,3052],[-902,3047],[-906,3038],[-912,3036],[-915,3031],[-921,3028],[-930,3028],[-936,3025],[-940,3020],[-947,3022],[-954,3019],[-961,3011],[-970,3004],[-970,3000],[-967,2998],[-964,2990],[-968,2970],[-972,2963],[-975,2955],[-972,2949],[-965,2950],[-959,2947],[-938,2947]]},{"name":"Šķesteru ezers","level":184.6,"poly":[[1374,-2707],[1368,-2713],[1364,-2721],[1369,-2734],[1376,-2743],[1386,-2750],[1397,-2753],[1415,-2747],[1422,-2736],[1430,-2729],[1434,-2715],[1438,-2711],[1446,-2709],[1457,-2710],[1465,-2713],[1478,-2729],[1484,-2730],[1490,-2727],[1495,-2727],[1499,-2731],[1503,-2737],[1509,-2740],[1515,-2738],[1520,-2733],[1522,-2729],[1526,-2727],[1532,-2728],[1538,-2727],[1542,-2724],[1548,-2714],[1552,-2705],[1555,-2700],[1561,-2696],[1561,-2691],[1563,-2682],[1565,-2674],[1566,-2667],[1565,-2656],[1564,-2644],[1559,-2629],[1559,-2622],[1559,-2615],[1560,-2609],[1561,-2602],[1558,-2596],[1554,-2585],[1552,-2575],[1554,-2566],[1547,-2559],[1546,-2551],[1543,-2548],[1538,-2544],[1532,-2536],[1526,-2530],[1521,-2527],[1518,-2522],[1518,-2515],[1514,-2507],[1507,-2502],[1497,-2499],[1490,-2493],[1486,-2483],[1480,-2478],[1475,-2474],[1470,-2471],[1467,-2465],[1463,-2459],[1460,-2453],[1458,-2444],[1454,-2434],[1448,-2431],[1440,-2430],[1430,-2429],[1423,-2427],[1419,-2423],[1411,-2422],[1404,-2423],[1397,-2428],[1392,-2433],[1382,-2436],[1374,-2443],[1369,-2452],[1366,-2457],[1363,-2460],[1357,-2460],[1353,-2460],[1351,-2462],[1348,-2469],[1350,-2472],[1355,-2474],[1356,-2477],[1351,-2481],[1348,-2486],[1347,-2495],[1346,-2503],[1340,-2514],[1334,-2523],[1331,-2531],[1331,-2532],[1324,-2544],[1319,-2550],[1316,-2560],[1310,-2570],[1304,-2594],[1303,-2618],[1306,-2644],[1306,-2647],[1311,-2665],[1320,-2683],[1337,-2708],[1350,-2711],[1354,-2705],[1362,-2701],[1372,-2699],[1375,-2703],[1374,-2707]]},{"name":"Dabaru ezers","level":184.89999999999998,"poly":[[-792,834],[-847,724],[-847,696],[-792,614],[-737,559],[-682,559],[-654,614],[-627,669],[-709,834],[-709,862],[-737,862],[-709,890],[-709,917],[-709,972],[-709,1165],[-792,1165],[-847,1165],[-847,1083],[-820,945],[-820,890],[-792,862]]}];
@@ -544,7 +544,7 @@ src/water.js:330:  return { group, pond, pondLevel, tick, setEra, applyEnvMap };
 codex
 I have the target modules and the prebuilt artifact in place. Next I’m reading the exact implementation around the sculpt stamps, mesh sampler, paint ordering, water apron construction, and vegetation distance thresholds with line numbers so any finding can be grounded precisely.
 exec
-/bin/bash -lc "nl -ba src/terrain.js | sed -n '1,460p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/terrain.js | sed -n '1,460p'" in ~/projects/village
  succeeded in 0ms:
      1	// Terrain: real Taurene DEM -> carved, painted, walkable ground.
      2	// The height field is shared by every era (the land itself is the constant);
@@ -983,7 +983,7 @@ exec
    435	}
 
 exec
-/bin/bash -lc "nl -ba src/landuse.js | sed -n '1,480p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/landuse.js | sed -n '1,480p'" in ~/projects/village
  succeeded in 0ms:
      1	// Land-use composition for each era: where the farmstead, fields, roads and
      2	// forests are. All modules (terrain painting, vegetation, era content) read
@@ -1453,7 +1453,7 @@ exec
    466	};
 
 exec
-/bin/bash -lc "nl -ba src/water.js | sed -n '1,360p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/water.js | sed -n '1,360p'" in ~/projects/village
  succeeded in 0ms:
      1	// Water bodies, all from real geometry: the Gauja ribbon (OSM course),
      2	// Taurenes ezers (OSM outline), the Dzērbe and a nameless brook, and the
@@ -1788,7 +1788,7 @@ exec
    331	}
 
 exec
-/bin/bash -lc "nl -ba src/vegetation.js | sed -n '1,380p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/vegetation.js | sed -n '1,380p'" in ~/projects/village
  succeeded in 0ms:
      1	// Vegetation: LAAS-pipeline trees (real branched bark tubes + captured
      2	// twig-atlas cluster cards) in two tiers — FULL (bark+cards, casts shadow)
@@ -2172,7 +2172,7 @@ exec
    380	        const d = forestDensity(era, x, z, y);
 
 exec
-/bin/bash -lc "nl -ba src/vegetation.js | sed -n '358,760p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/vegetation.js | sed -n '358,760p'" in ~/projects/village
  succeeded in 0ms:
    358	  // ---- placements per era ------------------------------------------------
    359	  function placementsFor(era) {
@@ -2581,7 +2581,7 @@ exec
 codex
 The first pass shows the relevant code is concentrated in a few places: terrain sculpt and `meshHeightAt`, water ribbon/skirt, land-use distance fields, and vegetation placement. I’m now checking the math against Three.js geometry conventions and the generated distance fields, because several of these bugs would be silent unless the sampler or thresholds are off by one cell.
 exec
-/bin/bash -lc "nl -ba src/util.js | sed -n '1,220p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/util.js | sed -n '1,220p'" in ~/projects/village
  succeeded in 0ms:
      1	// Shared helpers: deterministic RNG, value noise, procedural canvas textures.
      2	import * as THREE from 'three';
@@ -2683,13 +2683,13 @@ exec
     98	}
 
 exec
-/bin/bash -lc "find . -maxdepth 2 -type f \\( -name 'package.json' -o -name 'package-lock.json' -o -name 'pnpm-lock.yaml' -o -name 'yarn.lock' \\) -print" in /home/anna/projects/village
+/bin/bash -lc "find . -maxdepth 2 -type f \\( -name 'package.json' -o -name 'package-lock.json' -o -name 'pnpm-lock.yaml' -o -name 'yarn.lock' \\) -print" in ~/projects/village
  succeeded in 0ms:
 ./package-lock.json
 ./package.json
 
 exec
-/bin/bash -lc "nl -ba src/heightmap.js | sed -n '1,80p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/heightmap.js | sed -n '1,80p'" in ~/projects/village
  succeeded in 0ms:
      1	// Real elevation, Taurene–Brezgi country, Latvia. 8.8 km square,
      2	// 320x320 grid, centre offset (500, 1700) from the village origin.
@@ -2710,7 +2710,7 @@ exec
     17	}
 
 exec
-/bin/bash -lc "ls -la node_modules/three 2>/dev/null | sed -n '1,80p'" in /home/anna/projects/village
+/bin/bash -lc "ls -la node_modules/three 2>/dev/null | sed -n '1,80p'" in ~/projects/village
  succeeded in 0ms:
 total 32
 drwxrwxr-x  5 anna anna 4096 Jul  4 01:14 .
@@ -2725,7 +2725,7 @@ drwxrwxr-x 18 anna anna 4096 Jul  4 01:14 src
 codex
 `meshHeightAt` is a likely high-risk area because it tries to mirror Three.js’s indexed plane triangles. I’m going to verify it with the installed Three.js code rather than relying on memory, then probe the terrain/water distances numerically.
 exec
-/bin/bash -lc 'cat package.json' in /home/anna/projects/village
+/bin/bash -lc 'cat package.json' in ~/projects/village
  succeeded in 0ms:
 {
   "name": "village",
@@ -2750,7 +2750,7 @@ exec
 }
 
 exec
-/bin/bash -lc "nl -ba node_modules/three/src/geometries/PlaneGeometry.js | sed -n '1,220p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba node_modules/three/src/geometries/PlaneGeometry.js | sed -n '1,220p'" in ~/projects/village
  succeeded in 0ms:
      1	import { BufferGeometry } from '../core/BufferGeometry.js';
      2	import { Float32BufferAttribute } from '../core/BufferAttribute.js';
@@ -2887,7 +2887,7 @@ exec
    133	export { PlaneGeometry };
 
 exec
-/bin/bash -lc 'rg -n "class PlaneGeometry|PlaneGeometry" node_modules/three/src node_modules/three/build | head -40' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "class PlaneGeometry|PlaneGeometry" node_modules/three/src node_modules/three/build | head -40' in ~/projects/village
  succeeded in 0ms:
 node_modules/three/build/three.core.js:35938: * const geometry = new THREE.PlaneGeometry( 1, 1 );
 node_modules/three/build/three.core.js:35945: * @demo scenes/geometry-browser.html#PlaneGeometry
@@ -2913,7 +2913,7 @@ node_modules/three/build/three.webgpu.js:88140:export { ACESFilmicToneMapping, A
 node_modules/three/src/materials/ShadowMaterial.js:8: * const geometry = new THREE.PlaneGeometry( 2000, 2000 );
 
 exec
-/bin/bash -lc 'rg -n "findings-river|river|water|terrain" research/audit-codex/confirmed.json research/audit-codex/uncertain.json research/audit-codex/log-river.txt' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "findings-river|river|water|terrain" research/audit-codex/confirmed.json research/audit-codex/uncertain.json research/audit-codex/log-river.txt' in ~/projects/village
  succeeded in 0ms:
 research/audit-codex/uncertain.json:6:  "evidence": "Poles follow x = S.x+46+sin(z*0.004)*4 for z=-700..zEnd with no water/road/building checks. Pole 8 at (-140,-332) is 2.4m from the rendered river spline centreline \u2014 ~9m inside the 23.6m-wide water surface (both eras). Screenshot scratchpad/audit/y3-e4-pole-field-river.png shows the wire run crossing the Gauja on the water with the pole at the channel and the line then passing directly across the old manor house frontage \u2014 the pole at z=-194 computes to (-139.8,-194), ~5m from the manorHouse placed at (Mn.x-105, Mn.z-15)=(-145,-195) in eras 4/5. Poles 14 and 29-39 stand inside the hand-laid parish-road corridor (pole 14 is 0.85m from the road centreline). Data: xmod-out2.txt section 6.",
 research/audit-codex/uncertain.json:45:  "title": "Pond water edge hangs above the ground on its north and south-west rims",
@@ -2979,7 +2979,7 @@ research/audit-codex/log-river.txt:72:-rw-rw-r-- 1 anna anna  2555 Jul  8 01:50 
 research/audit-codex/log-river.txt:74:-rw-rw-r-- 1 anna anna  2012 Jul  7 22:05 prompt-river.md
 research/audit-codex/log-river.txt:99:-rw-rw-r-- 1 anna anna  18994 Jul  5 11:09 terrain.js
 research/audit-codex/log-river.txt:104:-rw-rw-r-- 1 anna anna  13926 Jul  5 10:44 water.js
-research/audit-codex/log-river.txt:112:/bin/bash -lc 'pwd && rg -n "function|const|export|meshHeightAt|buildTerrain|sculpt|river|RIVER|apron|shelf|micro|distToRiver|road|paint|band|lake|pond" src/terrain.js src/water.js src/landuse.js src/geodata.js' in /home/anna/projects/village
+research/audit-codex/log-river.txt:112:/bin/bash -lc 'pwd && rg -n "function|const|export|meshHeightAt|buildTerrain|sculpt|river|RIVER|apron|shelf|micro|distToRiver|road|paint|band|lake|pond" src/terrain.js src/water.js src/landuse.js src/geodata.js' in ~/projects/village
 research/audit-codex/log-river.txt:121:src/landuse.js:2:// forests are. All modules (terrain painting, vegetation, era content) read
 research/audit-codex/log-river.txt:124:src/landuse.js:19:// --- coarse water-distance field (30 m cells) — makes distToRiver/streams O(1)
 research/audit-codex/log-river.txt:138:src/landuse.js:49:  // the river on exactly those bends)
@@ -3258,7 +3258,7 @@ research/audit-codex/log-river.txt:540:src/water.js:322:  function applyEnvMap(t
 research/audit-codex/log-river.txt:541:src/water.js:323:    for (const m of mats) {
 research/audit-codex/log-river.txt:542:src/water.js:330:  return { group, pond, pondLevel, tick, setEra, applyEnvMap };
 research/audit-codex/log-river.txt:545:I have the target modules and the prebuilt artifact in place. Next I’m reading the exact implementation around the sculpt stamps, mesh sampler, paint ordering, water apron construction, and vegetation distance thresholds with line numbers so any finding can be grounded precisely.
-research/audit-codex/log-river.txt:547:/bin/bash -lc "nl -ba src/terrain.js | sed -n '1,460p'" in /home/anna/projects/village
+research/audit-codex/log-river.txt:547:/bin/bash -lc "nl -ba src/terrain.js | sed -n '1,460p'" in ~/projects/village
 research/audit-codex/log-river.txt:569:    21	  // each water point lowers the cells inside its radius; candidates are
 research/audit-codex/log-river.txt:592:    44	  // …and a tight channel stamped along the RIBBON SPLINE itself: the water
 research/audit-codex/log-river.txt:594:    46	  // off the point-stamped corridor on bends and left the river beheaded by
@@ -3297,7 +3297,7 @@ research/audit-codex/log-river.txt:1119:   132	  CAMP: { x: rvx + 90, z: 130 }, 
 research/audit-codex/log-river.txt:1176:   189	const bx = riverXAt(bridgeZ);
 research/audit-codex/log-river.txt:1177:   190	const b2 = riverPointNearest(M.x + 40, M.z - 220);
 research/audit-codex/log-river.txt:1191:   204	    // footpaths: stead->river, stead->barrows, stead->oak
-research/audit-codex/log-river.txt:1456:/bin/bash -lc "nl -ba src/water.js | sed -n '1,360p'" in /home/anna/projects/village
+research/audit-codex/log-river.txt:1456:/bin/bash -lc "nl -ba src/water.js | sed -n '1,360p'" in ~/projects/village
 research/audit-codex/log-river.txt:1460:     3	// mill pond that exists only while the manor's watermill does (eras 2-3).
 research/audit-codex/log-river.txt:1465:     8	import { heightAt } from './terrain.js';
 research/audit-codex/log-river.txt:1467:    10	function waterNormalTex() {
@@ -3332,7 +3332,7 @@ research/audit-codex/log-river.txt:2696:     3	// Source: AWS Open Data terrain 
 research/audit-codex/log-river.txt:2726:`meshHeightAt` is a likely high-risk area because it tries to mirror Three.js’s indexed plane triangles. I’m going to verify it with the installed Three.js code rather than relying on memory, then probe the terrain/water distances numerically.
 
 exec
-/bin/bash -lc "nl -ba src/eras.js | sed -n '520,640p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/eras.js | sed -n '520,640p'" in ~/projects/village
  succeeded in 0ms:
    520	    spawns.push(['chicken', 3, { x: S.x, z: S.z + 3, r: 10 }]);
    521	    spawns.push(['rooster', 1, { x: S.x, z: S.z + 3, r: 10 }]);
@@ -3457,7 +3457,7 @@ exec
    640	  g.traverse((o) => { if (o.isMesh && o.castShadow === undefined) o.castShadow = true; });
 
 exec
-/bin/bash -lc 'rg -n "bridge|BRIDGE|BRIDGE2|meshHeightAt|roadRibbons|road|dam|pond" src/eras.js src/main.js src/rig.js src/grass.js' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "bridge|BRIDGE|BRIDGE2|meshHeightAt|roadRibbons|road|dam|pond" src/eras.js src/main.js src/rig.js src/grass.js' in ~/projects/village
  succeeded in 0ms:
 src/grass.js:28:// bands still check roads per blade (an 11m cell straddles a whole lane).
 src/grass.js:33:  { key: 'mid', r0: 45, r1: 130, cell: 2.6, perCell: 9, thresh: 38, wide: 1.85, cellRules: true, roadPerBlade: true },
@@ -3495,10 +3495,10 @@ src/eras.js:619:    nb.position.y = BRIDGE2.level + 0.2;
 src/eras.js:628:    roadRibbons(g, 5);
 
 exec
-/bin/bash -lc "find research/audit-codex/shots -maxdepth 1 -type f -printf '%f\\n' | sort | sed -n '1,160p'" in /home/anna/projects/village
+/bin/bash -lc "find research/audit-codex/shots -maxdepth 1 -type f -printf '%f\\n' | sort | sed -n '1,160p'" in ~/projects/village
  succeeded in 0ms:
 exec
-/bin/bash -lc "nl -ba src/eras.js | sed -n '1,190p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/eras.js | sed -n '1,190p'" in ~/projects/village
  succeeded in 0ms:
      1	// The six moments in time, staged on the same ground:
      2	//   0  ~10,800 BC — Younger Dryas tundra: reindeer, dead ice, no one yet
@@ -3694,7 +3694,7 @@ exec
 codex
 I found one already-confirmed river-adjacent defect in prior audit notes, but I’m not going to copy it blindly. I’m checking whether it still holds from current source and whether it belongs to this narrower terrain/water pipeline before deciding whether to include it.
 exec
-/bin/bash -lc "nl -ba src/eras.js | sed -n '190,260p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/eras.js | sed -n '190,260p'" in ~/projects/village
  succeeded in 0ms:
    190	    const dashes = new THREE.Mesh(dg, new THREE.MeshLambertMaterial({
    191	      color: 0xc9cdd1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
@@ -3856,7 +3856,7 @@ for (const i of [0,1,2,rows.length-3,rows.length-2,rows.length-1]) {
   const r=rows[i];
   console.log('row',i,'center',r.slice(0,3).map(v=>+v.toFixed(3)),'wOut',+r[5].toFixed(3),'inner0',inner[0][i].map(v=>+v.toFixed(3)),'inner1',inner[1][i].map(v=>+v.toFixed(3)));
 }
-EOF" in /home/anna/projects/village
+EOF" in ~/projects/village
  succeeded in 0ms:
 {
   "triangles": 16000,
@@ -3928,15 +3928,15 @@ row 2 center [ 375.012, 6069.979, 193.604 ] wOut 15.351 inner0 [ 364.176, 193.60
 row 1998 center [ 4889.487, -1205.153, 175.2 ] wOut 15.006 inner0 [ 4900.189, 175.2, -1210.123 ] inner1 [ 4878.785, 175.2, -1200.183 ]
 row 1999 center [ 4890.934, -1202.792, 175.2 ] wOut 15.148 inner0 [ 4901.668, 175.2, -1207.695 ] inner1 [ 4880.201, 175.2, -1197.89 ]
 row 2000 center [ 4891.983, -1201.03, 175.2 ] wOut 15.416 inner0 [ 4902.669, 175.2, -1206.035 ] inner1 [ 4881.297, 175.2, -1196.026 ]
-(node:1684690) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
+(node:1684690) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 codex
 The apron winding check produced a strong result: almost every skirt triangle winds downward while the material renders only front faces. I’m now checking vegetation/grass thresholds against the refined `distToRiver` field, because a single overestimated distance near a bend would let plants survive in the channel.
 exec
-/bin/bash -lc "nl -ba src/grass.js | sed -n '1,430p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/grass.js | sed -n '1,430p'" in ~/projects/village
  succeeded in 0ms:
      1	// Near-field grass — LAAS GroundRing, WebGL edition, stable-world variant.
      2	// Four camera-following bands: a SHORT DENSE CARPET everywhere the ground is
@@ -4370,7 +4370,7 @@ exec
    430	        if (band.hiOff && !band.on) mesh0Off(band);
 
 exec
-/bin/bash -lc 'rg -n "distToRiver|distToStreams|riverLevelNear|water|lake|road|field|heightAt" src/grass.js src/vegetation.js src/landuse.js src/terrain.js' in /home/anna/projects/village
+/bin/bash -lc 'rg -n "distToRiver|distToStreams|riverLevelNear|water|lake|road|field|heightAt" src/grass.js src/vegetation.js src/landuse.js src/terrain.js' in ~/projects/village
  succeeded in 0ms:
 src/terrain.js:2:// The height field is shared by every era (the land itself is the constant);
 src/terrain.js:7:import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
@@ -4536,7 +4536,7 @@ src/grass.js:393:          const t = fa.field.type;
 codex
 There is a separate plant gap in `grass.js`: the grass bands use a 16.5m water exclusion, but flowers use only 4m. I’m going to quantify whether actual deterministic flower positions can land within the 11.8m water ribbon, rather than treating it as a purely theoretical threshold mismatch.
 exec
-/bin/bash -lc "rg -n \"grass\\.update|buildGrass|focus|simControls|camera\\.position|LOC|view|cam\" src/main.js src/rig.js src/content.js data/dbg.mjs" in /home/anna/projects/village
+/bin/bash -lc "rg -n \"grass\\.update|buildGrass|focus|simControls|camera\\.position|LOC|view|cam\" src/main.js src/rig.js src/content.js data/dbg.mjs" in ~/projects/village
  succeeded in 0ms:
 data/dbg.mjs:1:// Debug screenshot harness: place the camera anywhere, hide named groups.
 data/dbg.mjs:2:// node data/dbg.mjs out.png "era=1;time=0.42;hide=clouds,horizon;cam=-410,200,-16;tgt=-730,187,715;wait=900"
@@ -4604,7 +4604,7 @@ src/main.js:525:    sky.update(dt, focus, shadowNow);
 src/main.js:529:    grass.update(focus, currentEra, camera.position);
 
 exec
-/bin/bash -lc "nl -ba data/dbg.mjs | sed -n '1,220p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba data/dbg.mjs | sed -n '1,220p'" in ~/projects/village
  succeeded in 0ms:
      1	// Debug screenshot harness: place the camera anywhere, hide named groups.
      2	// node data/dbg.mjs out.png "era=1;time=0.42;hide=clouds,horizon;cam=-410,200,-16;tgt=-730,187,715;wait=900"
@@ -4621,7 +4621,7 @@ exec
     13	page.on('console', (m) => {
     14	  if (m.type() === 'error' || m.text().startsWith('[boot]')) console.log('[console]', m.text().slice(0, 300));
     15	});
-    16	await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+    16	await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
     17	await page.waitForFunction('window.__sim !== undefined', { timeout: 40000 });
     18	await new Promise((r) => setTimeout(r, 2500));
     19	for (const step of script.split(';').filter(Boolean)) {
@@ -4658,7 +4658,7 @@ exec
     50	console.log('saved', out);
 
 exec
-/bin/bash -lc "nl -ba src/main.js | sed -n '240,560p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/main.js | sed -n '240,560p'" in ~/projects/village
  succeeded in 0ms:
    240	      }
    241	    }
@@ -5077,7 +5077,7 @@ for (let i=0;i<=SEG;i++) {
 }
 console.log('worstInsideWaterDRiv', Object.fromEntries(Object.entries(worstInside).map(([k,v])=>[k, typeof v==='number'?+v.toFixed(3):v])));
 console.log('worstOverestimateInsideWater', Object.fromEntries(Object.entries(worstOver).map(([k,v])=>[k, typeof v==='number'?+v.toFixed(3):v])));
-EOF" in /home/anna/projects/village
+EOF" in ~/projects/village
  succeeded in 1720ms:
 upe-cam era 2 focus -410.0 -16.0 hits 158 [
   {
@@ -6416,17 +6416,17 @@ worstOverestimateInsideWater {
   err: 25.469,
   y: 185
 }
-(node:1685990) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
+(node:1685990) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 codex
 The numeric probe found a larger issue than the flower threshold alone: `distToRiver` can report about 25m at points that are on the rendered spline centerline, because it bilinearly samples a 30m grid of distances rather than computing continuous distance. That directly affects grass exclusion and `microDamp`, so I’m taking targeted screenshots at one of those coordinates to see whether the artifact is visible.
 exec
-/bin/bash -lc 'mkdir -p research/audit-codex/shots && node data/dbg.mjs research/audit-codex/shots/river-distfield-water-grass.png "era=4;time=0.4;nofog=1;cam=-725,190,465;tgt=-706,184,541;wait=1200"' in /home/anna/projects/village
+/bin/bash -lc 'mkdir -p research/audit-codex/shots && node data/dbg.mjs research/audit-codex/shots/river-distfield-water-grass.png "era=4;time=0.4;nofog=1;cam=-725,190,465;tgt=-706,184,541;wait=1200"' in ~/projects/village
 exec
-/bin/bash -lc 'node data/dbg.mjs research/audit-codex/shots/river-apron-low.png "era=4;time=0.4;nofog=1;cam=-718,187,520;tgt=-706,184,541;wait=1200"' in /home/anna/projects/village
+/bin/bash -lc 'node data/dbg.mjs research/audit-codex/shots/river-apron-low.png "era=4;time=0.4;nofog=1;cam=-718,187,520;tgt=-706,184,541;wait=1200"' in ~/projects/village
 exec
 /bin/bash -lc "node --input-type=module <<'EOF'
 import { RIVER_PTS } from './src/geodata.js';
@@ -6456,7 +6456,7 @@ for(const band of BANDS.slice(0,4)) {
   const hits=candidates(band,focus.x,focus.z,4).sort((a,b)=>a.ex-b.ex);
   console.log(band.key,hits.length,hits.slice(0,8).map(h=>({x:+h.x.toFixed(2),z:+h.z.toFixed(2),ex:+h.ex.toFixed(2),dRivCell:+h.dRivCell.toFixed(2),y:+h.y.toFixed(2),lvl:+h.lvl.toFixed(2)})));
 }
-EOF' in /home/anna/projects/village
+EOF' in ~/projects/village
  succeeded in 48255ms:
 turf 689 [
   {
@@ -6722,9 +6722,9 @@ mid 1092 [
     lvl: 185
   }
 ]
-(node:1686868) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
+(node:1686868) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
  succeeded in 63394ms:
@@ -6762,7 +6762,7 @@ for(let pass=0;pass<3;pass++)for(let i=1;i<rows.length-1;i++)rows[i][5]=Math.min
 const samples=[];
 for(let i=0;i<rows.length;i++){ const [x,z,y,dx,dz,wOut]=rows[i]; for(const side of [-1,1]){ const nx=-dz*side,nz=dx*side; const pts=[['inner',W_IN,y-0.5],['mid',W_IN+(wOut-W_IN)*0.45,y+0.04],['outer',wOut,y+0.07]]; for(const [band,w,ay] of pts){const px=x+nx*w,pz=z+nz*w; const gy=heightAt(px,pz); samples.push({i,band,side,w,px,pz,water:y,apron:ay,ground:gy,clear:ay-gy,dRiv:distToRiver(px,pz)}); }} }
 for(const band of ['inner','mid','outer']){ const a=samples.filter(s=>s.band===band); const min=a.reduce((m,s)=>s.clear<m.clear?s:m,a[0]); const max=a.reduce((m,s)=>s.clear>m.clear?s:m,a[0]); const buried=a.filter(s=>s.clear<0).length; const low=a.filter(s=>s.clear>=0&&s.clear<0.08).length; const float=a.filter(s=>s.clear>0.5).length; console.log(band,{n:a.length,buried,low,float,min:Object.fromEntries(Object.entries(min).map(([k,v])=>[k, typeof v==='number'?+v.toFixed(3):v])),max:Object.fromEntries(Object.entries(max).map(([k,v])=>[k, typeof v==='number'?+v.toFixed(3):v]))}); }
-EOF" in /home/anna/projects/village
+EOF" in ~/projects/village
  succeeded in 214ms:
 inner {
   n: 4002,
@@ -6860,15 +6860,15 @@ outer {
     dRiv: 10.052
   }
 }
-(node:1689230) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
+(node:1689230) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 codex
 One more item is directly tied to the sculpt shelf: the fixed bridge placement at the manor bend. I’m doing a quick current-source check and one screenshot so the output can say exactly whether that crossing is cut by the submerged shelf.
 exec
-/bin/bash -lc 'node data/dbg.mjs research/audit-codex/shots/bridge2-shelf-cut.png "era=4;time=0.4;nofog=1;hide=vegetation;cam=-48,196,-346;tgt=-37,185,-423;wait=1200"' in /home/anna/projects/village
+/bin/bash -lc 'node data/dbg.mjs research/audit-codex/shots/bridge2-shelf-cut.png "era=4;time=0.4;nofog=1;hide=vegetation;cam=-48,196,-346;tgt=-37,185,-423;wait=1200"' in ~/projects/village
 exec
 /bin/bash -lc "node --input-type=module <<'EOF'
 import { RIVER_PTS } from './src/geodata.js';
@@ -6883,7 +6883,7 @@ console.log({BRIDGE2});
 for(const [name,x,z] of pts){ const n=nearest(x,z); console.log(name,{x,z,exactDist:+n.d.toFixed(2),ground:+heightAt(x,z).toFixed(2),water:lvl}); }
 // Walk along deck axis until ground rises above water+0.2
 for(const dir of [-1,1]){ let first=null; for(let s=0;s<=35;s+=0.5){const x=cx,z=cz+dir*s; if(heightAt(x,z)>lvl+0.2){first=s;break;}} console.log('dry along z dir',dir,first); }
-EOF" in /home/anna/projects/village
+EOF" in ~/projects/village
  succeeded in 215ms:
 { BRIDGE2: { x: -37, z: -423, level: 185 } }
 center { x: -37, z: -423, exactDist: 0, ground: 183.5, water: 185 }
@@ -6893,9 +6893,9 @@ north+corner { x: -34.8, z: -437, exactDist: 10.71, ground: 183.48, water: 185 }
 south+corner { x: -39.2, z: -409, exactDist: 10.97, ground: 183.7, water: 185 }
 dry along z dir -1 22.5
 dry along z dir 1 18.5
-(node:1689763) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/anna/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
+(node:1689763) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://~/projects/village/src/geodata.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
-To eliminate this warning, add "type": "module" to /home/anna/projects/village/package.json.
+To eliminate this warning, add "type": "module" to ~/projects/village/package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
  succeeded in 59732ms:
@@ -6910,12 +6910,12 @@ saved research/audit-codex/shots/bridge2-shelf-cut.png
 codex
 The bridge probe holds: both deck ends are still over submerged carved shelf, and dry ground starts several metres beyond the nominal 28m deck. I’m inspecting that screenshot, then I’ll write the JSON findings only for issues that have enough evidence.
 exec
-/bin/bash -lc "rg -n \"function bridge|bridge\\(\" src/buildings.js | head -20" in /home/anna/projects/village
+/bin/bash -lc "rg -n \"function bridge|bridge\\(\" src/buildings.js | head -20" in ~/projects/village
  succeeded in 0ms:
 389:export function bridge(simple = false) {
 
 exec
-/bin/bash -lc "nl -ba src/buildings.js | sed -n '1,180p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/buildings.js | sed -n '1,180p'" in ~/projects/village
  succeeded in 0ms:
      1	// Parametric vernacular architecture of the Vidzeme countryside:
      2	// corner-notched log buildings, thatch/shingle/tile roofs, the klēts on
@@ -7099,7 +7099,7 @@ exec
    180	  }
 
 exec
-/bin/bash -lc "nl -ba src/buildings.js | sed -n '380,430p'" in /home/anna/projects/village
+/bin/bash -lc "nl -ba src/buildings.js | sed -n '380,430p'" in ~/projects/village
  succeeded in 0ms:
    380	  }
    381	  wheel.position.set(-3.2, 1.2, 0);
@@ -7156,11 +7156,11 @@ exec
 codex
 I have enough evidence for three defects: the river distance field breaks water exclusions and `microDamp`, the bank apron is not reliably rendered/draped, and the fixed bridge crossing is shorter than the carved submerged shelf. I’m writing only those to the requested JSON file now.
 exec
-/bin/bash -lc "test -e research/audit-codex/findings-river.json && nl -ba research/audit-codex/findings-river.json | sed -n '1,160p' || true" in /home/anna/projects/village
+/bin/bash -lc "test -e research/audit-codex/findings-river.json && nl -ba research/audit-codex/findings-river.json | sed -n '1,160p' || true" in ~/projects/village
  succeeded in 0ms:
 apply patch
 patch: completed
-/home/anna/projects/village/research/audit-codex/findings-river.json
+~/projects/village/research/audit-codex/findings-river.json
 diff --git a/research/audit-codex/findings-river.json b/research/audit-codex/findings-river.json
 new file mode 100644
 index 0000000000000000000000000000000000000000..c8ddd80a736bc534c3d99228b7d4cea85a9384e5
@@ -7228,7 +7228,7 @@ index 0000000000000000000000000000000000000000..c8ddd80a736bc534c3d99228b7d4cea8
 codex
 The JSON file is written. I’m validating it now and then I’ll print the requested completion marker.
 exec
-/bin/bash -lc "node -e \"const fs=require('fs'); JSON.parse(fs.readFileSync('research/audit-codex/findings-river.json','utf8'));\" && printf 'DONE\\n'" in /home/anna/projects/village
+/bin/bash -lc "node -e \"const fs=require('fs'); JSON.parse(fs.readFileSync('research/audit-codex/findings-river.json','utf8'));\" && printf 'DONE\\n'" in ~/projects/village
  succeeded in 0ms:
 DONE
 

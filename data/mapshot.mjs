@@ -11,7 +11,7 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1600, height: 1000 });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 400)));
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
   await new Promise((r) => setTimeout(r, 2500));
   await page.evaluate((e) => window.__sim.era(+e), era);

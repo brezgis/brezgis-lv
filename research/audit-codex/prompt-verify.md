@@ -1,9 +1,9 @@
-You are an adversarial verifier for a Three.js heritage simulation at /home/anna/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; work read-only except for writing your outputs).
+You are an adversarial verifier for a Three.js heritage simulation at ~/projects/village (already built to artifact/brezgi-taurene.html — do NOT run build.mjs, do NOT git commit; work read-only except for writing your outputs).
 
 The file research/audit-codex/uncertain.json holds 8 findings from another reviewer whose verification never completed. For EACH finding, try hard to REFUTE it by reading the actual code in src/ and, for visual claims, by taking your own screenshots. Default to REFUTED if the evidence does not hold up.
 
 Screenshot harness (headless Chrome; each page load takes 30-120s, so BATCH shots — few page loads):
-  cd /home/anna/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=<0..5>;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
+  cd ~/projects/village && node data/dbg.mjs research/audit-codex/shots/<name>.png "era=<0..5>;time=0.4;cam=x,y,z;tgt=x,y,z;wait=900"
 Extra params: nofog=1 disables fog; hide=<group,group> hides named groups (terrain,vegetation,clouds,stars).
 Coordinates: scene metres, origin = village centre; x east, z south; terrain y ~185-259. Era 1 = AD 50, era 4 = 1935, era 5 = 2025.
 Key locations in src/landuse.js (LOC). The river spline points are RIVER_PTS in src/geodata.js.

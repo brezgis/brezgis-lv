@@ -9,8 +9,12 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 900, height: 560 });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 300)));
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
+  // __sim is exposed before the initial era finishes activating. Switching
+  // immediately races two 600k-instance forest fills and can kill the GPU
+  // process before the first keyboard event.
+  await new Promise((r) => setTimeout(r, 3000));
   await page.evaluate(() => {
     window.__sim.era(3);
     window.__sim.jump('pagalms');
@@ -19,10 +23,12 @@ try {
     const c = window.__sim.camera.position;
     return { x: c.x, z: c.z, mode: window.__rig.mode };
   });
+  const advance = (frames) => page.evaluate((n) => {
+    for (let i = 0; i < n; i++) window.__rig.update(1 / 60);
+  }, frames);
   // real keyboard event: cinema -> fly via the ArrowUp alias
   await page.keyboard.down('ArrowUp');
-  // headless throttles rAF; screenshots force frames
-  for (let i = 0; i < 8; i++) await page.screenshot({ path: '/dev/null' }).catch(() => {});
+  await advance(45);
   await page.keyboard.up('ArrowUp');
   const mid = await page.evaluate(() => {
     const c = window.__sim.camera.position;
@@ -35,15 +41,19 @@ try {
     S.jump('pagalms');
     window.__rig.setMode('walk');
   });
-  for (let i = 0; i < 4; i++) await page.screenshot({ path: '/dev/null' }).catch(() => {});
+  await advance(45);
+  const walkBefore = await page.evaluate(() => {
+    const c = window.__sim.camera.position;
+    return { x: c.x, z: c.z };
+  });
   await page.keyboard.down('ArrowUp');
-  for (let i = 0; i < 8; i++) await page.screenshot({ path: '/dev/null' }).catch(() => {});
+  await advance(75);
   await page.keyboard.up('ArrowUp');
   const after = await page.evaluate(() => {
     const c = window.__sim.camera.position;
     return { x: c.x, z: c.z, mode: window.__rig.mode, grounded: window.__rig.grounded };
   });
-  const walked = Math.hypot(after.x - mid.x, after.z - mid.z);
+  const walked = Math.hypot(after.x - walkBefore.x, after.z - walkBefore.z);
   console.log(`cinema->${mid.mode} flew ${flew.toFixed(1)}m; walk grounded=${after.grounded} walked ${walked.toFixed(1)}m`);
   console.log(mid.mode === 'fly' && flew > 0.5 && after.mode === 'walk' && after.grounded && walked > 0.5 ? 'PASS' : 'FAIL');
   if (process.argv[2]) await page.screenshot({ path: process.argv[2] });

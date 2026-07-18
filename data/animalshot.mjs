@@ -18,7 +18,7 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1400, height: 900 });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 300)));
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 60000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
   await new Promise((r) => setTimeout(r, 2500));
   await page.evaluate((e) => { window.__sim.era(+e); window.__sim.sky.state.paused = true; window.__sim.sky.state.t = 0.42; }, era);

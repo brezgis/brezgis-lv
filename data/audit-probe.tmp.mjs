@@ -1,6 +1,6 @@
 // Audit probe: flower determinism, hiOff aerial logic, instance-cap saturation.
 import puppeteer from 'puppeteer-core';
-const OUT = '/tmp/claude-1002/-home-anna-projects-village/8ce52bd6-2012-41d8-9a38-2c512e1e1885/scratchpad/audit';
+const OUT = '/tmp/village-scratch/audit';
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome',
   headless: 'new',
@@ -10,7 +10,7 @@ const page = await browser.newPage();
 await page.setViewport({ width: 1600, height: 1000 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 300)));
 page.on('console', (m) => { if (m.type() === 'error' || m.text().startsWith('[boot]')) console.log('[console]', m.text().slice(0, 200)); });
-await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 90000 });
+await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 90000 });
 await page.waitForFunction('window.__sim !== undefined', { timeout: 60000 });
 await new Promise((r) => setTimeout(r, 3000));
 

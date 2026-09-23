@@ -2,7 +2,7 @@
 import { build } from 'esbuild';
 import puppeteer from 'puppeteer-core';
 import { mkdtempSync } from 'node:fs';
-const out = mkdtempSync('/tmp/village-items-');
+const out = mkdtempSync((process.env.OUT_DIR || '/tmp') + '/village-items-');
 const result = await build({ stdin: { contents: `
 import * as THREE from 'three';
 import { SPECIES } from './src/animals.js';

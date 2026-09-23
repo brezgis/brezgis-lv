@@ -174,12 +174,14 @@ export const LOC = {
   BREZGA: { x: BREZGA.x, z: BREZGA.z },      // Brežģa kalns summit (255 m) — the family hill
   KROGS: { x: 2320, z: 5270 },               // Brežģa krogs / Brezgis settlement, on the old road
 };
-// The manor's watermill (eras 3-4) dams the Gauja itself. The dam runs
+// The manor's watermill (eras 3-4; plausible, not documented for Nēķene —
+// research/manor-and-interwar.md) weirs the Gauja itself. A low weir runs
 // straight across the channel at the river point nearest the old pond
-// anchor; its 1.2 m head backs the river up into a still mill reach (the
-// pond — water.js floods it over the real terrain). The mill stands on the
-// manor bank just below the dam: a breastshot wheel fed along a flume at
-// pond level, its house dug into the bank so the wheel meets the tailrace.
+// anchor; its 0.6 m head — what a lowland river of this size allows an
+// undershot wheel — backs the river up into a still mill reach (the pond:
+// water.js floods it over the real terrain) that fades out ~0.5 km
+// upstream. The mill stands in the far bank just below the weir, its house
+// dug into the bank so the flume-fed wheel meets the tailrace.
 {
   const q = riverAt(pondPt[0], pondPt[1]);
   const dam = { x: q.x, z: q.z, dx: q.dx, dz: q.dz, hw: q.hw, level: q.level };
@@ -189,7 +191,7 @@ export const LOC = {
   if ((LOC.MANOR.x - q.x) * nx + (LOC.MANOR.z - q.z) * nz > 0) { nx = -nx; nz = -nz; }
   dam.nx = nx; dam.nz = nz;                          // toward the mill bank
   LOC.DAM = dam;
-  LOC.POND_LEVEL = q.level + 1.2;
+  LOC.POND_LEVEL = q.level + 0.6;
   const mx = q.x + nx * (q.hw + 4.6) + q.dx * 7, mz = q.z + nz * (q.hw + 4.6) + q.dz * 7;
   // the house's local −x (wheel side) faces the channel; its floor is a
   // half-storey below the terrace the bank is cut back to (shore.js)

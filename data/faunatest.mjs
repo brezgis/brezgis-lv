@@ -5,12 +5,22 @@ import { AnimalManager } from '../src/animals.js';
 import { distToRiver, LOC } from '../src/landuse.js';
 import { heightAt } from '../src/terrain.js';
 import { RIVER_PTS } from '../src/geodata.js';
+import { waterLevelAt, riverAt } from '../src/riverzone.js';
+import { meshHeightAt } from '../src/terrain.js';
 
 const mgr = new AnimalManager();
 const rp = RIVER_PTS[Math.round(RIVER_PTS.length * 0.5)];
 const riverHome = { x: rp[0], z: rp[1], r: 30 };
 const inRiver = (x, z) => distToRiver(x, z) < 7.2;
 const meadow = { x: LOC.STEAD.x - 60, z: LOC.STEAD.z + 80, r: 90 };
+// the aquatic suite follows the local water level (era 4 rules)
+const lvl = (x, z) => waterLevelAt(x, z, 4);
+const depthIn = (lo, hi = 99) => (x, z) => { const d = lvl(x, z) - meshHeightAt(x, z); return d >= lo && d <= hi; };
+const kfPerches = [[-14, 5], [10, -8], [4, 14]].map(([dx, dz]) => {
+  const q = riverAt(rp[0] + dx, rp[1] + dz);
+  const nx = -q.dz * q.side, nz = q.dx * q.side;
+  return [q.x + nx * (q.hw + 0.4), q.level + 0.8, q.z + nz * (q.hw + 0.4)];
+});
 
 const subjects = [
   ['fishPerch', riverHome, { medium: 'water', level: rp[2] - 0.28, inWater: inRiver, speed: 0.7 }, { minMove: 3, water: true }],
@@ -32,6 +42,11 @@ const subjects = [
     }),
   }, { minMove: 6, path: true }],
   ['bee', meadow, { medium: 'air', fly: 'flutter', low: true }, { minMove: 5, air: [0.05, 1.6], path: true }],
+  ['roachShoal', riverHome, { medium: 'water', levelFn: lvl, depth: 0.38, inWater: depthIn(0.55), speed: 0.55 }, { minMove: 3, water: true }],
+  ['duckGoosanderM', riverHome, { medium: 'water', levelFn: lvl, inWater: depthIn(0.25), speed: 0.6 }, { minMove: 3, water: true }],
+  ['otter', riverHome, { medium: 'water', levelFn: lvl, inWater: depthIn(0.55), speed: 0.9, diver: true }, { minMove: 3, water: true }],
+  ['heron', { ...riverHome, r: 40 }, { medium: 'water', levelFn: lvl, wade: true, inWater: depthIn(0.03, 0.32), speed: 0.14, idleT: 4 }, { minMove: 0.3, water: true }],
+  ['kingfisher', riverHome, { medium: 'air', fly: 'perch', perches: kfPerches, noGround: true, dives: true, levelFn: lvl }, { minMove: 6, path: true }],
 ];
 
 const recs = subjects.map(([kind, home, opts]) => mgr.spawn(kind, home, opts));
@@ -49,9 +64,15 @@ for (let i = 0; i < SECONDS * 60; i++) {
       const p = r.group.position;
       travel[si] += p.distanceTo(last[si]);
       last[si].copy(p);
-      if (spec.water && !inRiver(p.x, p.z)) {
+      // in water = under the local water surface, whatever body it is
+      const bed = meshHeightAt(p.x, p.z), L = lvl(p.x, p.z);
+      if (spec.water && !(L > bed)) {
         habitatFails++;
         console.log(`HABITAT-FAIL ${r.kind} left the water at (${p.x.toFixed(1)}, ${p.z.toFixed(1)})`);
+      }
+      if (spec.water && r.depth !== null && r.depth !== undefined && !(p.y < L && p.y > bed)) {
+        habitatFails++;
+        console.log(`HABITAT-FAIL ${r.kind} at y ${p.y.toFixed(2)} outside bed ${bed.toFixed(2)}..surface ${L.toFixed(2)}`);
       }
       if (spec.land && r.hopT < 0) {
         const dy = Math.abs(p.y - heightAt(p.x, p.z));

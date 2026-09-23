@@ -233,47 +233,179 @@ function squirrel() {
 }
 
 // --- water creatures ----------------------------------------------------------
-function fish({ len = 0.5, color = 0x37424a, belly = 0x93a29a, pike = false } = {}) {
+function fish({ len = 0.5, color = 0x37424a, belly = 0x93a29a, pike = false, fin = null, deep = 1, sail = false } = {}) {
   const g = new THREE.Group();
+  const finM = M(fin ?? color);
   const body = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), M(color));
-  body.scale.set(len * (pike?.08:.13), len * (pike?.11:.2), len * 0.5);
+  body.scale.set(len * (pike?.08:.13), len * (pike?.11:.2) * deep, len * 0.5);
   birdEyes(g,len*(pike?.061:.087),len*.03,len*.37,len*.019);
   if(pike)ellipsoid(g,M(color),[0,0,len*.42],[len*.075,len*.055,len*.16]);
   const bl = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), M(belly));
-  bl.scale.set(len * (pike?.065:.11), len * (pike?.07:.14), len * 0.44);
-  bl.position.y = -len * 0.05;
-  const tailF = new THREE.Mesh(new THREE.ConeGeometry(len * 0.16, len * 0.24, 4), M(color));
+  bl.scale.set(len * (pike?.065:.11), len * (pike?.07:.14) * deep, len * 0.44);
+  bl.position.y = -len * 0.05 * deep;
+  const tailF = new THREE.Mesh(new THREE.ConeGeometry(len * 0.16, len * 0.24, 4), finM);
   tailF.scale.x = 0.22;
   tailF.rotation.x = Math.PI / 2 + 0.2;
   tailF.position.set(0, 0, -len * 0.58);
-  const dorsal = new THREE.Mesh(new THREE.ConeGeometry(len * 0.1, len * 0.16, 4), M(color));
+  // the grayling's sail: a tall, long, violet-flecked dorsal
+  const dorsal = new THREE.Mesh(new THREE.ConeGeometry(len * (sail ? 0.2 : 0.1), len * (sail ? 0.3 : 0.16), 4), sail ? M(0x5e4a62) : finM);
   dorsal.scale.x = 0.2;
-  dorsal.position.set(0, len * (pike?.10:.2), -len * (pike?.31:.05));
+  if (sail) dorsal.scale.z = 1.8;
+  dorsal.position.set(0, len * (pike?.10:.2) * deep, -len * (pike?.31:sail?.02:.05));
   g.add(body, bl, tailF, dorsal);
+  if (fin !== null) for (const sd of [-1, 1]) {     // paired fins where they carry the colour
+    const pel = new THREE.Mesh(new THREE.ConeGeometry(len * 0.05, len * 0.1, 4), finM);
+    pel.scale.x = 0.25; pel.rotation.x = Math.PI / 2 + 0.6;
+    pel.position.set(sd * len * 0.07, -len * 0.12 * deep, len * 0.05);
+    g.add(pel);
+  }
   return { group: g, legs: [], neck: null, wiggle: true };
 }
 
-function duck(male = true) {
+// A shoal: one baked fish geometry, instanced, each member on its own
+// slow orbit about the shoal's centre — one draw call per shoal.
+function fishShoal(kind, n, spread) {
+  const geo = bakeSpeciesGeometry(kind, { grazing: false });
+  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }), n);
+  mesh.castShadow = false;
   const g = new THREE.Group();
-  const bodyC = male ? 0x8d867a : 0x8a7457;
+  g.add(mesh);
+  const offs = [];
+  for (let i = 0; i < n; i++) offs.push([(rng() - 0.5) * spread, (rng() - 0.5) * 0.22, (rng() - 0.5) * spread * 1.5, rng() * TAU]);
+  const dummy = new THREE.Object3D();
+  const anim = (t) => {
+    for (let i = 0; i < n; i++) {
+      const o = offs[i];
+      dummy.position.set(o[0] + Math.sin(t * 0.61 + o[3]) * 0.3, o[1] + Math.sin(t * 0.9 + o[3] * 2) * 0.05, o[2] + Math.cos(t * 0.47 + o[3]) * 0.35);
+      dummy.rotation.set(0, Math.sin(t * 7 + o[3]) * 0.18 + Math.sin(t * 0.3 + o[3]) * 0.35, 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  anim(0);
+  geo.computeBoundingSphere();
+  mesh.frustumCulled = false;
+  return { group: g, legs: [], neck: null, wiggle: true, anim };
+}
+
+// grey heron — pelēkais gārnis: grey mantle, white neck and face, the black
+// crest stripe, a yellow dagger. Stands hunched in the shallows for minutes.
+function heron() {
+  const g = new THREE.Group();
+  const grey = M(0x9aa0a6), dark = M(0x6f767e), white = M(0xe0ded6), black = M(0x1b1b1d), yellow = M(0xcfa934);
+  // hunched: body level-to-tail-down, wings folded over the flanks
+  ellipsoid(g, grey, [0, 0.72, -0.02], [0.12, 0.13, 0.28]).rotation.x = 0.28;
+  for (const sd of [-1, 1]) ellipsoid(g, dark, [sd * 0.085, 0.74, -0.04], [0.045, 0.1, 0.27]).rotation.x = 0.28;
+  ellipsoid(g, white, [0, 0.72, 0.17], [0.07, 0.09, 0.07]);
+  const neck = new THREE.Group();
+  neck.position.set(0, 0.8, 0.18);
+  // hunched S: neck drawn into the shoulders
+  organicTube(neck, white, [[0, -0.04, -0.04], [0, 0.07, 0.04], [0, 0.16, 0.0], [0, 0.23, 0.05]], [0.045, 0.036, 0.03, 0.028]);
+  const head = ellipsoid(neck, white, [0, 0.25, 0.07], [0.04, 0.042, 0.07]);
+  void head;
+  ellipsoid(neck, black, [0, 0.27, 0.03], [0.043, 0.018, 0.08]);       // crest stripe
+  organicTube(neck, black, [[0, 0.27, -0.04], [0, 0.26, -0.13]], [0.008, 0.002]);   // plume
+  const bill = new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.14, 5), yellow);
+  bill.rotation.x = Math.PI / 2 + 0.1; bill.position.set(0, 0.245, 0.17);
+  neck.add(bill);
+  birdEyes(neck, 0.034, 0.26, 0.09, 0.006);
+  g.add(neck);
+  for (const sd of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.6, 4), M(0x8e7f55));
+    leg.position.set(sd * 0.06, 0.3, 0.02);
+    g.add(leg);
+  }
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 5), dark);
+  tail.rotation.x = -Math.PI / 2 + 0.3; tail.position.set(0, 0.63, -0.28);
+  g.add(tail);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return { group: g, neck, legs: [] };
+}
+
+// Eurasian otter — ūdrs: long, low, dark brown; swims with only the flat
+// head and a line of back showing, and slips under for long stretches.
+function otter() {
+  const g = new THREE.Group();
+  const brown = M(0x4a3526), pale = M(0x8f7c62);
+  ellipsoid(g, brown, [0, 0, 0], [0.11, 0.09, 0.36]);
+  ellipsoid(g, pale, [0, -0.03, 0.2], [0.07, 0.05, 0.12]);
+  const neck = new THREE.Group();
+  neck.position.set(0, 0.03, 0.33);
+  ellipsoid(neck, brown, [0, 0.02, 0.05], [0.07, 0.055, 0.09]);
+  ellipsoid(neck, pale, [0, -0.005, 0.1], [0.045, 0.03, 0.05]);
+  birdEyes(neck, 0.04, 0.045, 0.1, 0.006);
+  g.add(neck);
+  organicTube(g, brown, [[0, 0, -0.3], [0, -0.01, -0.5], [0, -0.02, -0.72]], [0.06, 0.035, 0.012]);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return { group: g, neck, legs: [], wiggle: true };
+}
+
+// common kingfisher — zivju dzenis: a cobalt-and-orange spark on a twig
+// over the water; straight fast flights low along the river, plunge dives.
+function kingfisher() {
+  const g = new THREE.Group();
+  const blue = M(0x1d86b4), cobalt = M(0x2fb6e8), orange = M(0xd9702a), white = M(0xf2efe6), black = M(0x141414);
+  ellipsoid(g, blue, [0, 0.07, 0], [0.032, 0.03, 0.06]);
+  ellipsoid(g, orange, [0, 0.058, 0.01], [0.028, 0.025, 0.05]);
+  ellipsoid(g, cobalt, [0, 0.085, -0.02], [0.012, 0.01, 0.045]);
+  ellipsoid(g, blue, [0, 0.1, 0.045], [0.026, 0.026, 0.03]);
+  ellipsoid(g, white, [0, 0.092, 0.066], [0.016, 0.012, 0.01]);
+  ellipsoid(g, orange, [0.02, 0.1, 0.05], [0.008, 0.009, 0.014]);
+  ellipsoid(g, orange, [-0.02, 0.1, 0.05], [0.008, 0.009, 0.014]);
+  const bill = new THREE.Mesh(new THREE.ConeGeometry(0.007, 0.05, 4), black);
+  bill.rotation.x = Math.PI / 2; bill.position.set(0, 0.098, 0.095);
+  g.add(bill);
+  birdEyes(g, 0.021, 0.106, 0.058, 0.004);
+  const tailPivot = new THREE.Group();
+  tailPivot.position.set(0, 0.07, -0.05);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.006, 0.035), blue);
+  tail.position.z = -0.017;
+  tailPivot.add(tail);
+  g.add(tailPivot);
+  const wings = [];
+  for (const sd of [-1, 1]) {
+    // hinged along the body axis: folded it lies on the flank, flapping
+    // swings it out and up
+    const w = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.006, 0.065), blue);
+    w.geometry.translate(sd * 0.012, 0, -0.008);
+    w.position.set(sd * 0.022, 0.082, 0);
+    w.userData.side = sd;
+    g.add(w);
+    wings.push(w);
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return { group: g, neck: null, legs: [], wings, tailPivot };
+}
+
+// mallard by default; `p` repaints it as another diving or dabbling duck
+function duck(male = true, p = {}) {
+  const g = new THREE.Group();
+  const bodyC = p.body ?? (male ? 0x8d867a : 0x8a7457);
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 10), M(bodyC));
-  body.scale.set(0.75, 0.62, 1.25);
+  body.scale.set(0.75, 0.62, 1.25 * (p.long ?? 1));
   body.position.y = 0.02;
-  const breast = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 10), M(male ? 0x5a3a2c : 0x7a6448));
+  if (p.back) ellipsoid(g, M(p.back), [0, 0.075, -0.03], [0.085, 0.045, 0.16 * (p.long ?? 1)]);
+  const breast = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 10), M(p.breast ?? (male ? 0x5a3a2c : 0x7a6448)));
   breast.position.set(0, 0.03, 0.12);
   const neck = new THREE.Group();
   neck.position.set(0, 0.1, 0.14);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.062, 16, 10), M(male ? 0x1e5e30 : 0x8a7457));
+  const headC = p.head ?? (male ? 0x1e5e30 : 0x8a7457);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.062, 16, 10), M(headC));
   head.position.set(0, 0.12, 0.05);
-  organicTube(neck, M(male ? 0x1e5e30 : bodyC), [[0,-0.06,-0.02],[0,0.05,0.025],[0,0.12,0.05]], [0.054,0.043,0.038]);
-  const bill = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.09, 4), M(0xc9a028));
+  if (p.puff) head.scale.set(1.05, 1.15, 1.0);
+  organicTube(neck, M(p.neck ?? (male ? 0x1e5e30 : bodyC)), [[0,-0.06,-0.02],[0,0.05,0.025],[0,0.12,0.05]], [0.054,0.043,0.038]);
+  if (p.crest) organicTube(neck, M(headC), [[0,.15,.03],[0,.14,-.03],[0,.11,-.07]], [.03,.022,.006]);
+  if (p.cheek) ellipsoid(neck, M(0xf4f2ec), [0.045, 0.105, 0.085], [0.006, 0.014, 0.012]), ellipsoid(neck, M(0xf4f2ec), [-0.045, 0.105, 0.085], [0.006, 0.014, 0.012]);
+  const bill = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.09, 4), M(p.bill ?? 0xc9a028));
   bill.scale.y = 0.55;
   bill.rotation.x = Math.PI / 2;
   bill.position.set(0, 0.11, 0.12);
   neck.add(head, bill);
-  bill.geometry.dispose();bill.geometry=new THREE.SphereGeometry(1,16,10);bill.scale.set(.025,.012,.049);bill.rotation.set(0,0,0);
+  bill.geometry.dispose();bill.geometry=new THREE.SphereGeometry(1,16,10);bill.scale.set(p.sawbill?.012:.025,.012,p.sawbill?.058:.049);bill.rotation.set(0,0,0);
+  if (p.sawbill) bill.position.z += 0.01;
   birdEyes(neck,.052,.139,.072,.006);
-  if(male)organicTube(neck,M(0xe8e6dc),[[0,.015,.009],[0,.028,.015]],[.049,.046]);
+  if(male && !p.noCollar)organicTube(neck,M(0xe8e6dc),[[0,.015,.009],[0,.028,.015]],[.049,.046]);
   const tail = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 4), M(bodyC));
   tail.scale.y = 0.4;
   tail.rotation.x = -Math.PI / 2 - 0.5;
@@ -588,6 +720,22 @@ export const SPECIES = {
   fishPerch: () => fish({ len: 0.34, color: 0x4a5a3c }),
   fishPike: () => fish({ len: 0.72, color: 0x39503c, belly: 0xa8b49a, pike:true }),
   duckM: () => duck(true),
+  // goosander — lielā gaura: the Gauja's own sawbill, nesting in bankside trees
+  duckGoosanderM: () => duck(true, { body: 0xeee6dc, breast: 0xf0e8de, back: 0x1b1c1e, head: 0x143a28, neck: 0x143a28, bill: 0xb02a1c, sawbill: true, long: 1.2, noCollar: true }),
+  duckGoosanderF: () => duck(false, { body: 0x979ca2, breast: 0xd6d4ce, head: 0x8c3c1c, neck: 0x8c3c1c, bill: 0xa83020, sawbill: true, long: 1.15, crest: true }),
+  // goldeneye — gaigala: the lake diver with the white cheek spot
+  duckGoldeneyeM: () => duck(true, { body: 0xf0eee8, breast: 0xf2f0ea, back: 0x18191b, head: 0x10221a, neck: 0x10221a, bill: 0x1a1a1a, puff: true, cheek: true, noCollar: true }),
+  duckGoldeneyeF: () => duck(false, { body: 0x8c9094, breast: 0xc8c6c0, head: 0x5c3a22, neck: 0x5c3a22, bill: 0x2a2622, puff: true }),
+  // Gauja fish, after the Latvian freshwater list
+  roach: () => fish({ len: 0.2, color: 0x44524c, belly: 0xc2c6be, fin: 0xb4442c }),            // rauda
+  grayling: () => fish({ len: 0.36, color: 0x5d646c, belly: 0xb4b2a8, sail: true }),         // alata
+  bream: () => fish({ len: 0.46, color: 0x6e5c38, belly: 0xb09c6c, deep: 1.55, fin: 0x4e4630 }), // plaudis
+  troutBrown: () => fish({ len: 0.28, color: 0x5e5634, belly: 0xcdb98c, fin: 0x6a6040 }),    // strauta forele
+  roachShoal: () => fishShoal('roach', 9, 1.8),
+  breamShoal: () => fishShoal('bream', 5, 2.2),
+  heron: () => heron(),
+  otter: () => otter(),
+  kingfisher: () => kingfisher(),
   duckF: () => duck(false),
   swanWhooper: () => swan(0xd8c030),   // Cygnus cygnus — the native breeder
   swanMute: () => swan(0xd07828),      // Cygnus olor — 20th-century colonist
@@ -698,7 +846,8 @@ export class AnimalManager {
       if (!opts.inWater(x, z)) { x = home.x; z = home.z; }
     }
     const medium = opts.medium || 'land';
-    const y = medium === 'water' ? (opts.level ?? heightAt(x, z))
+    const y = medium === 'water' ? (opts.wade ? meshHeightAt(x, z)
+        : opts.levelFn ? opts.levelFn(x, z) - (opts.depth ?? 0) : (opts.level ?? heightAt(x, z)))
       : medium === 'air' ? meshHeightAt(x, z) + (opts.alt ? (opts.alt[0] + opts.alt[1]) / 2 : 8)
       : meshHeightAt(x, z);
     a.group.position.set(x, y, z);
@@ -721,6 +870,10 @@ export class AnimalManager {
       turnRate: opts.turnRate ?? turnRateFor(kind), visualHeading: a.group.rotation.y,
       moveSpeed: 0, gaitP: 0, fleeing: false,
       waterfowl: kind.startsWith('duck') || kind.startsWith('swan'),
+      // local water instead of a spawn-time constant (the Gauja falls 18 m
+      // across the parish; the mill pond stands 1.2 m over its reach)
+      levelFn: opts.levelFn || null, depth: opts.depth ?? null, wade: opts.wade || false,
+      diver: opts.diver || false, idleT: opts.idleT ?? 1, noGround: opts.noGround || false, dives: opts.dives || false,
       herd: null, herdIndex: -1,
     };
     rec.gaitP = rec.phase;
@@ -800,10 +953,13 @@ export class AnimalManager {
         if (a.state !== 'swim') { a.state = 'idle'; a.timer = 2 + rng() * 4; }
       } else {
         a.state = 'idle';
-        a.timer = (a.wiggle ? 1 : 3) + rng() * 5;
+        a.timer = ((a.wiggle ? 1 : 3) + rng() * 5) * a.idleT;
+        // otters slip under for a while between surfacings
+        if (a.diver && rng() < 0.45) { a.state = 'dive'; a.timer = 6 + rng() * 10; }
       }
     }
     const g = a.group;
+    if (a.anim) a.anim(t);
     if (a.state === 'swim') {
       const dx = a.tx - g.position.x, dz = a.tz - g.position.z;
       const dist = Math.hypot(dx, dz);
@@ -830,8 +986,29 @@ export class AnimalManager {
     } else {
       a.moveSpeed = Math.max(0, a.moveSpeed - 1.1 * dt);
     }
-    // stay at the waterline (fish ride a little under it)
-    g.position.y = a.level + Math.sin(t * (a.wiggle ? 1.3 : 0.7) + a.phase) * (a.wiggle ? 0.06 : 0.015);
+    if (a.levelFn) {
+      const L = a.levelFn(g.position.x, g.position.z);
+      if (Number.isFinite(L)) a.level = L;
+    }
+    if (a.wade) {
+      // standing in the shallows: feet on the bed, and the heron's stab
+      g.position.y = meshHeightAt(g.position.x, g.position.z);
+      if (a.neck && a.state === 'idle') {
+        const strike = Math.sin(t * 0.37 + a.phase * 5);
+        a.neck.rotation.x = strike > 0.985 ? 1.1 : strike > 0.9 ? -0.15 : 0.05 * Math.sin(t * 0.5 + a.phase);
+      } else if (a.neck) a.neck.rotation.x = 0.12;
+    } else if (a.depth !== null) {
+      // fish ride below the surface but never through the bed
+      const floor = meshHeightAt(g.position.x, g.position.z) + 0.12;
+      const y = a.level - a.depth + Math.sin(t * 1.3 + a.phase) * 0.05;
+      g.position.y = Math.max(y, Math.min(floor, a.level - 0.08));
+    } else {
+      // stay at the waterline (fish ride a little under it); a diving
+      // otter is a shadow half a metre down
+      const dive = a.state === 'dive' ? -0.55 : 0;
+      g.position.y = a.level + dive + Math.sin(t * (a.wiggle ? 1.3 : 0.7) + a.phase) * (a.wiggle ? 0.06 : 0.015);
+    }
+    if (a.wade) { a.visualHeading = a.heading; g.rotation.y = a.heading; return; }
     if (a.waterfowl) {
       const da = angleDelta(a.visualHeading, a.heading);
       a.visualHeading += clamp(da, -0.72 * dt, 0.72 * dt);
@@ -974,17 +1151,19 @@ export class AnimalManager {
       if (a.state === 'pfly') {
         const dx = a.pt[0] - g.position.x, dy = a.pt[1] - g.position.y, dz = a.pt[2] - g.position.z;
         const d = Math.hypot(dx, dy, dz);
-        if (d < 0.25) {
+        if (d < 0.25 && a.pt[3] === 'plunge') {
+          a.pt = a.home2 || a.perches[(rng() * a.perches.length) | 0];   // back to the twig
+        } else if (d < 0.25) {
           g.position.set(a.pt[0], a.pt[1], a.pt[2]);
           a.state = a.pt[3] === 'ground' ? 'forage' : 'perched';
           a.timer = a.state === 'perched' ? 4 + rng() * 9 : 3 + rng() * 4;
         } else {
-          const sp = Math.min(5.5, d * 2.2 + 1.2);
+          const sp = Math.min(a.noGround ? 8.5 : 5.5, d * 2.2 + 1.2);
           g.position.x += (dx / d) * sp * dt;
           g.position.z += (dz / d) * sp * dt;
           // undulating bound flight: climb on flaps, dip on folds
-          const bound = Math.sin(t * 5.5 + a.phase * 3);
-          g.position.y += ((dy / d) * sp + bound * 0.9) * dt;
+          const bound = a.noGround ? 0.5 : Math.sin(t * 5.5 + a.phase * 3);
+          g.position.y += ((dy / d) * sp + (a.noGround ? 0 : bound * 0.9)) * dt;
           g.rotation.y = Math.atan2(dx, dz);
           this.flap(a, t, bound > -0.2 ? 30 : 4, bound > -0.2 ? 0.8 : 0.08);
         }
@@ -997,9 +1176,15 @@ export class AnimalManager {
           a.tailPivot.rotation.x = Math.sin(t * 8.5 + a.phase) * 0.4 * burst;
         }
         g.rotation.y += Math.sin(t * 0.4 + a.phase * 2) > 0.94 ? 1.4 * dt : 0;
-        if (a.timer <= 0) {
+        if (a.timer <= 0 && a.dives && rng() < 0.4) {
+          // plunge: straight down-and-out to the water, then back up
+          const hx = Math.sin(g.rotation.y), hz = Math.cos(g.rotation.y);
+          a.home2 = a.pt;
+          a.pt = [g.position.x + hx * 1.6, (a.levelFn ? a.levelFn(g.position.x + hx * 1.6, g.position.z + hz * 1.6) : g.position.y - 0.8) - 0.05, g.position.z + hz * 1.6, 'plunge'];
           a.state = 'pfly';
-          const ground = rng() < 0.4;
+        } else if (a.timer <= 0) {
+          a.state = 'pfly';
+          const ground = !a.noGround && rng() < 0.4;
           if (ground) {
             const ang = rng() * Math.PI * 2, r = 2 + rng() * 5;
             const gx = g.position.x + Math.cos(ang) * r, gz = g.position.z + Math.sin(ang) * r;

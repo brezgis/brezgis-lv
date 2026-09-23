@@ -32,6 +32,9 @@ const VIEWS = [
   ['mill', 3, 0.38, [-130, -370, 5], [-145, -330, 0]],
   ['mill-far', 4, 0.4, [-190, -390, 14], [-140, -325, -1]],
   ['manor-road', 3, 0.4, [-112, -318, 4], [-172, -345, 2]],
+  ['fish-bank', 4, 0.4, [-374, 31, 2.2], [-392, 44, -1.2]],
+  ['fish-reach', 2, 0.36, [-360, 20, 9], [-400, 60, -1]],
+  ['fish-top', 4, 0.4, [-381, 38, 60], [-380, 36, -1]],
   ['pisla-top', 4, 0.4, [-1545, 3205, 45], [-1544, 3195, -2]],
 ];
 const browser = await puppeteer.launch({
@@ -76,6 +79,7 @@ try {
       const set = new Set(names.split(','));
       window.__scene.traverse((o) => { if (set.has(o.name) || [...set].some((n) => n.endsWith('*') && o.name.startsWith(n.slice(0, -1)))) o.visible = false; });
     }, process.env.HIDE);
+    if (process.env.EVAL) await page.evaluate(process.env.EVAL);
     await new Promise((r) => setTimeout(r, 9000));
     await page.screenshot({ path: `${OUT}/${name}-${tag}.png` });
     console.log('shot', name);

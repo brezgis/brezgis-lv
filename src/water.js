@@ -318,7 +318,7 @@ varying vec3 vWPos;
 }
 
 // ------------------------------------------------------------- mill pond ---
-// The manor dam backs the Gauja up by 1.2 m. The pond is whatever that
+// The manor weir backs the Gauja up by 0.6 m. The pond is whatever that
 // floods: every lattice cell upstream of the dam line, connected to it,
 // whose rendered ground lies below the pond level — until the river's own
 // level climbs to meet the pond (the head of the backwater). Its shores are

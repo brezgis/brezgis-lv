@@ -19,7 +19,7 @@ import { roadMaterial, buildingMaterial } from './surfaces.js';
 import { buildRoadside } from './roadside.js';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W } from './landuse.js';
-import { riverAt, streamAt, lakeAt, pondAt, vegExcluded } from './riverzone.js';
+import { riverAt, streamAt, lakeAt, pondAt, vegExcluded, waterLevelAt, RIVER, STREAM_CHANNELS } from './riverzone.js';
 import { registerFootprints, registerTrample, buildingAt, stageFootprint } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
@@ -1552,10 +1552,98 @@ const LAKE_MAIN = (() => {
 const inMainLake = (x, z) => pointInPoly(x, z, LAKE_MAIN.shore);
 const inRiver = (x, z) => { const rv = riverAt(x, z); return !!rv && rv.d < rv.hw; };
 const RIVER_REACH = (t) => {
-  const i = Math.min(RIVER_PTS.length - 1, Math.round(RIVER_PTS.length * t));
-  const p = RIVER_PTS[i];
+  // on the harmonised channel (the raw OSM points carry DEM levels that
+  // differ from the rendered water by up to a metre)
+  const i = Math.min(RIVER.samples.length - 1, Math.round((RIVER.samples.length - 1) * t));
+  const p = RIVER.samples[i];
   return { x: p[0], z: p[1], r: 30, level: p[2] };
 };
+// the reach nearest a place, as a spawn home
+const reachNear = (x, z, r = 32) => {
+  let best = RIVER.samples[0], bd = Infinity;
+  RIVER.samples.forEach((p, i) => {
+    if (RIVER.lakeRun[i]) return;
+    const d = Math.hypot(p[0] - x, p[1] - z);
+    if (d < bd) { bd = d; best = p; }
+  });
+  return { x: best[0], z: best[1], r, level: best[2] };
+};
+const streamHome = (name, t, r = 22) => {
+  const ch = STREAM_CHANNELS.find((c) => c.name === name);
+  if (!ch) return null;
+  const p = ch.samples[Math.round((ch.samples.length - 1) * t)];
+  return { x: p[0], z: p[1], r, level: p[2] };
+};
+const depthIn = (era, lo, hi = 99) => (x, z) => {
+  const d = waterLevelAt(x, z, era) - meshHeightAt(x, z);
+  return d >= lo && d <= hi;
+};
+
+// Life in and on the water, eras 1-5 — species of the upper Gauja, its
+// brooks and the Vidzeme lakes. Everything follows the local water level.
+function aquaticSpawns(era, spawns) {
+  const lvl = (x, z) => waterLevelAt(x, z, era);
+  const swim = (extra = {}) => ({ medium: 'water', levelFn: lvl, ...extra });
+  const S2 = LOC.STEAD;
+  const lakeHome = { x: LAKE_MAIN.cx, z: LAKE_MAIN.cz, r: 120 };
+  const homes = [reachNear(S2.x - 200, S2.z), reachNear(LOC.CAMP.x, LOC.CAMP.z), reachNear(-400, 0),
+    reachNear(LOC.DAM.x - LOC.DAM.dx * 90, LOC.DAM.z - LOC.DAM.dz * 90), RIVER_REACH(0.28), RIVER_REACH(0.5), RIVER_REACH(0.66), RIVER_REACH(0.82)];
+  const deep = depthIn(era, 0.55), shallows = depthIn(era, 0.03, 0.32), anyWater = depthIn(era, 0.25);
+  // fish, seen through the clear shallows: roach shoals, perch, pike in the
+  // slow water, grayling on the riffles of the upper river
+  homes.forEach((h, i) => {
+    spawns.push(['roachShoal', 1, { ...h, r: 26 }, swim({ depth: 0.38, inWater: deep, speed: 0.55 })]);
+    if (i % 2 === 0) spawns.push(['fishPerch', 3, h, swim({ depth: 0.45, inWater: deep, speed: 0.7 })]);
+  });
+  spawns.push(['fishPike', 1, homes[2], swim({ depth: 0.5, inWater: deep, speed: 0.45 })]);
+  spawns.push(['fishPike', 1, homes[6], swim({ depth: 0.5, inWater: deep, speed: 0.45 })]);
+  spawns.push(['grayling', 3, RIVER_REACH(0.2), swim({ depth: 0.32, inWater: depthIn(era, 0.45, 1.6), speed: 0.8 })]);
+  spawns.push(['grayling', 2, homes[0], swim({ depth: 0.32, inWater: depthIn(era, 0.45, 1.6), speed: 0.8 })]);
+  // brown trout hold in the brooks
+  for (const [name, t] of [['Pīsla', 0.55], ['Dzērbe', 0.4], ['Dzērbe', 0.8]]) {
+    const h = streamHome(name, t);
+    if (h) spawns.push(['troutBrown', 2, h, swim({ depth: 0.18, inWater: depthIn(era, 0.25), speed: 0.6 })]);
+  }
+  // the lake: bream shoals over the deep basin, roach in the margins
+  spawns.push(['breamShoal', 2, { ...lakeHome, r: 90 }, swim({ depth: 0.9, inWater: depthIn(era, 1.4), speed: 0.35 })]);
+  spawns.push(['roachShoal', 2, lakeHome, swim({ depth: 0.4, inWater: deep, speed: 0.5 })]);
+  // ducks: mallards everywhere; goosanders are the river's own sawbills;
+  // goldeneyes dive on the lake
+  spawns.push(['duckM', 2, homes[0], swim({ inWater: anyWater, speed: 0.5 })]);
+  spawns.push(['duckF', 2, homes[0], swim({ inWater: anyWater, speed: 0.5 })]);
+  spawns.push(['duckM', 2, homes[4], swim({ inWater: anyWater, speed: 0.5 })]);
+  spawns.push(['duckF', 1, homes[4], swim({ inWater: anyWater, speed: 0.5 })]);
+  spawns.push(['duckGoosanderM', 1, homes[2], swim({ inWater: anyWater, speed: 0.6 })]);
+  spawns.push(['duckGoosanderF', 2, homes[2], swim({ inWater: anyWater, speed: 0.6 })]);
+  spawns.push(['duckGoosanderM', 1, homes[5], swim({ inWater: anyWater, speed: 0.6 })]);
+  spawns.push(['duckGoosanderF', 1, homes[5], swim({ inWater: anyWater, speed: 0.6 })]);
+  spawns.push(['duckM', 3, lakeHome, swim({ inWater: inMainLake, speed: 0.5 })]);
+  spawns.push(['duckGoldeneyeM', 2, lakeHome, swim({ inWater: inMainLake, speed: 0.5 })]);
+  spawns.push(['duckGoldeneyeF', 2, lakeHome, swim({ inWater: inMainLake, speed: 0.5 })]);
+  // swans: whoopers bred here before drainage; extirpated by the 1800s;
+  // mute swans only colonised Latvia in the 20th century (Engure 1935)
+  if (era <= 2) spawns.push(['swanWhooper', 2, lakeHome, swim({ inWater: inMainLake, speed: 0.4 })]);
+  if (era >= 5) spawns.push(['swanMute', 3, lakeHome, swim({ inWater: inMainLake, speed: 0.4 })]);
+  // grey herons stalk the shallows
+  for (const h of [homes[1], homes[3], homes[6]]) spawns.push(['heron', 1, { ...h, r: 40 }, swim({ wade: true, inWater: shallows, speed: 0.14, idleT: 4 })]);
+  spawns.push(['heron', 1, lakeHome, swim({ wade: true, inWater: shallows, speed: 0.14, idleT: 4 })]);
+  // an otter works the middle river
+  spawns.push(['otter', 1, { ...homes[2], r: 60 }, swim({ depth: null, inWater: deep, speed: 0.9, diver: true })]);
+  // kingfishers: twigs over the water, straight low flights, plunge dives
+  for (const h of [homes[0], homes[3]]) {
+    const perches = [];
+    for (const [dx, dz] of [[-18, 6], [-6, -14], [9, 12], [17, -5], [2, 20]]) {
+      const q = riverAt(h.x + dx, h.z + dz);
+      if (!q) continue;
+      const nx = -q.dz * q.side, nz = q.dx * q.side;
+      const px = q.x + nx * (q.hw + 0.4), pz = q.z + nz * (q.hw + 0.4);
+      perches.push([px, q.level + 0.75 + (perches.length % 2) * 0.35, pz]);
+    }
+    if (perches.length >= 2) spawns.push(['kingfisher', 1, { ...h, r: 30 }, { medium: 'air', fly: 'perch', perches, noGround: true, dives: true, levelFn: lvl }]);
+  }
+  spawns.push(['frog', 5, { x: homes[1].x + 14, z: homes[1].z, r: 10 }, HOP_FROG]);
+  spawns.push(['dragonfly', 6, { x: homes[2].x, z: homes[2].z, r: 26 }, { medium: 'air', fly: 'hawk', alt: [0.6, 2.4] }]);
+}
 const HOP_HARE = { hop: true, hopLen: 1.7, hopH: 0.3, hopDur: 0.32, restT: [3, 8], chainT: 0.05 };
 const HOP_FROG = { hop: true, hopLen: 0.32, hopH: 0.14, hopDur: 0.3, restT: [4, 9], chainT: 0.5 };
 
@@ -1577,19 +1665,8 @@ function wildSpawns(era, spawns) {
     spawns.push(['swanWhooper', 2, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.04, inWater: inMainLake, speed: 0.4 }]);
     return;
   }
-  // the river never emptied: fish, ducks, swans, frogs, dragonflies always
-  spawns.push(['fishPerch', 7, rMid, { medium: 'water', level: rMid.level - 0.28, inWater: inRiver, speed: 0.7 }]);
-  spawns.push(['fishPerch', 5, rUp, { medium: 'water', level: rUp.level - 0.28, inWater: inRiver, speed: 0.7 }]);
-  spawns.push(['fishPike', 2, rDown, { medium: 'water', level: rDown.level - 0.32, inWater: inRiver, speed: 0.5 }]);
-  spawns.push(['duckM', 3, rUp, { medium: 'water', level: rUp.level + 0.03, inWater: inRiver, speed: 0.5 }]);
-  spawns.push(['duckF', 3, rUp, { medium: 'water', level: rUp.level + 0.03, inWater: inRiver, speed: 0.5 }]);
-  // swans: whoopers bred here before drainage; extirpated by the 1800s;
-  // mute swans only colonised Latvia in the 20th century (Engure 1935)
-  if (era <= 2) spawns.push(['swanWhooper', 2, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.04, inWater: inMainLake, speed: 0.4 }]);
-  if (era >= 5) spawns.push(['swanMute', 3, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.04, inWater: inMainLake, speed: 0.4 }]);
-  spawns.push(['duckM', 3, lakeHome, { medium: 'water', level: LAKE_MAIN.level + 0.03, inWater: inMainLake, speed: 0.5 }]);
-  spawns.push(['frog', 5, { x: rUp.x + 14, z: rUp.z, r: 10 }, HOP_FROG]);
-  spawns.push(['dragonfly', 6, { x: rMid.x, z: rMid.z, r: 26 }, { medium: 'air', fly: 'hawk', alt: [0.6, 2.4] }]);
+  // the river never emptied: fish, ducks, herons, otters, kingfishers
+  aquaticSpawns(era, spawns);
   spawns.push(['butterflyW', 6, meadow, { medium: 'air', fly: 'flutter' }]);
   spawns.push(['butterflyO', 4, wideMeadow, { medium: 'air', fly: 'flutter' }]);
   spawns.push(['butterflyY', 4, meadow, { medium: 'air', fly: 'flutter' }]);
@@ -1627,7 +1704,7 @@ function wildSpawns(era, spawns) {
     spawns.push(['roeBuck', 1, forestS, { grazeBias: 0.75 }]);
     spawns.push(['roeDeer', 3, forestS, { grazeBias: 0.75 }]);
     spawns.push(['boar', era === 1 ? 5 : 4, { x: S2.x - 350, z: S2.z + 700, r: 90 }, { grazeBias: 0.85, speed: 0.7 }]);
-    spawns.push(['beaver', 2, rDown, { medium: 'water', level: rDown.level + 0.02, inWater: inRiver, speed: 0.45 }]);
+    spawns.push(['beaver', 2, rDown, { medium: 'water', levelFn: (x, z) => waterLevelAt(x, z, era), inWater: inRiver, speed: 0.45 }]);
     spawns.push(['fox', 1, wideMeadow, { speed: 1.2, grazeBias: 0.45 }]);
     spawns.push(['hare', 3, wideMeadow, HOP_HARE]);
     spawns.push(['squirrel', 2, { x: LOC.OAK.x, z: LOC.OAK.z, r: 30 }, { hop: true, hopLen: 0.8, hopH: 0.16, hopDur: 0.24, restT: [2, 6], chainT: 0.08 }]);
@@ -1642,14 +1719,14 @@ function wildSpawns(era, spawns) {
     spawns.push(['hare', 2, wideMeadow, HOP_HARE]);
     spawns.push(['frog', 4, { x: LOC.DAM.x + LOC.DAM.nx * (LOC.DAM.hw + 4) - LOC.DAM.dx * 40, z: LOC.DAM.z + LOC.DAM.nz * (LOC.DAM.hw + 4) - LOC.DAM.dz * 40, r: 12 }, HOP_FROG]);
     spawns.push(['stork', 2, { x: S2.x - 100, z: S2.z + 150, r: 55 }, { speed: 0.4, grazeBias: 0.55 }]);
-    spawns.push(['duckM', 2, { x: LOC.DAM.x - LOC.DAM.dx * 60, z: LOC.DAM.z - LOC.DAM.dz * 60, r: 25 }, { medium: 'water', level: LOC.POND_LEVEL + 0.03, speed: 0.5 }]);
+    spawns.push(['duckM', 2, { x: LOC.DAM.x - LOC.DAM.dx * 60, z: LOC.DAM.z - LOC.DAM.dz * 60, r: 25 }, { medium: 'water', levelFn: (x, z) => waterLevelAt(x, z, era), inWater: (x, z) => !!pondAt(x, z), speed: 0.5 }]);
   } else {
     // the quiet century: the forest fauna is back
     spawns.push(['roeDeer', 4, forestN, { grazeBias: 0.75 }]);
     spawns.push(['roeBuck', 1, forestN, { grazeBias: 0.75 }]);
     spawns.push(['redDeer', 2, forestS, { grazeBias: 0.78 }]);
     spawns.push(['boar', 3, forestS, { grazeBias: 0.85, speed: 0.7 }]);
-    spawns.push(['beaver', 1, rDown, { medium: 'water', level: rDown.level + 0.02, inWater: inRiver, speed: 0.45 }]);
+    spawns.push(['beaver', 1, rDown, { medium: 'water', levelFn: (x, z) => waterLevelAt(x, z, era), inWater: inRiver, speed: 0.45 }]);
     spawns.push(['fox', 1, wideMeadow, { speed: 1.2, grazeBias: 0.45 }]);
     spawns.push(['hare', 2, wideMeadow, HOP_HARE]);
     spawns.push(['swallow', 4, { x: S2.x, z: S2.z, r: 80 }, { medium: 'air', fly: 'hawk', alt: [4, 15] }]);
@@ -1947,9 +2024,9 @@ export function buildEra(era, ctx) {
     add(brewery(), P.x + 58, P.z + 48, Math.PI * 0.72);
     markBuilding(P.x + 58, P.z + 48, 16, 7.5, Math.PI * 0.72);
     smokes.push([Mn.x - 8, meshHeightAt(Mn.x, Mn.z) + 9.6, Mn.z, { rate: 0.4, gray: 0.88 }]);
-    // The mill dam spans the Gauja; the mill stands in the manor bank just
-    // below it, its floor at tailrace level so the breastshot wheel takes
-    // the pond water at axle height from a plank flume.
+    // The mill weir spans the Gauja; the mill stands in the far bank just
+    // below it, its floor half a storey down so the undershot wheel meets
+    // the water a plank flume brings it from the pond.
     {
       const D = LOC.DAM, L = ctx.water.pondLevel, Mi = LOC.MILL;
       const damRot = Math.atan2(-D.nz, D.nx);

@@ -104,6 +104,7 @@ async function boot() {
   const veg = buildVegetation(scene, renderer);
   window.__veg = veg;                    // debug hook for data/floracount.mjs
   window.__water = (x, z) => waterLevelAt(x, z, currentEra);   // debug hook: shot harnesses stay above water
+  window.__waterSys = water;                                    // debug hook: shader uniforms, reflector
   await progress('Sowing half a million blades of grass…');
   const grass = buildGrass(scene);
   window.__grass = grass;                // debug hook for data/dbg.mjs grassstate

@@ -8,8 +8,9 @@
 // reshuffles the sward — new growth only fades in at the feathered rim.
 import * as THREE from 'three';
 import { heightAt, meshHeightAt } from './terrain.js';
-import { forestDensity, distToRiver, distToRoad, distToRoadEx, ROAD_HALF_W, fieldAt, PADS, ERA2_FARMS } from './landuse.js';
-import { vegExcluded, lakeShoreWavyAt, lakeAt, streamAt } from './riverzone.js';
+import { forestDensity, distToRiver, distToRoad, distToRoadEx, ROAD_HALF_W, fieldAt, PADS, ERA2_FARMS, LOC } from './landuse.js';
+import { vegExcluded, lakeShoreWavyAt, lakeAt, streamAt, pondAt } from './riverzone.js';
+import { shoreBodies } from './shore.js';
 import { buildingAt, trampleAt } from './footprints.js';
 import { mulberry32, makeNoise, smoothstep as smoothstepJ } from './util.js';
 import { WIND } from './vegetation.js';
@@ -391,7 +392,7 @@ export function buildGrass(scene) {
     const n = (perCell | 0) + (rng() < perCell % 1 ? 1 : 0);
     // dense bands: rules once per 1.3m cell — blades that close together
     // share their fate, and per-blade rule checks made walk-regen hitch
-    let cellOK = true, cFa = null, cTrodden = false, cDRiv = 0, cFd = 0, cY = 0, cShoreK = 1;
+    let cellOK = true, cFa = null, cTrodden = false, cDRiv = 0, cFd = 0, cY = 0, cShoreK = 1, cWater = -Infinity;
     if (cellRules) {
       const ccx = (ix + 0.5) * cell, ccz = (iz + 0.5) * cell;
       cY = heightAt(ccx, ccz);
@@ -407,6 +408,12 @@ export function buildGrass(scene) {
         const dSh = lakeShoreWavyAt(ccx, ccz);
         if (dSh < 8) cShoreK = lakeAt(ccx, ccz) ? 0 : smoothstepJ(0.4, 7.5, dSh);
         if (cShoreK <= 0.02) cellOK = false;
+        // the cell may straddle a waterline its centre doesn't: remember the
+        // water level nearby so each blade can check its own footing
+        if (cellOK && (cDRiv < 45 || dSh < 30 || streamAt(ccx, ccz))) {
+          for (const b of shoreBodies(ccx, ccz)) if (b.e < cell + 6 && b.level > cWater) cWater = b.level;
+        }
+        if (cellOK && (era === 3 || era === 4) && pondAt(ccx, ccz)) cWater = Math.max(cWater, LOC.POND_LEVEL);
       }
       if (cellOK) {
         cFd = forestDensity(era, ccx, ccz, cY);
@@ -471,7 +478,9 @@ export function buildGrass(scene) {
       if (!carpet && fd > 0.35 && cJ1 < 0.6) continue;
       // yards: tall clumps die, the short carpet merely thins
       if (trodden && cJ2 < (carpet ? 0.6 : 0.93)) continue;
-      dummy.position.set(x, meshHeightAt(x, z) - 0.02, z);
+      const gy = meshHeightAt(x, z);
+      if (gy < cWater + 0.08) continue;              // no sward under the water
+      dummy.position.set(x, gy - 0.02, z);
       dummy.rotation.set(0, rot, 0);
       const tall = (carpet
         ? 0.13 + hJ * 0.14

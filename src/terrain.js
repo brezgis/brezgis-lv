@@ -77,7 +77,6 @@ function cellToWorld(gx, gy) {
       buckets.get(k).push(s);
     }
     const R = 84;
-    const P = LOC.POND;
     for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
       const [x, z] = cellToWorld(gx, gy);
       let dmin = 1e9, lvl = 0, hwN = 0;
@@ -93,33 +92,12 @@ function cellToWorld(gx, gy) {
         }
       }
       if (dmin > R || dmin <= hwN + 4.2) continue;             // bed+shelf stay carved
-      if (Math.hypot((x - (P.x + 4)) / 56, (z - P.z) / 38) < 1.25) continue; // pond basin
       if (lakeAt(x, z)) continue;
       const minH = lvl - 0.5 + 0.75 * smoothstep(hwN + 4.2, hwN + 15, dmin); // → lvl+0.25 past outer ring
       const i = gy * G + gx;
       if (field[i] < minH) field[i] = minH;
     }
   }
-  // the mill-pond basin: a real dished bed at the Gauja bend so the pond
-  // water body meets the mill and dam instead of hovering on the bank
-  {
-    const P = LOC.POND, lvl = LOC.POND_LEVEL;
-    const RX = 56, RZ = 38;
-    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
-      const [x, z] = cellToWorld(gx, gy);
-      const nx = (x - (P.x + 4)) / RX, nz = (z - P.z) / RZ;
-      const rr = Math.hypot(nx, nz);
-      if (rr < 1.15) {
-        const i = gy * G + gx;
-        const bed = lvl - 1.2 + smoothstep(0.7, 1.15, rr) * 2.6;
-        field[i] = Math.min(field[i], Math.max(bed, lvl - 1.2));
-        // …and RAISE low rims to the same profile: the N/SW rims sat below
-        // the waterline, so the flat pond sheet hung in the air past them
-        field[i] = Math.max(field[i], Math.min(bed, lvl + 0.25) - 0.35);
-      }
-    }
-  }
-
   // pads (farmyards) flatten
   for (const p of PADS) {
     const cgx = Math.round((((p.x - OX) / SPAN) + 0.5) * (G - 1));
@@ -279,7 +257,7 @@ function detailify(material, strength) {
           float greenK = clamp((diffuseColor.g - diffuseColor.r) * 5.0, 0.0, 1.0);
           diffuseColor.rgb *= mix(1.0, 0.8 + 0.38 * sward, greenK * uDetailK);
           // steep ground bares mineral soil / till between the grass
-          float bare = smoothstep(0.16, 0.45, vSlope + (d1 - 0.5) * 0.14);
+          float bare = smoothstep(0.3, 0.62, vSlope + (d1 - 0.5) * 0.14);
           diffuseColor.rgb = mix(diffuseColor.rgb,
             vec3(0.40, 0.345, 0.26) * (0.7 + 0.5 * d0), bare * 0.75 * uDetailK);
         }`

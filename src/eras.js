@@ -494,7 +494,7 @@ function roadRibbons(group, era) {
             (z0 + z1) / 2 + dx * side * (half + 0.18));
           rail.rotation.y = -Math.atan2(dz, dx);
           rail.castShadow = rail.receiveShadow = true;
-          bridgeFixtures.push(rail);
+          rail.name = "bridge-rail"; bridgeFixtures.push(rail);
         }
       }
       const ends = [run.from, run.to];
@@ -505,7 +505,7 @@ function roadRibbons(group, era) {
         ab.position.set(x, y - 0.52, z);
         ab.rotation.y = -Math.atan2(dz, dx);
         ab.castShadow = ab.receiveShadow = true;
-        bridgeFixtures.push(ab);
+        ab.name = "bridge-abutment"; bridgeFixtures.push(ab);
       }
     }
     fixtureClusterCount = clusters.length;
@@ -1640,9 +1640,9 @@ function wildSpawns(era, spawns) {
     spawns.push(['roeDeer', 2, forestN, { grazeBias: 0.8 }]);
     spawns.push(['fox', 1, { x: S2.x + 500, z: S2.z - 500, r: 130 }, { speed: 1.2, grazeBias: 0.45 }]);
     spawns.push(['hare', 2, wideMeadow, HOP_HARE]);
-    spawns.push(['frog', 4, { x: LOC.POND.x - 30, z: LOC.POND.z + 20, r: 14 }, HOP_FROG]);
+    spawns.push(['frog', 4, { x: LOC.DAM.x + LOC.DAM.nx * (LOC.DAM.hw + 4) - LOC.DAM.dx * 40, z: LOC.DAM.z + LOC.DAM.nz * (LOC.DAM.hw + 4) - LOC.DAM.dz * 40, r: 12 }, HOP_FROG]);
     spawns.push(['stork', 2, { x: S2.x - 100, z: S2.z + 150, r: 55 }, { speed: 0.4, grazeBias: 0.55 }]);
-    spawns.push(['duckM', 2, { x: LOC.POND.x + 4, z: LOC.POND.z, r: 30 }, { medium: 'water', level: LOC.POND_LEVEL + 0.03, speed: 0.5 }]);
+    spawns.push(['duckM', 2, { x: LOC.DAM.x - LOC.DAM.dx * 60, z: LOC.DAM.z - LOC.DAM.dz * 60, r: 25 }, { medium: 'water', level: LOC.POND_LEVEL + 0.03, speed: 0.5 }]);
   } else {
     // the quiet century: the forest fauna is back
     spawns.push(['roeDeer', 4, forestN, { grazeBias: 0.75 }]);
@@ -1947,14 +1947,57 @@ export function buildEra(era, ctx) {
     add(brewery(), P.x + 58, P.z + 48, Math.PI * 0.72);
     markBuilding(P.x + 58, P.z + 48, 16, 7.5, Math.PI * 0.72);
     smokes.push([Mn.x - 8, meshHeightAt(Mn.x, Mn.z) + 9.6, Mn.z, { rate: 0.4, gray: 0.88 }]);
-    const mill = add(watermill(ctx.water.pondLevel), P.x + 30, P.z + 16, Math.PI * 0.75);
-    markBuilding(P.x + 30, P.z + 16, 8, 7, Math.PI * 0.75);
-    if (mill.userData.tick) ticks.push(mill.userData.tick);
-    const dam = new THREE.Mesh(new THREE.BoxGeometry(30, 2.4, 1.8), MAT.plank);
-    dam.position.set(P.x + 26, ctx.water.pondLevel - 0.9, P.z + 2);
-    dam.rotation.y = -0.75;
-    dam.castShadow = true;
-    g.add(dam);
+    // The mill dam spans the Gauja; the mill stands in the manor bank just
+    // below it, its floor at tailrace level so the breastshot wheel takes
+    // the pond water at axle height from a plank flume.
+    {
+      const D = LOC.DAM, L = ctx.water.pondLevel, Mi = LOC.MILL;
+      const damRot = Math.atan2(-D.nz, D.nx);
+      const len = 2 * (D.hw + 7), bed = D.level - 3.3, top = L + 0.35;
+      const dam = new THREE.Mesh(new THREE.BoxGeometry(len, top - bed, 2.4), MAT.plank);
+      dam.position.set(D.x, (top + bed) / 2, D.z);
+      dam.rotation.y = damRot;
+      dam.castShadow = dam.receiveShadow = true;
+      dam.name = 'mill-dam';
+      addRaw(dam);
+      // the overflow: a thin glassy sheet down the dam face to the tailrace
+      const spillW = D.hw * 1.3, run = 2.2, drop = top - 0.2 - D.level;
+      const spill = new THREE.Mesh(new THREE.PlaneGeometry(spillW, Math.hypot(run, drop)),
+        new THREE.MeshLambertMaterial({ color: 0xdfe9e6, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+      spill.position.set(D.x + D.dx * (1.2 + run / 2), D.level + drop / 2, D.z + D.dz * (1.2 + run / 2));
+      spill.rotation.set(0, Math.atan2(D.dx, D.dz), 0);
+      spill.rotateX(-Math.PI / 2 + Math.atan2(drop, run));
+      spill.name = 'mill-spill';
+      addRaw(spill);
+      const mill = watermill(L);
+      mill.position.set(Mi.x, Mi.base, Mi.z);
+      mill.rotation.y = Mi.rot;
+      addRaw(mill);
+      markBuilding(Mi.x, Mi.z, 8, 7, Mi.rot);
+      // flume: from the pond just above the dam to the wheel's axle
+      const wheel = new THREE.Vector3(-3.2, 1.2, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), Mi.rot).add(mill.position);
+      const f0 = new THREE.Vector3(D.x + D.nx * (D.hw - 2) - D.dx * 2.5, L - 0.12, D.z + D.nz * (D.hw - 2) - D.dz * 2.5);
+      const f1 = new THREE.Vector3(wheel.x, L - 0.12, wheel.z);
+      const flen = f0.distanceTo(f1);
+      const flume = new THREE.Group();
+      const floor = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, flen), MAT.plank);
+      flume.add(floor);
+      for (const sd of [-1, 1]) {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, flen), MAT.plank);
+        wall.position.set(sd * 0.45, 0.25, 0);
+        flume.add(wall);
+      }
+      for (let k = 1; k < flen / 2.5; k++) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.4, 0.16), MAT.darkWood);
+        post.position.set(0, -1.2, -flen / 2 + k * 2.5);
+        flume.add(post);
+      }
+      flume.position.copy(f0).lerp(f1, 0.5);
+      flume.lookAt(f1.x, flume.position.y, f1.z);
+      flume.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+      flume.name = 'mill-flume';
+      addRaw(flume);
+    }
     add(churchSilhouette(), LOC.CHURCH.x, LOC.CHURCH.z, 0.8);
     markBuilding(LOC.CHURCH.x, LOC.CHURCH.z, 38, 24, 0.8);
 

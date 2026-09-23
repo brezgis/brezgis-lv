@@ -19,7 +19,7 @@
 // rugged waterline (e < 0 in the water), so the terrain, the ground paint,
 // the high-resolution shore mesh and the water surface all agree on the
 // line where land stops.
-import { riverAt, streamAt, lakeAt, lakeShoreDistAt, bankCharFromQuery, bankCharAt, bedDropAt, LAKE_SHORES } from './riverzone.js';
+import { reachesAt, lakeAt, lakeShoreDistAt, bankCharFromQuery, bankCharAt, bedDropAt, LAKE_SHORES } from './riverzone.js';
 import { clamp, lerp, smoothstep, makeNoise } from './util.js';
 import { LOC } from './landuse.js';
 
@@ -37,14 +37,23 @@ function channelBody(q, x, z, river) {
     H = clamp(0.62 + 1.05 * ch.outer + (n - 0.5) * 0.9 - 0.32 * ch.inner, 0.32, 2.0);
     W = lerp(2.8, 1.25, ch.outer) + ch.inner * 9.5 + ch.bar * 2.2 + n * 1.6;
     D = bedDropAt(q.curvature);
-    fadeA = 19; fadeB = 26; flood = 34;
+    fadeA = 28; fadeB = 38; flood = 34;
   } else {
     H = clamp(0.34 + 0.42 * ch.outer + (n - 0.5) * 0.4, 0.18, 0.95);
     W = 1.3 + ch.inner * 2.6 + n * 1.1;
     D = clamp(0.3 + q.hw * 0.17, 0.38, 0.9);
     fadeA = 16; fadeB = 24; flood = 12;
   }
-  return { kind: river ? 'river' : 'stream', q, ch, e, level: q.level, H, W, D, hw: q.hw, fadeA, fadeB, flood, n };
+  // Past the bank top the valley side climbs to whatever the DEM holds —
+  // but over a floodplain bench first (wide inside a bend, where the river
+  // builds land; nearly nothing on the cut side) and at a slope that runs
+  // from a steep scarp on outer bends to a long grassy rise on inner ones.
+  // (bench + bank capped so the wall always has room to climb before the
+  // carve fades — else the DEM returned as a cliff at the fade)
+  const bench = river ? Math.min(1.5 + ch.inner * 12 + n * 7, 15 - W) : Math.min(0.8 + ch.inner * 3 + n * 2, 7 - W);
+  const wall = river ? lerp(0.32, 0.85, clamp(ch.outer * 0.8 + (1 - n) * 0.45, 0, 1))
+    : lerp(0.35, 0.8, clamp(ch.outer + (1 - n) * 0.3, 0, 1));
+  return { kind: river ? 'river' : 'stream', q, ch, e, level: q.level, H, W, D, hw: q.hw, fadeA, fadeB, flood, n, bench, wall };
 }
 
 function lakeBody(x, z) {
@@ -67,16 +76,15 @@ function mkLake(lake, x, z, e) {
   // sandy/till shores that climb within a couple of metres
   const H = clamp(0.3 + n * 0.75 + ch.bar * 0.2, 0.25, 1.2);
   const W = 1.4 + ch.mud * 7 + (1 - n) * 3;
-  return { kind: 'lake', lake, ch, e, level: lake.level, H, W, D: 0, hw: 0, fadeA: 22, fadeB: 34, flood: 20, n };
+  return { kind: 'lake', lake, ch, e, level: lake.level, H, W, D: 0, hw: 0, fadeA: 22, fadeB: 34, flood: 20, n,
+    bench: Math.max(0, Math.min(2 + ch.mud * 8 + n * 4, 11 - W)), wall: lerp(0.3, 0.75, 1 - n) };
 }
 
 // every water body whose shore law reaches (x, z)
 export function shoreBodies(x, z) {
   const out = [];
-  const rv = riverAt(x, z);
-  if (rv && rv.d - rv.hw < 26) out.push(channelBody(rv, x, z, true));
-  const st = streamAt(x, z);
-  if (st && st.d - st.hw < 24) out.push(channelBody(st, x, z, false));
+  for (const rv of reachesAt('river', x, z)) if (rv.d - rv.hw < 38) out.push(channelBody(rv, x, z, true));
+  for (const st of reachesAt('stream', x, z)) if (st.d - st.hw < 24) out.push(channelBody(st, x, z, false));
   const lb = lakeBody(x, z);
   if (lb) out.push(lb);
   return out;
@@ -100,7 +108,10 @@ function bankAt(b) {
 function carve(b) {
   if (b.e < 0) return bedAt(b);
   if (b.e <= b.W) return bankAt(b);
-  return b.level + b.H + (b.e - b.W) * 1.1;
+  const r = b.e - b.W - b.bench;
+  // eased into the slope so the bench edge is a shoulder, not a crease
+  // …and steepening with distance, as valley sides do toward the plateau
+  return b.level + b.H + (r <= 0 ? 0 : (r < 3 ? r * r / 6 * b.wall : (r - 1.5) * b.wall) + 0.022 * r * r);
 }
 // fill envelope (terrain ≥ this)
 function fill(b) {
@@ -112,9 +123,6 @@ function fill(b) {
 function clearOf(b) {
   return smoothstep(b.W, b.W + 4, b.e);
 }
-function inPondBasin(x, z) {
-  return Math.hypot((x - (LOC.POND.x + 4)) / 56, (z - LOC.POND.z) / 38) < 1.25;
-}
 
 // Apply the law to a raw height. bodies may be passed in when the caller
 // already queried them (the paint does).
@@ -125,14 +133,18 @@ export function shoreHeight(h, x, z, bodies = shoreBodies(x, z)) {
     const u = carve(b);
     if (u < h) h += k * (u - h);
   }
-  const pond = inPondBasin(x, z);
   for (let i = 0; i < bodies.length; i++) {
     const b = bodies[i];
-    if (pond && b.kind === 'river' && b.e > 0) continue;
     let k = 1 - smoothstep(b.fadeA, b.fadeB, b.e);
     for (let j = 0; j < bodies.length; j++) if (j !== i) k *= clearOf(bodies[j]);
     const l = fill(b);
     if (l > h) h += k * (l - h);
+  }
+  // the mill terrace: the bank cut back to a level yard beside the dam
+  const M = LOC.MILL;
+  if (M) {
+    const w = smoothstep(13, 7, Math.hypot(x - M.x, z - M.z));
+    if (w > 0) h = lerp(h, Math.max(M.terrace, Math.min(h, M.terrace + 0.4)), w);
   }
   return h;
 }

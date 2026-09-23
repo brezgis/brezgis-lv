@@ -13,7 +13,7 @@ import { ROADS_OSM, DWELLINGS_OSM, BUILDINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
 import { forest1935At } from './forest1935.js';
-import { RIVER, STREAM_CHANNELS, riverAt, streamAt, setPond } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, riverAt, streamAt } from './riverzone.js';
 import { makeNoise, mulberry32, clamp, lerp, smoothstep, distToPolyline, pointInPoly, chaikinOpen } from './util.js';
 
 const noise = makeNoise(4217);
@@ -165,7 +165,6 @@ export const LOC = {
   CAMP: { x: rvx + 90, z: 130 },             // era-1 hunters' camp on the riverside terrace
   MANOR: { x: -40, z: -180 },                // Nēķena muiža ensemble (eras 3-5), village core
   POND: { x: pondPt[0], z: pondPt[1] },      // mill pond on the Gauja bend below the manor
-  POND_LEVEL: (riverAt(pondPt[0], pondPt[1])?.level ?? pondPt[2]) + 1.3,   // held 1.3 m above the harmonised river
   OAK: { x: rvx + 130, z: -90 },             // the old oak (sacred in era 2, still there in 4)
   BARROWS: { x: rvx + 330, z: 300 },         // Latgalian barrow cemetery (eras 2+, as mounds)
   STONE: { x: rvx + 245, z: -25 },           // poem stone by the road (eras 4-5)
@@ -175,8 +174,27 @@ export const LOC = {
   BREZGA: { x: BREZGA.x, z: BREZGA.z },      // Brežģa kalns summit (255 m) — the family hill
   KROGS: { x: 2320, z: 5270 },               // Brežģa krogs / Brezgis settlement, on the old road
 };
-// the mill pond becomes a riverzone location (eras 3-4; riverzone gates it)
-setPond({ x: LOC.POND.x + 4, z: LOC.POND.z, rx: 54, rz: 36, level: LOC.POND_LEVEL });
+// The manor's watermill (eras 3-4) dams the Gauja itself. The dam runs
+// straight across the channel at the river point nearest the old pond
+// anchor; its 1.2 m head backs the river up into a still mill reach (the
+// pond — water.js floods it over the real terrain). The mill stands on the
+// manor bank just below the dam: a breastshot wheel fed along a flume at
+// pond level, its house dug into the bank so the wheel meets the tailrace.
+{
+  const q = riverAt(pondPt[0], pondPt[1]);
+  const dam = { x: q.x, z: q.z, dx: q.dx, dz: q.dz, hw: q.hw, level: q.level };
+  let nx = -q.dz, nz = q.dx;                        // left-bank normal
+  // the manor bank carries the old riverside road along its top, so the
+  // mill takes the quiet far bank
+  if ((LOC.MANOR.x - q.x) * nx + (LOC.MANOR.z - q.z) * nz > 0) { nx = -nx; nz = -nz; }
+  dam.nx = nx; dam.nz = nz;                          // toward the mill bank
+  LOC.DAM = dam;
+  LOC.POND_LEVEL = q.level + 1.2;
+  const mx = q.x + nx * (q.hw + 4.6) + q.dx * 7, mz = q.z + nz * (q.hw + 4.6) + q.dz * 7;
+  // the house's local −x (wheel side) faces the channel; its floor is a
+  // half-storey below the terrace the bank is cut back to (shore.js)
+  LOC.MILL = { x: mx, z: mz, rot: Math.atan2(-nz, nx), base: q.level + 0.25, terrace: q.level + 0.9 };
+}
 
 // Terrain pads to flatten (union across eras — the ground itself is continuous)
 // Late Iron Age dispersal: Latgalian settlement was scattered single

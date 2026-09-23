@@ -21,7 +21,7 @@
 //    and sky as seen in the water — the main cue that water is water),
 //    falling back to the sky cube where the mirror's level doesn't apply.
 import * as THREE from 'three';
-import { RIVER, STREAM_CHANNELS, LAKE_SHORES } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, setPond } from './riverzone.js';
 import { shoreBodies, waterSampleOf, LAKE_DRIFT } from './shore.js';
 import { LOC } from './landuse.js';
 import { canvasTexture, makeNoise, lerp, smoothstep, clamp } from './util.js';
@@ -206,14 +206,15 @@ uniform vec3 uBody;        // scattering colour of the water column (linear)
 uniform vec3 uSilt;        // what very shallow water tints toward
 uniform float uExtinct;    // 1/m — how fast the bed disappears with depth
 uniform float uPondMask;
-uniform vec4 uPondBounds;
+uniform sampler2D uPondTex;
+uniform vec4 uPondBounds;   // x0, z0, width, depth of the flood mask
 uniform float uIsPond;
 varying float vWDepth;
 varying vec2 vWFlow;
 varying vec3 vWPos;
 `;
 
-function makeWaterMaterial(ripple, pondBounds) {
+function makeWaterMaterial(ripple, pondBounds, pondTex) {
   const m = new THREE.MeshPhongMaterial({
     color: 0xffffff, specular: 0xffffff, shininess: 320,
     transparent: true, depthWrite: false, side: THREE.FrontSide,
@@ -231,6 +232,7 @@ function makeWaterMaterial(ripple, pondBounds) {
     uExtinct: { value: 1.35 },
     uPondMask: { value: 0 },
     uPondBounds: { value: pondBounds },
+    uPondTex: { value: pondTex },
     uIsPond: { value: 0 },
   };
   m.userData.u = u;
@@ -247,7 +249,10 @@ varying vec3 vWPos;
   vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     sh.fragmentShader = WATER_PARS + sh.fragmentShader
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
-  if (uPondMask > 0.5 && uIsPond < 0.5 && length((vWPos.xz - uPondBounds.xy) / uPondBounds.zw) < 1.0) discard;
+  if (uPondMask > 0.5 && uIsPond < 0.5) {
+    vec2 pu = (vWPos.xz - uPondBounds.xy) / uPondBounds.zw;
+    if (pu.x > 0.0 && pu.y > 0.0 && pu.x < 1.0 && pu.y < 1.0 && texture2D(uPondTex, pu).r > 0.5) discard;
+  }
   if (vWDepth < -0.05) discard;`)
       // Ripples: a flow map. Two copies of the ripple field advect down the
       // local current on staggered clocks and cross-fade, so the pattern
@@ -312,28 +317,89 @@ varying vec3 vWPos;
   return m;
 }
 
-function pondGeometry(level) {
-  // a flat ellipse on the Gauja bend, depth off the rendered basin
-  const cx = LOC.POND.x + 4, cz = LOC.POND.z, RX = 52, RZ = 34;
+// ------------------------------------------------------------- mill pond ---
+// The manor dam backs the Gauja up by 1.2 m. The pond is whatever that
+// floods: every lattice cell upstream of the dam line, connected to it,
+// whose rendered ground lies below the pond level — until the river's own
+// level climbs to meet the pond (the head of the backwater). Its shores are
+// wherever the real terrain rises out of it; only the dam line and the
+// backwater head are cut straight, and the dam covers the first.
+function floodPond() {
+  const D = LOC.DAM, L = LOC.POND_LEVEL, S = 2, R = 1200, N = Math.ceil((2 * R) / S);
+  const gx0 = Math.round((D.x - R) / S), gz0 = Math.round((D.z - R) / S);
+  const cell = new Uint8Array(N * N);             // 0 unseen, 1 flooded, 2 dry/cut
+  const stack = [[Math.round((D.x - D.dx * 5) / S) - gx0, Math.round((D.z - D.dz * 5) / S) - gz0]];
+  let minI = N, maxI = 0, minJ = N, maxJ = 0;
+  while (stack.length) {
+    const [i, j] = stack.pop();
+    if (i < 0 || j < 0 || i >= N || j >= N || cell[j * N + i]) continue;
+    const x = (gx0 + i) * S, z = (gz0 + j) * S;
+    let wet = (x - D.x) * D.dx + (z - D.z) * D.dz < -0.5 && meshHeightAt(x, z) < L;
+    if (wet) {
+      const rv = riverAt(x, z);
+      if (rv && rv.d < rv.hw + 2 && rv.level >= L - 0.02) wet = false;   // the backwater's head
+    }
+    cell[j * N + i] = wet ? 1 : 2;
+    if (!wet) continue;
+    if (i < minI) minI = i; if (i > maxI) maxI = i; if (j < minJ) minJ = j; if (j > maxJ) maxJ = j;
+    stack.push([i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]);
+  }
+  const nx = maxI - minI + 3, nz = maxJ - minJ + 3;
+  const data = new Uint8Array(nx * nz);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const si = minI - 1 + i, sj = minJ - 1 + j;
+    if (si >= 0 && sj >= 0 && si < N && sj < N && cell[sj * N + si] === 1) data[j * nx + i] = 1;
+  }
+  // mask cells are CENTRED on lattice points
+  return { level: L, x0: (gx0 + minI - 1) * S - S / 2, z0: (gz0 + minJ - 1) * S - S / 2, S, nx, nz, data,
+    lx0: gx0 + minI - 1, lz0: gz0 + minJ - 1 };
+}
+
+function pondGeometry(P) {
+  const S = P.S, L = P.level;
+  const inRegion = (i, j) => i >= 0 && j >= 0 && i < P.nx && j < P.nz && P.data[j * P.nx + i] === 1;
   const pos = [], depth = [], flow = [], idx = [];
-  const RINGS = 10, SEGS = 64;
-  pos.push(cx, level, cz); depth.push(level - meshHeightAt(cx, cz)); flow.push(0, 0);
-  for (let r = 1; r <= RINGS; r++) for (let s = 0; s < SEGS; s++) {
-    const a = (s / SEGS) * Math.PI * 2, k = r / RINGS;
-    const x = cx + Math.cos(a) * RX * k, z = cz + Math.sin(a) * RZ * k;
-    pos.push(x, level, z); depth.push(level - meshHeightAt(x, z)); flow.push(0.01, 0.01);
-  }
-  for (let s = 0; s < SEGS; s++) idx.push(0, 1 + ((s + 1) % SEGS), 1 + s);
-  for (let r = 1; r < RINGS; r++) for (let s = 0; s < SEGS; s++) {
-    const a = 1 + (r - 1) * SEGS + s, b = 1 + (r - 1) * SEGS + (s + 1) % SEGS;
-    const c = a + SEGS, d = b + SEGS;
-    idx.push(a, b, d, a, d, c);
-  }
-  // wind every triangle CCW seen from above
-  for (let i = 0; i < idx.length; i += 3) {
-    const A = idx[i] * 3, B = idx[i + 1] * 3, C = idx[i + 2] * 3;
-    const ar = (pos[B + 2] - pos[A + 2]) * (pos[C] - pos[A]) - (pos[B] - pos[A]) * (pos[C + 2] - pos[A + 2]);
-    if (ar < 0) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+  const vmap = new Map();
+  const V = (x, z) => {
+    const k = Math.round(x * 4) * 1e7 + Math.round(z * 4);
+    if (vmap.has(k)) return vmap.get(k);
+    const i = pos.length / 3;
+    pos.push(x, L, z);
+    depth.push(L - meshHeightAt(x, z));
+    const rv = riverAt(x, z);
+    flow.push(rv ? rv.dx * 0.06 : 0.01, rv ? rv.dz * 0.06 : 0.01);
+    vmap.set(k, i);
+    return i;
+  };
+  const F = (i, j) => {
+    const x = (P.lx0 + i) * S, z = (P.lz0 + j) * S, g = meshHeightAt(x, z);
+    if (inRegion(i, j)) return { x, z, f: L - g + 0.15 };
+    return { x, z, f: g < L ? -0.5 : L - g + 0.15 };
+  };
+  const cache = new Map();
+  const at = (i, j) => { const k = j * 100000 + i; let v = cache.get(k); if (!v) cache.set(k, v = F(i, j)); return v; };
+  const tri = (A, B, C) => {
+    const poly = [], P3 = [A, B, C];
+    for (let k = 0; k < 3; k++) {
+      const a = P3[k], b = P3[(k + 1) % 3];
+      if (a.f >= 0) poly.push(a);
+      if ((a.f >= 0) !== (b.f >= 0)) {
+        const t = a.f / (a.f - b.f);
+        poly.push({ x: lerp(a.x, b.x, t), z: lerp(a.z, b.z, t) });
+      }
+    }
+    for (let k = 1; k + 1 < poly.length; k++) {
+      const a = poly[0], b = poly[k], c = poly[k + 1];
+      const area = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+      if (Math.abs(area) < 1e-4) continue;
+      const va = V(a.x, a.z), vb = V(b.x, b.z), vc = V(c.x, c.z);
+      if (area > 0) idx.push(va, vb, vc); else idx.push(va, vc, vb);
+    }
+  };
+  for (let j = -1; j < P.nz; j++) for (let i = -1; i < P.nx; i++) {
+    if (!inRegion(i, j) && !inRegion(i + 1, j) && !inRegion(i, j + 1) && !inRegion(i + 1, j + 1)) continue;
+    const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
+    tri(a, b, c); tri(a, c, d);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -425,22 +491,28 @@ export function buildWater() {
   const group = new THREE.Group();
   group.name = 'water';
   const ripple = waterNormalTex();
-  const pondBounds = new THREE.Vector4(LOC.POND.x + 4, LOC.POND.z, 52, 34);
+  const P = floodPond();
+  setPond(P);                                   // vegetation, wading, ducks ask riverzone
+  const pondTex = new THREE.DataTexture(P.data.map((v) => v * 255), P.nx, P.nz, THREE.RedFormat, THREE.UnsignedByteType);
+  pondTex.magFilter = pondTex.minFilter = THREE.NearestFilter;
+  pondTex.needsUpdate = true;
+  const pondBounds = new THREE.Vector4(P.x0, P.z0, P.nx * P.S, P.nz * P.S);
 
-  const mat = makeWaterMaterial(ripple, pondBounds);
+  const mat = makeWaterMaterial(ripple, pondBounds, pondTex);
   const surface = new THREE.Mesh(buildSurface(), mat);
   surface.name = 'water:surface';
   surface.renderOrder = 1;
   group.add(surface);
 
-  const pondLevel = LOC.POND_LEVEL;
-  const pondMat = makeWaterMaterial(ripple, pondBounds);
+  const pondLevel = P.level;
+  const pondMat = makeWaterMaterial(ripple, pondBounds, pondTex);
   pondMat.userData.u.uIsPond.value = 1;
-  const pond = new THREE.Mesh(pondGeometry(pondLevel), pondMat);
+  const pond = new THREE.Mesh(pondGeometry(P), pondMat);
   pond.name = 'pond';
   pond.visible = false;
   pond.renderOrder = 1;
   group.add(pond);
+  console.log(`[boot] mill pond: ${(P.data.reduce((a, v) => a + v, 0) * 4 / 1e4).toFixed(1)} ha backwater at ${pondLevel.toFixed(2)} m`);
 
   const mats = [mat, pondMat];
   const reflector = makeReflector();

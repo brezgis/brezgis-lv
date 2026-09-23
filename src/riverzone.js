@@ -519,7 +519,7 @@ for (const mouth of CONFLUENCES) {
 // 16m buckets over every channel sample; exact within QUERY_R, null beyond
 // (callers keep using landuse's coarse field for far distances).
 const BK = 16;
-export const QUERY_R = 40;
+export const QUERY_R = 46;
 function bucketsFor(chans) {
   const m = new Map();
   for (const chan of chans) {
@@ -539,7 +539,7 @@ function bucketsFor(chans) {
 }
 const rivBK = bucketsFor([RIVER]);
 const strmBK = bucketsFor(STREAM_CHANNELS);
-function nearest(m, x, z, channel = null) {
+function nearest(m, x, z, channel = null, not = null) {
   const bx = Math.floor(x / BK), bz = Math.floor(z / BK);
   let best = null, bd = QUERY_R * QUERY_R;
   for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
@@ -547,6 +547,7 @@ function nearest(m, x, z, channel = null) {
     if (!arr) continue;
     for (const seg of arr) {
       if (channel && seg.chan !== channel) continue;
+      if (not && seg.chan === not.chan && Math.abs(seg.chan.sampleS[seg.i] - not.s) < not.gap) continue;
       const a = seg.chan.samples[seg.i], b = seg.chan.samples[seg.i + 1];
       const sx = b[0] - a[0], sz = b[1] - a[1], sl2 = sx * sx + sz * sz;
       const u = clamp(((x - a[0]) * sx + (z - a[1]) * sz) / (sl2 || 1), 0, 1);
@@ -569,6 +570,15 @@ function nearest(m, x, z, channel = null) {
 // CENTERLINE; d - hw is the signed distance to the rugged water's edge.
 export function riverAt(x, z) { return nearest(rivBK, x, z); }
 export function streamAt(x, z) { return nearest(strmBK, x, z); }
+// The nearest reach AND the nearest other reach of the same channel (a
+// meander neck, the far arm of a hairpin). Bank laws evaluated on both and
+// combined stay continuous where the nearest-segment answer jumps arms.
+export function reachesAt(bk, x, z) {
+  const a = nearest(bk === 'river' ? rivBK : strmBK, x, z);
+  if (!a) return [];
+  const b = nearest(bk === 'river' ? rivBK : strmBK, x, z, a.chan, { chan: a.chan, s: a.s, gap: 2 * a.hw + 50 });
+  return b ? [a, b] : [a];
+}
 // Channel-specific query keeps neighbouring tributaries from stealing each
 // other's surface vertices at confluences. Uses the same spatial index.
 export function channelAt(channel, x, z) {
@@ -594,12 +604,16 @@ export function confluenceAt(x, z, margin = 0) {
 export function inConfluenceMask(x, z, margin = 0) { return confluenceAt(x, z, margin) !== null; }
 
 // ------------------------------------------------------------- the pond ----
-// The mill pond exists only in eras 3-4; landuse registers it (it owns LOC).
+// The mill pond exists only in eras 3-4. It is the Gauja's backwater above
+// the manor dam, flooded over the real terrain by water.js, which publishes
+// the flooded cells here: { level, x0, z0, S, nx, nz, data(Uint8) }.
 let POND = null;
-export function setPond(p) { POND = p; }        // {x, z, rx, rz, level}
+export function setPond(p) { POND = p; }
 export function pondAt(x, z) {
   if (!POND) return null;
-  return Math.hypot((x - POND.x) / POND.rx, (z - POND.z) / POND.rz) < 1.05 ? POND : null;
+  const ix = Math.floor((x - POND.x0) / POND.S), iz = Math.floor((z - POND.z0) / POND.S);
+  if (ix < 0 || iz < 0 || ix >= POND.nx || iz >= POND.nz) return null;
+  return POND.data[iz * POND.nx + ix] ? POND : null;
 }
 
 // ------------------------------------------------------------ the rules ----

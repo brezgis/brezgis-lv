@@ -12,8 +12,8 @@ import { LOC } from './landuse.js';
 const STATIC_RECTS = [
   // Dzērbene church silhouette (nave + tower), eras 3-5
   { x: LOC.CHURCH.x, z: LOC.CHURCH.z, w: 38, d: 24, rot: -0.8, eras: [3, 4, 5] },
-  // the watermill on the pond bend, eras 3-4 (offset per the era-3 builder)
-  { x: LOC.POND.x + 30, z: LOC.POND.z + 16, w: 18, d: 14, rot: -Math.PI * 0.75, eras: [3, 4] },
+  // the watermill beside the Gauja dam, eras 3-4 (house + wheel + flume)
+  { x: LOC.MILL.x, z: LOC.MILL.z, w: 12, d: 10, rot: -LOC.MILL.rot, eras: [3, 4] },
   // the 2017 observation tower base (vegetation is thinned there already —
   // this is the belt to that braces)
   { x: LOC.BREZGA.x, z: LOC.BREZGA.z, w: 9, d: 9, rot: -0.2, eras: [5] },

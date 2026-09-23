@@ -1,16 +1,31 @@
-// Water bodies, all from real geometry: the Gauja ribbon (OSM course),
-// Taurenes ezers (OSM outline), the Dzērbe and a nameless brook, and the
-// mill pond that exists only while the manor's watermill does (eras 3-4).
+// WATER — one surface for every river, brook and lake in the parish.
+//
+// The Gauja here flows THROUGH Brenkūzis, Dabaru ezers and Taurenes ezers,
+// and its tributaries run into it and into Šķesteru ezers. Earlier builds
+// drew each of those as its own sheet (ribbons for the channels, polygons
+// for the lakes, collars and skirts for their banks) and every join was a
+// visible overlap: a river ribbon running on through a lake, a brook sliding
+// under the Gauja, tan strips riding on the meadow. Now:
+//
+//  * riverzone harmonises the levels (water runs downhill; a lake the river
+//    crosses IS the river there) so every join is flush;
+//  * the surface is ONE coverage mesh on a 2 m lattice, clipped by marching
+//    triangles against the union of all water, overshooting the waterline
+//    by 2 m so the shore itself is the bank rising through the sheet —
+//    terrain.js builds those banks at 2 m resolution from the same law;
+//  * deep lake interiors collapse to 64 m quads (flat water, no T-crack);
+//  * the shader reads its optical depth from the rendered bed, so shallows
+//    are clear and fade to nothing at the waterline, and deep water turns
+//    the dark tea-brown of a humic Vidzeme river;
+//  * reflections come from a planar mirror of the scene (the banks, trees
+//    and sky as seen in the water — the main cue that water is water),
+//    falling back to the sky cube where the mirror's level doesn't apply.
 import * as THREE from 'three';
-import { STREAMS, LAKES } from './geodata.js';
-import { RIVER, STREAM_CHANNELS, channelRows, bankCharAt, bankCharSideAt, CONFLUENCES,
-  LAKE_SHORES, lakeAt, riverAt, streamAt, inConfluenceMask, channelAt } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES } from './riverzone.js';
+import { shoreBodies, waterSampleOf, LAKE_DRIFT } from './shore.js';
 import { LOC } from './landuse.js';
-import { canvasTexture, makeNoise, chaikinPoly, lerp, smoothstep } from './util.js';
-import { meshHeightAt } from './terrain.js';
-import { channelSurfaceGeometry } from './channel-surface.js';
-
-const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+import { canvasTexture, makeNoise, lerp, smoothstep, clamp } from './util.js';
+import { meshHeightAt, shoreLatticeWater, releaseShoreLattice } from './terrain.js';
 
 function waterNormalTex() {
   const tex = canvasTexture(256, 256, (ctx, w, h) => {
@@ -26,7 +41,7 @@ function waterNormalTex() {
     };
     const hgt = (x, y) => {
       const u = ((x % w) + w) % w / w, v = ((y % h) + h) % h / h;
-      return periodic(u, v, 7) * 0.7 + periodic(u, v, 23) * 0.3;
+      return periodic(u, v, 7) * 0.62 + periodic(u, v, 19) * 0.26 + periodic(u, v, 41) * 0.12;
     };
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const dx = (hgt(x + 1, y) - hgt(x - 1, y)) * 3.2;
@@ -41,614 +56,431 @@ function waterNormalTex() {
     ctx.putImageData(img, 0, 0);
   });
   tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
 
-// Cheap value noise for the foam lace. Same role as brook's vnoise: the foam
-// threshold has to be jittered by the same field that draws the foam, or a
-// clean depth contour reads as a white stripe painted along the shoreline —
-// which is exactly what a hem of foam is not.
-const FOAM_GLSL = /* glsl */`
-float wHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
-float wNoise(vec2 p){
-  vec2 i = floor(p), f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(wHash(i), wHash(i + vec2(1.0, 0.0)), u.x),
-             mix(wHash(i + vec2(0.0, 1.0)), wHash(i + vec2(1.0, 1.0)), u.x), u.y);
+// ------------------------------------------------------------ the surface ---
+const SC = 2, CH = 32, CV = CH + 1, BLOCK = SC * CH;   // 2 m cells, 64 m blocks
+const OVERSHOOT = 2.0;                                  // sheet runs 2 m under the bank
+
+function waterSample(x, z) {
+  const ix = Math.round(x / SC), iz = Math.round(z / SC);
+  if (ix * SC === x && iz * SC === z) {
+    const w = shoreLatticeWater(ix, iz);
+    if (w !== undefined) return w && { ...w };
+  }
+  return waterSampleOf(shoreBodies(x, z));
 }
+
+function buildSurface() {
+  const t0 = performance.now();
+  const want = new Set();
+  const key = (bx, bz) => (bx + 4096) * 8192 + (bz + 4096);
+  const touch = (x, z, r) => {
+    for (let bx = Math.floor((x - r) / BLOCK); bx <= Math.floor((x + r) / BLOCK); bx++)
+      for (let bz = Math.floor((z - r) / BLOCK); bz <= Math.floor((z + r) / BLOCK); bz++) want.add(key(bx, bz));
+  };
+  RIVER.samples.forEach(([x, z, , hw], i) => { if (i % 2 === 0) touch(x, z, hw + 6); });
+  for (const chan of STREAM_CHANNELS) chan.samples.forEach(([x, z, , hw], i) => { if (i % 3 === 0) touch(x, z, hw + 5); });
+  for (const l of LAKE_SHORES) {
+    for (let x = l.minX - 8; x <= l.maxX + 8; x += BLOCK / 2)
+      for (let z = l.minZ - 8; z <= l.maxZ + 8; z += BLOCK / 2) touch(x, z, 4);
+  }
+  const pos = [], depth = [], flow = [], idx = [];
+  const vmap = new Map();
+  const vkey = (x, z) => Math.round(x * 4) * 1e7 + Math.round(z * 4);
+  const emitV = (x, z, s, minDepth = 0) => {
+    const k = vkey(x, z);
+    let i = vmap.get(k);
+    if (i !== undefined) return i;
+    i = pos.length / 3;
+    pos.push(x, s.level, z);
+    depth.push(Math.max(minDepth, s.level - meshHeightAt(x, z)));
+    flow.push(s.fx, s.fz);
+    vmap.set(k, i);
+    return i;
+  };
+  let coarseQuads = 0;
+  for (const bk of want) {
+    const bx = Math.floor(bk / 8192) - 4096, bz = bk % 8192 - 4096;
+    const x0 = bx * BLOCK, z0 = bz * BLOCK;
+    // deep lake interior: one flat quad for the whole block
+    {
+      let deep = true, lake = null;
+      for (let j = 0; j <= 4 && deep; j++) for (let i = 0; i <= 4 && deep; i++) {
+        const s = waterSample(x0 + i * 16, z0 + j * 16);
+        if (!s || !s.lake || s.f < 14 || (lake && s.lake !== lake)) deep = false;
+        else lake = s.lake;
+      }
+      if (deep) {
+        const s = { level: lake.level, fx: 0.6 * LAKE_DRIFT, fz: 0.8 * LAKE_DRIFT };
+        // the whole block is ≥14 m from shore: deep, whatever its corners sample
+        const a = emitV(x0, z0, s, 3), b = emitV(x0 + BLOCK, z0, s, 3), c = emitV(x0 + BLOCK, z0 + BLOCK, s, 3), d = emitV(x0, z0 + BLOCK, s, 3);
+        idx.push(a, c, b, a, d, c);
+        coarseQuads++;
+        continue;
+      }
+    }
+    // fine lattice + marching triangles on f = OVERSHOOT − e
+    const S = new Array(CV * CV);
+    let any = false;
+    for (let j = 0; j < CV; j++) for (let i = 0; i < CV; i++) {
+      const s = waterSample(x0 + i * SC, z0 + j * SC);
+      if (s) { s.f += OVERSHOOT; if (s.f > 0) any = true; }
+      S[j * CV + i] = s;
+    }
+    if (!any) continue;
+    const pt = (i, j) => { const s = S[j * CV + i]; return { x: x0 + i * SC, z: z0 + j * SC, f: s ? s.f : -9, s }; };
+    const lerpS = (a, b, t) => {
+      const sa = a.s || b.s, sb = b.s || a.s;
+      return { level: lerp(sa.level, sb.level, t), fx: lerp(sa.fx, sb.fx, t), fz: lerp(sa.fz, sb.fz, t) };
+    };
+    const tri = (A, B, C) => {
+      const poly = [];
+      const P = [A, B, C];
+      for (let k = 0; k < 3; k++) {
+        const a = P[k], b = P[(k + 1) % 3];
+        if (a.f >= 0) poly.push(a);
+        if ((a.f >= 0) !== (b.f >= 0)) {
+          const t = a.f / (a.f - b.f);
+          poly.push({ x: lerp(a.x, b.x, t), z: lerp(a.z, b.z, t), s: lerpS(a, b, t) });
+        }
+      }
+      if (poly.length < 3) return;
+      const vs = poly.map((p) => emitV(p.x, p.z, p.s));
+      for (let k = 1; k + 1 < vs.length; k++) {
+        const a = poly[0], b = poly[k], c = poly[k + 1];
+        const area = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+        if (Math.abs(area) < 1e-4) continue;
+        // CCW seen from above
+        if (area > 0) idx.push(vs[0], vs[k], vs[k + 1]); else idx.push(vs[0], vs[k + 1], vs[k]);
+      }
+    };
+    // 16 m sub-squares wholly out in a lake: one flat quad each
+    const merged = new Uint8Array(16);
+    for (let sj = 0; sj < 4; sj++) for (let si = 0; si < 4; si++) {
+      let lake = null, ok = true;
+      for (let j = sj * 8; j <= sj * 8 + 8 && ok; j++) for (let i = si * 8; i <= si * 8 + 8 && ok; i++) {
+        const s = S[j * CV + i];
+        if (!s || !s.lake || s.f < 12 + OVERSHOOT || (lake && s.lake !== lake)) ok = false; else lake = s.lake;
+      }
+      if (!ok) continue;
+      merged[sj * 4 + si] = 1;
+      const s = { level: lake.level, fx: 0.6 * LAKE_DRIFT, fz: 0.8 * LAKE_DRIFT };
+      const X0 = x0 + si * 16, Z0 = z0 + sj * 16;
+      const a = emitV(X0, Z0, s, 2), b = emitV(X0 + 16, Z0, s, 2), c = emitV(X0 + 16, Z0 + 16, s, 2), d = emitV(X0, Z0 + 16, s, 2);
+      idx.push(a, c, b, a, d, c);
+    }
+    for (let j = 0; j < CH; j++) for (let i = 0; i < CH; i++) {
+      if (merged[(j >> 3) * 4 + (i >> 3)]) continue;
+      const a = pt(i, j), b = pt(i + 1, j), c = pt(i + 1, j + 1), d = pt(i, j + 1);
+      if (a.f < 0 && b.f < 0 && c.f < 0 && d.f < 0) continue;
+      tri(a, b, c); tri(a, c, d);
+    }
+  }
+  releaseShoreLattice();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  const nrm = new Float32Array(pos.length);
+  for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  geo.setAttribute('aDepth', new THREE.Float32BufferAttribute(depth, 1));
+  geo.setAttribute('aFlow', new THREE.Float32BufferAttribute(flow, 2));
+  geo.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
+  geo.computeBoundingSphere();
+  console.log(`[boot] water surface: ${pos.length / 3} verts, ${idx.length / 3} tris (${coarseQuads} deep-lake quads), ${(performance.now() - t0).toFixed(0)} ms`);
+  return geo;
+}
+
+// -------------------------------------------------------------- material ---
+const WATER_PARS = /* glsl */`
+uniform sampler2D uRipple;
+uniform samplerCube uSkyCube;
+uniform sampler2D uRefl;
+uniform mat4 uReflMatrix;
+uniform float uReflOn;
+uniform float uReflLevel;
+uniform float uTime;
+uniform vec3 uBody;        // scattering colour of the water column (linear)
+uniform vec3 uSilt;        // what very shallow water tints toward
+uniform float uExtinct;    // 1/m — how fast the bed disappears with depth
+uniform float uPondMask;
+uniform vec4 uPondBounds;
+uniform float uIsPond;
+varying float vWDepth;
+varying vec2 vWFlow;
+varying vec3 vWPos;
 `;
 
-// THE ONE-LINE TRAP THIS FILE FELL INTO ONCE: `onBeforeCompile` runs BEFORE
-// three resolves `#include <...>`, so a `.replace()` aimed at a string that
-// lives *inside* a ShaderChunk silently matches nothing and the patch is
-// simply absent — no error, no warning. The second ripple octave was written
-// that way and had never once executed. Splice the RESOLVED chunk in instead,
-// and assert the substitution took, so a three upgrade breaks loudly.
-const NORMAL_MAP_NEEDLE = 'vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;';
-const RIPPLE_CHUNK = (() => {
-  const chunk = THREE.ShaderChunk.normal_fragment_maps;
-  const patched = chunk.replace(NORMAL_MAP_NEEDLE, /* glsl */`
-    // Two ripple octaves scrolling against each other — interference, not
-    // slide. Local flow rotates the world-space advection into the channel
-    // direction; uOff2 supplies slower cross-drift.
-    vec2 flow = normalize(vWFlow + vec2(0.00001));
-    vec2 across = vec2(-flow.y, flow.x);
-    vec3 mapN1 = texture2D( normalMap, vNormalMapUv + across*uOff1.x + flow*uOff1.y ).xyz * 2.0 - 1.0;
-    vec3 mapN2 = texture2D( normalMap, vNormalMapUv * 3.7 + across*uOff2.x + flow*uOff2.y ).xyz * 2.0 - 1.0;
-    // Ripples are ~1 m across. Past ~50 m they are sub-pixel, and a tight
-    // specular lobe over a sub-pixel normal field aliases into drifting
-    // blotches — the whole reach read as curdled milk. Flatten the normals
-    // with distance: the far water keeps its sheen and loses its speckle.
-    float rippleLOD = mix( 0.30, 1.0, 1.0 - smoothstep( 45.0, 320.0, length( vViewPosition ) ) );
-    vec3 mapN = normalize( vec3(
-      ( mapN1.xy + mapN2.xy * 0.45 ) * ( 0.62 + 0.85 * vWTurb ) * rippleLOD, mapN1.z ) );
-  `);
-  if (patched === chunk) throw new Error('water.js: normal_fragment_maps no longer contains the ripple hook');
-  return patched;
-})();
-
-function makeWaterMaterial(color, opacity, normalMap, opts = {}) {
+function makeWaterMaterial(ripple, pondBounds) {
   const m = new THREE.MeshPhongMaterial({
-    color,
-    shininess: 64,
-    specular: 0xb9c6d0,
-    transparent: true,
-    depthWrite: false,
-    forceSinglePass: true,
-    opacity,
-    normalMap,
-    normalScale: new THREE.Vector2(0.18, 0.18),
-    side: THREE.DoubleSide, // allow a view from beneath the surface too
+    color: 0xffffff, specular: 0xffffff, shininess: 320,
+    transparent: true, depthWrite: false, side: THREE.FrontSide,
   });
-  // Flow is per MATERIAL, not per texture: every water body shares one normal
-  // map, so animating `normalMap.offset` moved the Gauja, the streams, the
-  // lakes and the mill pond as one diagonal slide across the parish. The
-  // river now advects along its own course.
-  m.userData.off1 = new THREE.Vector2();
-  m.userData.off2 = new THREE.Vector2();
-  m.userData.uvM = opts.uvM || 9;          // metres per normal-map tile
-  m.userData.flow = opts.flow ?? 0;        // surface speed downstream, m/s
-  m.userData.drift = opts.drift ?? 0.02;   // cross-drift of the second octave
-  // Shallow water is the bed seen through a little tea-coloured water; deep
-  // water is the body colour plus whatever the sky is doing. One colour for
-  // both read as poster paint.
-  m.userData.shallow = new THREE.Color(opts.shallow ?? 0x6f7a58);
-  m.userData.shallowBase = m.userData.shallow.clone();
-  m.userData.pondMask={value:0};m.userData.isPond=!!opts.pond;
+  const u = {
+    uRipple: { value: ripple },
+    uSkyCube: { value: null },
+    uRefl: { value: null },
+    uReflMatrix: { value: new THREE.Matrix4() },
+    uReflOn: { value: 0 },
+    uReflLevel: { value: -1e4 },
+    uTime: { value: 0 },
+    uBody: { value: new THREE.Color(0.052, 0.043, 0.025) },
+    uSilt: { value: new THREE.Color(0.20, 0.18, 0.12) },
+    uExtinct: { value: 1.35 },
+    uPondMask: { value: 0 },
+    uPondBounds: { value: pondBounds },
+    uIsPond: { value: 0 },
+  };
+  m.userData.u = u;
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uOff1 = { value: m.userData.off1 };
-    sh.uniforms.uOff2 = { value: m.userData.off2 };
-    sh.uniforms.uShallow = { value: m.userData.shallow };
-    sh.uniforms.uFoam = { value: opts.foam ?? 1 };
-    sh.uniforms.uDepthK = { value: new THREE.Vector2(opts.dShallow ?? 0.10, opts.dDeep ?? 2.1) };
-    sh.uniforms.uPondMask=m.userData.pondMask;
-    sh.uniforms.uPondBounds={value:new THREE.Vector4(LOC.POND.x+4,LOC.POND.z,52,34)};
+    Object.assign(sh.uniforms, u);
     sh.vertexShader = `attribute float aDepth;
-attribute float aTurb;
 attribute vec2 aFlow;
-varying vec2 vWFlow;
 varying float vWDepth;
-varying float vWTurb;
+varying vec2 vWFlow;
 varying vec3 vWPos;
 ` + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
   vWDepth = aDepth;
-  vWTurb = aTurb;
   vWFlow = aFlow;
-  vWPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;`);
-    sh.fragmentShader = `uniform vec2 uOff1;
-uniform vec2 uOff2;
-uniform vec3 uShallow;
-uniform vec2 uDepthK;
-uniform float uFoam;
-uniform float uPondMask;
-uniform vec4 uPondBounds;
-varying vec2 vWFlow;
-varying float vWDepth;
-varying float vWTurb;
-varying vec3 vWPos;
-${FOAM_GLSL}
-` + sh.fragmentShader.replace('#include <normal_fragment_maps>', `${RIPPLE_CHUNK}
-{
-  // FRESNEL. Water is a mirror at grazing angles and nearly clear when you
-  // look into it; without it the sky mix and the sun glitter land flat
-  // across the surface, so a river seen from a bank or a low flight read
-  // as white milk while the far reaches stayed dark — exactly inverted.
-  // (Phong applies its reflectivity and specular lobe flat across a surface.)
-  float ndv = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
-  float fres = pow(1.0 - ndv, 5.0);
-  specularStrength *= 0.035 + 0.965 * fres;
-
-  // DEPTH. Baked per vertex off the same rendered bed the terrain draws, so
-  // the shader and the geometry cannot disagree about where the shallows are.
-  float dK = smoothstep(uDepthK.x, uDepthK.y, vWDepth);
-  if(uPondMask>0.5 && length((vWPos.xz-uPondBounds.xy)/uPondBounds.zw)<1.0) discard;
-  if (vWDepth < 0.008) discard;
-  diffuseColor.rgb = mix(uShallow, diffuseColor.rgb, dK);
-  // Optical thickness: the substrate remains visible in the shallows and
-  // progressively disappears into tea-coloured water, not a flat blue decal.
-  float absorption = 1.0 - exp(-max(vWDepth, 0.0) * 0.72);
-  diffuseColor.a *= mix(0.18, 1.0, absorption);
-  // ...but at a grazing angle even an inch of water is a mirror.
-  diffuseColor.a = mix(diffuseColor.a, 1.0, fres * 0.8);
-
-  // FOAM. A hem where the flow drags over the shallows, plus lace on the
-  // broken water at the riffle crossings. Advected downstream with the flow.
-  // Kept COARSE (half-metre cells and larger): fine-grained foam noise reads
-  // as pixel speckle across the whole reach rather than as patches of froth,
-  // and a river falling 1.1 m/km does not froth — it only laces its shallows.
-  vec2 fp = vWPos.xz;
-  float lace = wNoise(fp * 0.50 + uOff1 * 26.0) * 0.64
-             + wNoise(fp * 1.45 + uOff2 * 6.0) * 0.36;
-  float hem = 1.0 - smoothstep(0.03, 0.30 + lace * 0.30, vWDepth);
-  float churn = smoothstep(0.52, 0.96, vWTurb);
-  float foam = uFoam * clamp(hem * smoothstep(0.34, 0.74, lace) * 0.80
-                           + churn * smoothstep(0.70, 0.94, lace) * 0.55, 0.0, 1.0);
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.82, 0.80), foam);
-  diffuseColor.a = clamp(diffuseColor.a + foam * 0.55, 0.0, 1.0);
-  specularStrength *= 1.0 - 0.85 * foam;   // foam is rough; it does not glitter
-}`);
+  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+    sh.fragmentShader = WATER_PARS + sh.fragmentShader
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+  if (uPondMask > 0.5 && uIsPond < 0.5 && length((vWPos.xz - uPondBounds.xy) / uPondBounds.zw) < 1.0) discard;
+  if (vWDepth < -0.05) discard;`)
+      // Ripples: a flow map. Two copies of the ripple field advect down the
+      // local current on staggered clocks and cross-fade, so the pattern
+      // travels with the river round every bend without ever smearing.
+      .replace('#include <normal_fragment_maps>', `
+  vec2 wp = vWPos.xz;
+  float spd = length(vWFlow);
+  float ph0 = fract(uTime * 0.11), ph1 = fract(uTime * 0.11 + 0.5);
+  float wBlend = abs(ph0 - 0.5) * 2.0;
+  vec2 fl = vWFlow * 6.0;
+  vec2 dA = texture2D(uRipple, wp / 3.1 - fl * ph0 / 3.1).xy * 2.0 - 1.0;
+  vec2 dB = texture2D(uRipple, wp / 3.1 - fl * ph1 / 3.1 + 0.37).xy * 2.0 - 1.0;
+  vec2 d1 = mix(dA, dB, wBlend);
+  // a slow, broad swell and a fine cat's-paw octave that no current carries
+  vec2 d2 = texture2D(uRipple, wp / 11.0 + vec2(uTime * 0.006, -uTime * 0.004)).xy * 2.0 - 1.0;
+  vec2 d3 = texture2D(uRipple, wp / 0.9 + vec2(-uTime * 0.03, uTime * 0.024)).xy * 2.0 - 1.0;
+  float viewD = length(vViewPosition);
+  // ripples are sub-pixel far away: flatten them with distance or the
+  // specular lobe aliases into drifting blotches
+  float lod = 1.0 - smoothstep(40.0, 300.0, viewD);
+  // a lowland river is nearly glassy: the current shows as a gentle crawl
+  // of ripples, not chop
+  float chop = 0.035 + 0.07 * smoothstep(0.05, 0.6, spd);
+  vec2 slope = (d1 * chop + d2 * 0.022 + d3 * 0.018 * lod) * mix(0.4, 1.0, lod);
+  vec3 nW = normalize(vec3(-slope.x, 1.0, -slope.y));
+  normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);
+`)
+      .replace('#include <opaque_fragment>', `
+  {
+    vec3 V = normalize(cameraPosition - vWPos);
+    float ndv = clamp(dot(nW, V), 0.0, 1.0);
+    // Schlick with water's F0 = 0.02
+    float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+    vec3 R = reflect(-V, nW);
+    R.y = abs(R.y);
+    vec3 sky = textureCube(uSkyCube, R).rgb;
+    vec3 refl = sky;
+    // planar mirror of the world, valid for water near its level
+    float mk = uReflOn * (1.0 - smoothstep(0.5, 1.8, abs(vWPos.y - uReflLevel)));
+    if (mk > 0.001) {
+      vec4 ru = uReflMatrix * vec4(vWPos, 1.0);
+      vec2 rUv = ru.xy / ru.w + (d1 * chop + d2 * 0.022) * 0.35;
+      vec4 mir = texture2D(uRefl, clamp(rUv, vec2(0.001), vec2(0.999)));
+      refl = mix(sky, mir.rgb, mk * mir.a);
+    }
+    // optical depth → how much of the bed shows through
+    float d = max(vWDepth, 0.0);
+    float T = exp(-d * uExtinct);
+    // the water column's own colour, lit like any diffuse thing
+    vec3 lit = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
+    vec3 column = mix(uBody, uSilt, T * 0.5) * lit / max(diffuseColor.rgb, vec3(1e-3));
+    float a = (1.0 - T) * (1.0 - fres) + fres;
+    refl *= 0.86;
+    vec3 col = (column * (1.0 - T) * (1.0 - fres) + refl * fres) / max(a, 1e-3);
+    col += reflectedLight.directSpecular * 0.9;
+    // the waterline itself: no hard sheet edge where depth → 0
+    a *= smoothstep(0.0, 0.12, d);
+    gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+  }`);
   };
+  m.customProgramCacheKey = () => 'water-v3';
   return m;
 }
 
-const channelSeg = (chan) => Math.min(2600, chan.pts.length * 7);
-
-// Shared coverage topology prevents folded surfaces at tight meanders.
-function ribbon(rows, mat, uvM = 9) {
-  return new THREE.Mesh(channelSurfaceGeometry(rows[0].chan, uvM), mat);
-}
-
-// ---------------------------------------------------------------- the bed ----
-// The terrain paints a riverbed, but it paints it on a 17.2 m mesh, and the
-// Gauja is 19 m wide: most cells crossing the channel have no vertex inside
-// it at all, so the "bed" the terrain draws is largely interpolated meadow.
-// That did not matter while the water was an opaque sheet. It matters now.
-//
-// So the channel gets its own bed, built from the SAME rows as the ribbon
-// above it — silt in the pools, washed gravel over the riffle crossings,
-// pale cobble on the point bars, soft mud in the slack reaches.
-function bedTexture() {
-  return canvasTexture(128, 128, (ctx, w, h) => {
-    ctx.fillStyle = '#6b6455';
-    ctx.fillRect(0, 0, w, h);
-    const sr = makeNoise(2027).rng;
-    for (let i = 0; i < 1800; i++) {           // grit
-      const g = 90 + sr() * 90;
-      ctx.fillStyle = `rgba(${g},${(g * 0.95) | 0},${(g * 0.82) | 0},0.55)`;
-      ctx.fillRect(sr() * w, sr() * h, 1 + sr() * 1.5, 1 + sr() * 1.5);
-    }
-    for (let i = 0; i < 150; i++) {            // water-rounded cobbles
-      const g = 105 + sr() * 105;
-      ctx.fillStyle = `rgba(${g},${(g * 0.97) | 0},${(g * 0.86) | 0},0.7)`;
-      ctx.beginPath();
-      ctx.ellipse(sr() * w, sr() * h, 1.4 + sr() * 2.6, 1.1 + sr() * 2.0, sr() * 3.14, 0, 7);
-      ctx.fill();
-    }
-  });
-}
-
-function buildChannelBed(surface, material, name) {
-  const geo=surface.geometry.clone(), p=geo.attributes.position;
-  const colors=[],uvs=[], grain=makeNoise(2029);
-  for(let i=0;i<p.count;i++){
-    const x=p.getX(i),z=p.getZ(i),waterY=p.getY(i),ground=meshHeightAt(x,z);
-    p.setY(i,Math.min(ground+.035,waterY-.04));
-    const d=Math.max(0,waterY-ground), ch=bankCharAt(x,z);
-    const k=smoothstep(2.2,.35,d), speck=(grain.noise2(x*.35,z*.35)-.5)*.045;
-    colors.push(lerp(.115,.42,k)+ch.bar*.04+speck,lerp(.125,.39,k)+speck,lerp(.098,.31,k)+speck);
-    uvs.push(x*.22,z*.22);
+function pondGeometry(level) {
+  // a flat ellipse on the Gauja bend, depth off the rendered basin
+  const cx = LOC.POND.x + 4, cz = LOC.POND.z, RX = 52, RZ = 34;
+  const pos = [], depth = [], flow = [], idx = [];
+  const RINGS = 10, SEGS = 64;
+  pos.push(cx, level, cz); depth.push(level - meshHeightAt(cx, cz)); flow.push(0, 0);
+  for (let r = 1; r <= RINGS; r++) for (let s = 0; s < SEGS; s++) {
+    const a = (s / SEGS) * Math.PI * 2, k = r / RINGS;
+    const x = cx + Math.cos(a) * RX * k, z = cz + Math.sin(a) * RZ * k;
+    pos.push(x, level, z); depth.push(level - meshHeightAt(x, z)); flow.push(0.01, 0.01);
   }
-  geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-  geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
-  for(const key of ['aDepth','aTurb','aFlow'])geo.deleteAttribute(key);
-  geo.computeBoundingSphere();
-  const mesh=new THREE.Mesh(geo,material);mesh.receiveShadow=true;mesh.name=name;
-  return mesh;
-}
-
-// Simple pond meshes still need the attributes the
-// water shader declares — an unbound attribute reads as garbage on some
-// drivers. One constant depth, no chop.
-function fillWaterAttribs(geo, depth, turb = 0) {
-  const n = geo.attributes.position.count;
-  geo.setAttribute('aDepth', new THREE.Float32BufferAttribute(new Float32Array(n).fill(depth), 1));
-  geo.setAttribute('aTurb', new THREE.Float32BufferAttribute(new Float32Array(n).fill(turb), 1));
-  geo.setAttribute('aFlow', new THREE.Float32BufferAttribute(Array.from({length:n*2},(_,i)=>i%2), 2));
-}
-
-export function skirtRows(rows, chan = rows[0]?.chan || RIVER) {
-  if (!rows.length) return [];
-  const SEG = Math.max(1, rows.length - 1);
-  const bankNoise = makeNoise(881);
-  const out = [];
-  let pdx = 0, pdz = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const t = i / SEG;
-    const row = rows[i];
-    const left = bankCharSideAt(row.x, row.z, 1, chan);
-    const right = bankCharSideAt(row.x, row.z, -1, chan);
-    const ch = bankCharAt(row.x, row.z);
-    const W_IN = row.hw + 1.6;
-    // organic shoreline: the sand band waxes and wanes (~45m wavelength)
-    const baseBand = 1.1 + bankNoise.fbm(t * 380, 3.7, 3) * 4.4;
-    let wOutLeft = W_IN + baseBand * (1 - 0.28 * left.mud) * (1 + 0.35 * left.bar) * left.apron;
-    let wOutRight = W_IN + baseBand * (1 - 0.28 * right.mud) * (1 + 0.35 * right.bar) * right.apron;
-    if (i > 0) {
-      const dTheta = Math.acos(Math.min(1, Math.max(-1, row.dx * pdx + row.dz * pdz)));
-      const radius = dTheta > 1e-4 ? (chan.length / SEG) / dTheta : 1e9;
-      const limit = Math.max(W_IN + 0.4, radius * 0.85);
-      wOutLeft = Math.min(wOutLeft, limit);
-      wOutRight = Math.min(wOutRight, limit);
-    }
-    pdx = row.dx; pdz = row.dz;
-    // Tributary skirts taper cleanly into receivers and wet hollow ends.
-    const taper = chan === RIVER ? 1 : 1 - row.mouthFactor;
-    wOutLeft = W_IN + (wOutLeft - W_IN) * taper;
-    wOutRight = W_IN + (wOutRight - W_IN) * taper;
-    // Receiver apron notch: collapse only the bank the tributary enters.
-    if (chan === RIVER) {
-      for (const mouth of CONFLUENCES) {
-        if (mouth.type !== 'river' || mouth.receiver !== RIVER) continue;
-        const along = Math.abs(row.s - mouth.receiverS);
-        const throat = mouth.channel.samples[mouth.channel.samples.length - 1][3] + 4;
-        if (along < throat) {
-          const k = smoothstep(throat, throat * 0.65, along);
-          if (mouth.bankSide > 0) wOutLeft = lerp(wOutLeft, W_IN, k);
-          else wOutRight = lerp(wOutRight, W_IN, k);
-        }
-      }
-    }
-    out.push({ W_IN, wOut: Math.max(wOutLeft, wOutRight), wOutLeft, wOutRight, ch, left, right });
+  for (let s = 0; s < SEGS; s++) idx.push(0, 1 + ((s + 1) % SEGS), 1 + s);
+  for (let r = 1; r < RINGS; r++) for (let s = 0; s < SEGS; s++) {
+    const a = 1 + (r - 1) * SEGS + s, b = 1 + (r - 1) * SEGS + (s + 1) % SEGS;
+    const c = a + SEGS, d = b + SEGS;
+    idx.push(a, b, d, a, d, c);
   }
-  // smooth the clamp: abrupt width changes twist the quads
-  for (let pass = 0; pass < 3; pass++) {
-    for (let i = 1; i < out.length - 1; i++) {
-      for (const key of ['wOutLeft', 'wOutRight']) {
-        const avg = (out[i - 1][key] + out[i][key] + out[i + 1][key]) / 3;
-        const mayCollapse = rows[i].lake || rows[i].mouthFactor > 0 || chan === RIVER;
-        out[i][key] = Math.max(out[i].W_IN + (mayCollapse ? 0 : 0.4), Math.min(out[i][key], avg));
-      }
-      out[i].wOut = Math.max(out[i].wOutLeft, out[i].wOutRight);
-    }
+  // wind every triangle CCW seen from above
+  for (let i = 0; i < idx.length; i += 3) {
+    const A = idx[i] * 3, B = idx[i + 1] * 3, C = idx[i + 2] * 3;
+    const ar = (pos[B + 2] - pos[A + 2]) * (pos[C] - pos[A]) - (pos[B] - pos[A]) * (pos[C + 2] - pos[A + 2]);
+    if (ar < 0) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
   }
-  let lakeK = rows.map((row) => (row.lake ? 1 : 0));
-  for (let pass = 0; pass < 2; pass++) {
-    const next = new Array(lakeK.length);
-    for (let i = 0; i < lakeK.length; i++) {
-      let sum = 0, n = 0;
-      for (let j = Math.max(0, i - 2); j <= Math.min(lakeK.length - 1, i + 2); j++) {
-        sum += lakeK[j]; n++;
-      }
-      next[i] = sum / n;
-    }
-    lakeK = next;
-  }
-  for (let i = 0; i < out.length; i++) {
-    if (rows[i].lake) out[i].wOutLeft = out[i].wOutRight = out[i].W_IN;
-    else {
-      out[i].wOutLeft = out[i].W_IN + (out[i].wOutLeft - out[i].W_IN) * (1 - lakeK[i]);
-      out[i].wOutRight = out[i].W_IN + (out[i].wOutRight - out[i].W_IN) * (1 - lakeK[i]);
-    }
-    out[i].wOut = Math.max(out[i].wOutLeft, out[i].wOutRight);
-  }
-  return out;
-}
-
-// Bank coverage follows the same channel field as the surface. Draping on
-// the actual terrain removes the raised, folded tan retaining-wall strips.
-function buildChannelBank(rows,chan,material,edgeDrop,name){
-  const geo=channelSurfaceGeometry(chan,5.5,{bank:true}),p=geo.attributes.position,colors=[];
-  for(let i=0;i<p.count;i++){
-    const x=p.getX(i),z=p.getZ(i),q=channelAt(chan,x,z),ch=bankCharAt(x,z);
-    const edge=clamp01((q.d-q.hw-.75)/3.6),wet=clamp01((q.level+.15-p.getY(i))/.8);
-    colors.push(lerp(.34,.30,edge)-wet*.08+ch.bar*.05,lerp(.30,.34,edge)-wet*.04,lerp(.22,.20,edge)-wet*.05);
-  }
-  geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-  for(const key of ['aDepth','aFlow','aTurb'])geo.deleteAttribute(key);
-  const mesh=new THREE.Mesh(geo,material);mesh.receiveShadow=true;mesh.name=name;return mesh;
-}
-function buildBankDetails(rows, chan) {
-  const widths = skirtRows(rows, chan);
-  const positions = [], colors = [], indices = [];
-  let made = 0;
-  for (let i = 4; i + 2 < rows.length - 4; i += 11) {
-    const a = rows[i], b = rows[i + 2];
-    if (a.lake || b.lake || a.mouthFactor || b.mouthFactor || inConfluenceMask(a.x, a.z, 8)) continue;
-    if (CONFLUENCES.some((m) => m.receiver === chan && Math.abs(a.s - m.receiverS) < 22)) continue;
-    const left = widths[i].left, right = widths[i].right;
-    const side = left.erosion > right.erosion ? 1 : -1;
-    const ch = side > 0 ? left : right;
-    if (ch.erosion < 0.62 || ch.bar > 0.55) continue;
-    const base = positions.length / 3;
-    for (const [row, wi] of [[a, widths[i]], [b, widths[i + 2]]]) {
-      const nx = -row.dz * side, nz = row.dx * side;
-      const wOut = side > 0 ? wi.wOutLeft : wi.wOutRight;
-      const landX = row.x + nx * wOut, landZ = row.z + nz * wOut;
-      const lipR = wi.W_IN + Math.min(0.55, Math.max(0.18, (wOut - wi.W_IN) * 0.22));
-      const lipX = row.x + nx * lipR, lipZ = row.z + nz * lipR;
-      const topY = Math.max(row.y + 0.08, Math.min(meshHeightAt(landX, landZ) + 0.04, row.y + 0.55));
-      positions.push(landX, topY, landZ, lipX, topY - 0.02, lipZ, lipX, row.y - 0.18, lipZ);
-      colors.push(0.25, 0.31, 0.15, 0.30, 0.36, 0.18, 0.20, 0.15, 0.10);
-    }
-    indices.push(
-      base, base + 3, base + 4, base, base + 4, base + 1,
-      base + 1, base + 4, base + 5, base + 1, base + 5, base + 2);
-    // Every fourth lip gets a short, safely landward slump wedge.
-    if ((made++ & 3) === 0) indices.push(base, base + 2, base + 5, base, base + 5, base + 3);
-  }
-  if (!positions.length) return null;
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
-  mesh.name = `${chan.name || 'channel'}:bankdetails`;
-  return mesh;
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  const nrm = new Float32Array(pos.length); for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  geo.setAttribute('aDepth', new THREE.Float32BufferAttribute(depth, 1));
+  geo.setAttribute('aFlow', new THREE.Float32BufferAttribute(flow, 2));
+  geo.setIndex(idx);
+  geo.computeBoundingSphere();
+  return geo;
 }
 
-// Subdivide the triangulated shoreline without changing its mapped outline.
-// Depth is then sampled across the basin, rather than assigning 1.7 m to
-// every vertex of a handful of lake-spanning triangles.
-function lakeSurfaceGeometry(shape, level, tileMetres=14) {
-  const base=new THREE.ShapeGeometry(shape), p=base.attributes.position, index=base.index;
-  const positions=[], uv=[], depths=[];
-  const emit=(a,b,c,n=0)=>{
-    const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
-    if(n<8 && Math.max(dist(a,b),dist(b,c),dist(c,a))>28){
-      const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
-      const ab=mid(a,b),bc=mid(b,c),ca=mid(c,a);
-      emit(a,ab,ca,n+1);emit(ab,b,bc,n+1);emit(ca,bc,c,n+1);emit(ab,bc,ca,n+1);return;
-    }
-    for(const [x,ny] of [a,b,c]){
-      const z=-ny;positions.push(x,0,z);uv.push(x/tileMetres,z/tileMetres);
-      depths.push(Math.max(.03,level-meshHeightAt(x,z)));
-    }
-  };
-  for(let i=0;i<index.count;i+=3)emit(...[0,1,2].map(k=>{const j=index.getX(i+k);return[p.getX(j),p.getY(j)];}));
-  base.dispose();
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
-  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setAttribute('aDepth',new THREE.Float32BufferAttribute(depths,1));
-  g.setAttribute('aTurb',new THREE.Float32BufferAttribute(depths.map(()=>0),1));
-  g.setAttribute('aFlow',new THREE.Float32BufferAttribute(positions.flatMap((_,i)=>i%3===0?[0,1]:[]),2));
-  g.computeVertexNormals();return g;
+// ------------------------------------------------------------ reflection ---
+// Planar mirror at the level of the water nearest the camera. Rendered at
+// half resolution, only while water that level is close enough to matter.
+function makeReflector() {
+  const rt = new THREE.WebGLRenderTarget(16, 16, { type: THREE.HalfFloatType });
+  rt.texture.generateMipmaps = false;
+  const cam = new THREE.PerspectiveCamera();
+  const tm = new THREE.Matrix4();
+  const plane = new THREE.Plane(), clip = new THREE.Vector4(), q = new THREE.Vector4();
+  const view = new THREE.Vector3(), target = new THREE.Vector3(), lookAt = new THREE.Vector3();
+  const rot = new THREE.Matrix4(), N = new THREE.Vector3(0, 1, 0), P = new THREE.Vector3();
+  const size = new THREE.Vector2();
+  function render(renderer, scene, camera, level, hide) {
+    renderer.getDrawingBufferSize(size);
+    const w = Math.max(16, Math.round(size.x * 0.5)), h = Math.max(16, Math.round(size.y * 0.5));
+    if (rt.width !== w || rt.height !== h) rt.setSize(w, h);
+    P.set(0, level, 0);
+    const camPos = camera.getWorldPosition(view.clone());
+    if (camPos.y < level) return false;
+    view.subVectors(P, camPos).reflect(N).negate().add(P);
+    // mirror only in y: reflect across the horizontal plane through level
+    view.set(camPos.x, 2 * level - camPos.y, camPos.z);
+    rot.extractRotation(camera.matrixWorld);
+    lookAt.set(0, 0, -1).applyMatrix4(rot).add(camPos);
+    target.set(lookAt.x, 2 * level - lookAt.y, lookAt.z);
+    cam.position.copy(view);
+    cam.up.set(0, 1, 0).applyMatrix4(rot).reflect(N);
+    cam.lookAt(target);
+    cam.far = camera.far; cam.near = camera.near; cam.fov = camera.fov; cam.aspect = camera.aspect;
+    cam.layers.mask = camera.layers.mask | 2;
+    cam.updateMatrixWorld();
+    cam.projectionMatrix.copy(camera.projectionMatrix);
+    tm.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
+    tm.multiply(cam.projectionMatrix).multiply(cam.matrixWorldInverse);
+    // oblique near plane at the water (Lengyel), a little below it so the
+    // waterline itself doesn't fringe
+    plane.setFromNormalAndCoplanarPoint(N, P.set(0, level - 0.05, 0)).applyMatrix4(cam.matrixWorldInverse);
+    clip.set(plane.normal.x, plane.normal.y, plane.normal.z, plane.constant);
+    const pm = cam.projectionMatrix.elements;
+    q.x = (Math.sign(clip.x) + pm[8]) / pm[0];
+    q.y = (Math.sign(clip.y) + pm[9]) / pm[5];
+    q.z = -1; q.w = (1 + pm[10]) / pm[14];
+    clip.multiplyScalar(2 / clip.dot(q));
+    pm[2] = clip.x; pm[6] = clip.y; pm[10] = clip.z + 1; pm[14] = clip.w;
+    const vis = hide.map((o) => o.visible);
+    hide.forEach((o) => { o.visible = false; });
+    const prevRT = renderer.getRenderTarget();
+    const prevShadow = renderer.shadowMap.needsUpdate;
+    renderer.shadowMap.needsUpdate = false;
+    renderer.setRenderTarget(rt);
+    renderer.clear();
+    renderer.render(scene, cam);
+    renderer.setRenderTarget(prevRT);
+    renderer.shadowMap.needsUpdate = prevShadow;
+    hide.forEach((o, i) => { o.visible = vis[i]; });
+    return true;
+  }
+  return { rt, tm, render };
+}
+
+// nearest open water to a point: its level and horizontal distance
+const probe = [];
+for (const chan of [RIVER, ...STREAM_CHANNELS]) {
+  chan.samples.forEach((p, i) => { if (i % 2 === 0 && !chan.lakeRun[i]) probe.push([p[0], p[1], p[2], p[3]]); });
+}
+for (const l of LAKE_SHORES) for (const [x, z] of l.poly) probe.push([x, z, l.level, 0]);
+function nearestWater(x, z) {
+  let bd = Infinity, lvl = null;
+  for (const p of probe) {
+    const d = Math.hypot(p[0] - x, p[1] - z) - p[3];
+    if (d < bd) { bd = d; lvl = p[2]; }
+  }
+  return { d: Math.max(0, bd), level: lvl };
 }
 
 export function buildWater() {
   const group = new THREE.Group();
   group.name = 'water';
-  const mats = [];
-  const normalMap = waterNormalTex();
-  let sandTex = null;                    // baked in the river-skirt block, reused by lake collars
-  // one bed material shared by the Gauja and every brook
-  const bedMat = new THREE.MeshLambertMaterial({
-    map: bedTexture(), vertexColors: true, side: THREE.DoubleSide,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-  });
+  const ripple = waterNormalTex();
+  const pondBounds = new THREE.Vector4(LOC.POND.x + 4, LOC.POND.z, 52, 34);
 
-  // --- lakes from OSM polygons
-  // Through-flow lakes: quiet surfaces over inferred, depth-sampled basins.
-  const LAKE_UV_M = 14;
-  const lakeMat = makeWaterMaterial(0x2f4c58, 0.90, normalMap, {
-    uvM: LAKE_UV_M, flow: 0.035, drift: 0.012, foam: 0, dShallow: 0.1, dDeep: 1.2,
-  });
-  mats.push(lakeMat);
-  // OSM lake outlines are sparse polygons — Chaikin-smooth the shoreline
-  // or the basins read as blocky cut gems
-  const chaikin = (poly) => chaikinPoly(poly);
-  for (const lake of LAKES) {
-    // store as (x, -z) so that rotateX(-PI/2) lands on (x, z) with the normal up
-    const shape = new THREE.Shape(chaikin(lake.poly).map(([x, z]) => new THREE.Vector2(x, -z)));
-    const geo = lakeSurfaceGeometry(shape, lake.level);
-    const mesh = new THREE.Mesh(geo, lakeMat);
-    mesh.position.y = lake.level;
-    mesh.name = lake.name || 'lake';
-    // uv for shimmer — 260 m per tile meant a single ripple stretched across
-    // the whole basin, i.e. no visible surface at all
-    mesh.renderOrder = 2;
-    group.add(mesh);
-  }
+  const mat = makeWaterMaterial(ripple, pondBounds);
+  const surface = new THREE.Mesh(buildSurface(), mat);
+  surface.name = 'water:surface';
+  surface.renderOrder = 1;
+  group.add(surface);
 
-  // --- the Gauja
-  // The young Gauja here falls 18.5 m over 16.7 km of mapped course — 1.1 m/km,
-  // a quiet lowland river. Surface speed ~0.45 m/s; no whitewater, but the
-  // riffle crossings chop and the shallows over the point bars hem with foam.
-  const riverMat = makeWaterMaterial(0x2e4a55, 0.90, normalMap, {
-    uvM: 9, flow: 0.45, drift: 0.035, shallow: 0x74764f, dShallow: 0.10, dDeep: 2.1, foam: 0.4,
-  });
-  mats.push(riverMat);
-  // rim 0.35: the 0.5m dark wall showed through the transparent surface
-  // from the far bank as a black outline around every reach
-  const riverRows = channelRows(RIVER, channelSeg(RIVER));
-  const river = ribbon(riverRows, riverMat, 9);
-  group.add(buildChannelBed(river, bedMat, 'gauja:bed'));
-  river.renderOrder = 1;
-  river.name = 'gauja';
-  group.add(river);
-  // Water-rounded stones on submerged shallow gravel, not scattered across
-  // deep pools or lake surfaces. One instanced draw for the entire channel.
-  const sr=makeNoise(3817).rng, stones=[];
-  for(let i=2;i<riverRows.length;i+=3){
-    const row=riverRows[i];if(row.lake || row.mouthFactor>.25)continue;
-    for(let j=0;j<3;j++){
-      const off=(sr()-.5)*row.hw*1.8,x=row.x-row.dz*off,z=row.z+row.dx*off;
-      const y=meshHeightAt(x,z),depth=row.y-y;
-      if(depth<.18 || depth>1.25 || lakeAt(x,z))continue;
-      const size=.055+sr()*.16;stones.push({x,y:y+.035,z,size,rot:sr()*6.28});
-    }
-  }
-  const pebbles=new THREE.InstancedMesh(new THREE.SphereGeometry(1,8,5),new THREE.MeshLambertMaterial({color:0x898273}),stones.length);
-  const stoneDummy=new THREE.Object3D(),stoneColor=new THREE.Color();
-  stones.forEach((p,i)=>{
-    stoneDummy.position.set(p.x,p.y,p.z);stoneDummy.rotation.set(0,p.rot,0);stoneDummy.scale.set(p.size,p.size*.48,p.size*.76);stoneDummy.updateMatrix();pebbles.setMatrixAt(i,stoneDummy.matrix);
-    stoneColor.setScalar(.68+sr()*.4);pebbles.setColorAt(i,stoneColor);
-  });
-  pebbles.name='gauja:submerged-cobbles';pebbles.receiveShadow=true;group.add(pebbles);
-
-  // Substrate texture is shared by the low, terrain-draped bank collars.
-  sandTex=bedTexture();
-  const riverBankMaterial=new THREE.MeshLambertMaterial({map:sandTex,vertexColors:true,
-    polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1});
-  group.add(buildChannelBank(riverRows,RIVER,riverBankMaterial,0,'bankskirt'));
-  const riverDetails = buildBankDetails(riverRows, RIVER);
-  if (riverDetails) group.add(riverDetails);
-
-  // --- streams
-  // The brooks are steep by comparison (the unnamed one falls 12.9 m in
-  // 1.9 km, 6.9 m/km) and shallow: broken, hurrying, foam-flecked water.
-  const streamMat = makeWaterMaterial(0x314f58, 0.92, normalMap, {
-    uvM: 3.6, flow: 0.75, drift: 0.05, shallow: 0x7b7a4e, dShallow: 0.06, dDeep: 0.95, foam: 0.85,
-  });
-  mats.push(streamMat);
-  const streamBankMat = new THREE.MeshLambertMaterial({
-    map: sandTex, vertexColors: true, side: THREE.DoubleSide,
-    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-  });
-  for (let i = 0; i < STREAM_CHANNELS.length; i++) {
-    const chan = STREAM_CHANNELS[i];
-    const rows = channelRows(chan, channelSeg(chan));
-    const st = ribbon(rows, streamMat, 3.6);
-    group.add(buildChannelBed(st, bedMat, `${STREAMS[i].name || 'stream'}:bed`));
-    st.name = STREAMS[i].name || 'stream';
-    group.add(st);
-    group.add(buildChannelBank(rows, chan, streamBankMat, 0.5, `${st.name}:bankskirt`));
-  }
-
-  // --- LAKE BANK COLLARS: the wet-sand shore band the river always had.
-  // One strip per lake along the Chaikin shoreline: inner rim tucked under
-  // the water sheet, outer edge draped on the terrain with a noise- and
-  // character-driven width (mud reaches narrow, gravel bars wide), fringe
-  // colours pulled toward the meadow so the band DISSOLVES into grass.
-  {
-    const collarNoise = makeNoise(1213);
-    const collarMat = new THREE.MeshLambertMaterial({
-      map: sandTex, vertexColors: true, side: THREE.DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-    });
-    const mix3 = (a, b, k) => [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)];
-    for (const lake of LAKE_SHORES) {
-      const poly = lake.poly, N = poly.length;
-      // outward = the side lakeAt says is dry (empirical beats winding math)
-      let nxs = -(poly[1][1] - poly[N - 1][1]), nzs = poly[1][0] - poly[N - 1][0];
-      const nl0 = Math.hypot(nxs, nzs) || 1;
-      const outSign = lakeAt(poly[0][0] + (nxs / nl0) * 3, poly[0][1] + (nzs / nl0) * 3) ? -1 : 1;
-      const positions = [], colors = [], uvsA = [], indices = [], collapsedRows = [];
-      let s = 0;
-      for (let i = 0; i <= N; i++) {
-        const i0 = i % N;
-        const prev = poly[(i0 - 1 + N) % N], cur = poly[i0], next = poly[(i0 + 1) % N];
-        let tx = next[0] - prev[0], tz = next[1] - prev[1];
-        const tl = Math.hypot(tx, tz) || 1;
-        tx /= tl; tz /= tl;
-        const nx = -tz * outSign, nz = tx * outSign;
-        s += Math.hypot(cur[0] - prev[0], cur[1] - prev[1]) * 0.5;
-        const ch = bankCharAt(cur[0], cur[1]);
-        let w = (2.1 + collarNoise.fbm(s * 0.045, lake.level * 0.13, 3) * 3.4)
-          * (1 - 0.35 * ch.mud) * (1 + 0.45 * ch.bar);
-        // a river mouth brings its own treatment — collapse the collar there
-        const rv = riverAt(cur[0], cur[1]);
-        const st = streamAt(cur[0], cur[1]);
-        const collapsed = (rv && rv.d < rv.hw + 4) || (st && st.d < st.hw + 4);
-        if (collapsed) w = 0;
-        collapsedRows.push(!!collapsed);
-        const midX = cur[0] + nx * w * 0.35, midZ = cur[1] + nz * w * 0.35;
-        const outX = cur[0] + nx * w, outZ = cur[1] + nz * w;
-        const gMid = Math.min(Math.max(meshHeightAt(midX, midZ) + 0.03, lake.level + 0.02), lake.level + 0.35);
-        const gOut = Math.min(Math.max(meshHeightAt(outX, outZ) + 0.03, lake.level - 0.25), lake.level + 0.7);
-        positions.push(
-          cur[0], lake.level - 0.3, cur[1],
-          midX, gMid, midZ,
-          outX, gOut, outZ);
-        const wet = mix3(mix3([0.62, 0.55, 0.42], [0.30, 0.27, 0.19], ch.mud), [0.58, 0.55, 0.47], ch.bar * 0.7);
-        const dry = mix3(mix3([0.78, 0.70, 0.53], [0.52, 0.46, 0.34], ch.mud * 0.6), [0.62, 0.58, 0.50], ch.bar);
-        const fringe = mix3([0.60, 0.65, 0.42], [0.45, 0.52, 0.30], 0.55 + 0.3 * ch.mud);
-        colors.push(...wet, ...dry, ...fringe);
-        uvsA.push(cur[0] * 0.18, cur[1] * 0.18, midX * 0.18, midZ * 0.18, outX * 0.18, outZ * 0.18);
-        if (i > 0 && !collapsedRows[i] && !collapsedRows[i - 1]) {
-          const a2 = (i - 1) * 3;
-          for (const [o0, o1] of [[0, 1], [1, 2]]) {
-            indices.push(a2 + o0, a2 + o1, a2 + o1 + 3, a2 + o0, a2 + o1 + 3, a2 + o0 + 3);
-          }
-        }
-      }
-      // force CCW seen from above — the river skirt's hard-won rule: with
-      // DoubleSide, downward-wound quads light from below and render black
-      for (let i = 0; i < indices.length; i += 3) {
-        const a = indices[i] * 3, b = indices[i + 1] * 3, c = indices[i + 2] * 3;
-        const abx = positions[b] - positions[a], abz = positions[b + 2] - positions[a + 2];
-        const acx = positions[c] - positions[a], acz = positions[c + 2] - positions[a + 2];
-        if (abz * acx - abx * acz < 0) {
-          const t = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = t;
-        }
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvsA, 2));
-      geo.setIndex(indices);
-      const nrm = new Float32Array(positions.length);
-      for (let i = 0; i < nrm.length; i += 3) nrm[i + 1] = 1;   // ground lights as ground
-      geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-      const collar = new THREE.Mesh(geo, collarMat);
-      collar.receiveShadow = true;
-      collar.name = 'lakebank';
-      group.add(collar);
-    }
-  }
-
-  // --- mill pond on the Gauja bend (added/removed by era manager; eras 3-4)
-  // A held millpond is the stillest water in the parish — barely a drift.
-  const pondMat = makeWaterMaterial(0x2f4e57, 0.94, normalMap, {
-    uvM: 10, flow: 0.02, drift: 0.008, foam: 0, dShallow: 0.1, dDeep: 1.0, pond:true,
-  });
-  mats.push(pondMat);
   const pondLevel = LOC.POND_LEVEL;
-  const pondShape=new THREE.Shape(Array.from({length:64},(_,i)=>{
-    const a=i*Math.PI/32;return new THREE.Vector2(LOC.POND.x+4+52*Math.cos(a),-LOC.POND.z+34*Math.sin(a));
-  }));
-  const pondGeo=lakeSurfaceGeometry(pondShape,pondLevel,10);
-  const pond = new THREE.Mesh(pondGeo, pondMat);
-  pond.position.y=pondLevel;
+  const pondMat = makeWaterMaterial(ripple, pondBounds);
+  pondMat.userData.u.uIsPond.value = 1;
+  const pond = new THREE.Mesh(pondGeometry(pondLevel), pondMat);
   pond.name = 'pond';
   pond.visible = false;
+  pond.renderOrder = 1;
   group.add(pond);
 
+  const mats = [mat, pondMat];
+  const reflector = makeReflector();
+  for (const m of mats) m.userData.u.uRefl.value = reflector.rt.texture;
+
   function tick(t) {
-    for (const m of mats) {
-      const { uvM, flow, drift } = m.userData;
-      // Sample AHEAD of the flow so the pattern travels with it: v is arc
-      // length downstream, so a negative v offset moves the ripples down the
-      // course. Speeds are metres per second, converted into tile space.
-      m.userData.off1.set(drift * t / uvM, -flow * t / uvM);
-      // Second octave: 3.7x finer, running slower and crabbing across the
-      // flow, so the two interfere instead of sliding as one sheet.
-      m.userData.off2.set(-drift * 2.1 * t * 3.7 / uvM, -flow * 0.62 * t * 3.7 / uvM);
-    }
+    for (const m of mats) m.userData.u.uTime.value = t;
   }
-  // glacial-era meltwater is milky with rock flour
-  const original = mats.map((m) => m.color.clone());
+  // era palettes: glacial meltwater is milky with rock flour; later rivers
+  // carry the humic tea of the bogs and spruce forests upstream
   function setEra(era) {
-    mats.forEach((m, i) => {
-      m.userData.pondMask.value=(era===3||era===4)&&!m.userData.isPond?1:0;
-      if (era === 0) {
-        m.color.set(0x8fb6ba);
-        m.userData.shallow.set(0xa8c4c2);   // suspended rock flour, not a stony bed
-      } else {
-        m.color.copy(original[i]);
-        m.userData.shallow.copy(m.userData.shallowBase);
-      }
-    });
-  }
-  // sky reflections from an occasionally-refreshed cubemap
-  function applyEnvMap(tex) {
+    const pondOn = era === 3 || era === 4;
     for (const m of mats) {
-      m.envMap = tex;
-      m.combine = THREE.MixOperation;
-      // near-full mirror at the horizon; the Fresnel term above is what keeps
-      // it from washing out the water you are standing over
-      m.reflectivity = 0.62;
-      m.needsUpdate = true;
+      const u = m.userData.u;
+      u.uPondMask.value = pondOn ? 1 : 0;
+      if (era === 0) {
+        u.uBody.value.setRGB(0.055, 0.085, 0.088); u.uSilt.value.setRGB(0.2, 0.24, 0.22); u.uExtinct.value = 2.2;
+      } else {
+        u.uBody.value.setRGB(0.052, 0.043, 0.025); u.uSilt.value.setRGB(0.20, 0.18, 0.12); u.uExtinct.value = 1.35;
+      }
     }
   }
-  return { group, pond, pondLevel, tick, setEra, applyEnvMap };
+  function applyEnvMap(tex) {
+    for (const m of mats) m.userData.u.uSkyCube.value = tex;
+  }
+  // called by main before the frame: mirror the world at the nearest water
+  let reflK = 0;
+  function updateReflection(renderer, scene, camera, hide, dt = 1 / 60) {
+    const c = camera.position;
+    const nw = nearestWater(c.x, c.z);
+    const above = nw.level === null ? 1e9 : c.y - nw.level;
+    const want = nw.level !== null && above > 0.05 && above < 260 && nw.d < 700 ? 1 : 0;
+    reflK += (want - reflK) * Math.min(1, dt * 3);
+    const on = reflK > 0.02 && reflector.render(renderer, scene, camera, nw.level, [group, ...hide]);
+    for (const m of mats) {
+      const u = m.userData.u;
+      u.uReflOn.value = on ? reflK * (1 - smoothstep(350, 700, nw.d)) : 0;
+      u.uReflLevel.value = nw.level ?? -1e4;
+      u.uReflMatrix.value.copy(reflector.tm);
+    }
+  }
+  return { group, pond, pondLevel, tick, setEra, applyEnvMap, updateReflection, surface };
 }

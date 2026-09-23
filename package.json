@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "start": "node serve.mjs",
-    "test": "node data/corecheck.mjs && node data/hydrocheck.mjs && npm run build && node data/qualitycheck.mjs",
+    "test": "node data/corecheck.mjs && node data/hydroprobe.mjs && npm run build && node data/qualitycheck.mjs",
     "test:world": "node data/worldcheck.mjs",
     "test:walk": "node data/walktest.mjs",
     "test:items": "node data/itemshowcase.mjs",

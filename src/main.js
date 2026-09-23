@@ -1,4 +1,5 @@
 // Brezgi / Taurene time machine — entry point.
+import { waterLevelAt } from './riverzone.js';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -102,6 +103,7 @@ async function boot() {
   await progress('Growing the forests — branches, twig atlases, impostors…');
   const veg = buildVegetation(scene, renderer);
   window.__veg = veg;                    // debug hook for data/floracount.mjs
+  window.__water = (x, z) => waterLevelAt(x, z, currentEra);   // debug hook: shot harnesses stay above water
   await progress('Sowing half a million blades of grass…');
   const grass = buildGrass(scene);
   window.__grass = grass;                // debug hook for data/dbg.mjs grassstate
@@ -132,6 +134,9 @@ async function boot() {
   let envAge = 1e9;
 
   const effects = new Effects(scene);
+  // left out of the water's mirror: grass is sub-pixel at half resolution,
+  // and cloud billboards seen from below are dark smudges, not clouds
+  const reflHide = [...grass.meshes, effects.group, scene.getObjectByName('clouds')].filter(Boolean);
   effects.setFireflyCenter(S.x - 40, steadY, S.z + 30);
   const mistPts = [];
   for (let i = 4; i < RIVER_PTS.length - 4; i += 9) {
@@ -699,6 +704,8 @@ async function boot() {
       const text = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
       if (text !== clockText || clockEl !== clockTextEl) { clockEl.textContent = text; clockText = text; clockTextEl = clockEl; }
     }
+    // the water's planar mirror (grass is sub-pixel in a half-res reflection)
+    water.updateReflection(renderer, scene, camera, reflHide, dt);
     composer.render();
   }
 }

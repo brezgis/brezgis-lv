@@ -165,7 +165,7 @@ export const LOC = {
   CAMP: { x: rvx + 90, z: 130 },             // era-1 hunters' camp on the riverside terrace
   MANOR: { x: -40, z: -180 },                // Nēķena muiža ensemble (eras 3-5), village core
   POND: { x: pondPt[0], z: pondPt[1] },      // mill pond on the Gauja bend below the manor
-  POND_LEVEL: pondPt[2] + 1.3,
+  POND_LEVEL: (riverAt(pondPt[0], pondPt[1])?.level ?? pondPt[2]) + 1.3,   // held 1.3 m above the harmonised river
   OAK: { x: rvx + 130, z: -90 },             // the old oak (sacred in era 2, still there in 4)
   BARROWS: { x: rvx + 330, z: 300 },         // Latgalian barrow cemetery (eras 2+, as mounds)
   STONE: { x: rvx + 245, z: -25 },           // poem stone by the road (eras 4-5)

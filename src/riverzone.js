@@ -336,6 +336,50 @@ for (let i = 0; i < STREAMS.length; i++) {
   }));
 }
 
+// ------------------------------------------------------ hydraulic profile ----
+// Water only runs downhill, and a lake the river flows through is ONE sheet
+// of water with it. The DEM-sampled levels broke both rules: the Gauja ran
+// 0.1-0.8 m BELOW Brenkūzis, Dabaru ezers and Taurenes ezers while crossing
+// them, so a second river surface showed through each lake ("a river going
+// through the lake"). Lake levels are the trustworthy anchors (a flat water
+// sheet is the best-measured thing in a DEM); the reaches between them keep
+// the shape of their sampled fall but are re-scaled to land exactly on the
+// next lake. Samples inside a lake carry chan.lakeRun[i] = that lake.
+function harmonise(chan) {
+  const S = chan.samples, n = S.length;
+  chan.lakeRun = S.map(([x, z]) => lakeAt(x, z));
+  const orig = S.map((p) => p[2]);
+  const ctrl = [];
+  if (!chan.lakeRun[0]) ctrl.push({ i: 0, L: orig[0], lake: null });
+  for (let i = 0; i < n;) {
+    const lk = chan.lakeRun[i];
+    if (!lk) { i++; continue; }
+    let j = i;
+    while (j + 1 < n && chan.lakeRun[j + 1] === lk) j++;
+    ctrl.push({ i, L: lk.level, lake: lk }, { i: j, L: lk.level, lake: lk });
+    i = j + 1;
+  }
+  if (!chan.lakeRun[n - 1]) ctrl.push({ i: n - 1, L: orig[n - 1], lake: null });
+  // free (non-lake) anchors bow to the lakes around them
+  for (let k = 1; k < ctrl.length; k++) if (!ctrl[k].lake) ctrl[k].L = Math.min(ctrl[k].L, ctrl[k - 1].L);
+  for (let k = ctrl.length - 2; k >= 0; k--) if (!ctrl[k].lake) ctrl[k].L = Math.max(ctrl[k].L, ctrl[k + 1].L);
+  for (let k = 0; k + 1 < ctrl.length; k++) {
+    const a = ctrl[k], b = ctrl[k + 1];
+    if (a.lake && a.lake === b.lake) { for (let i = a.i; i <= b.i; i++) S[i][2] = a.L; continue; }
+    const oa = orig[a.i], ob = orig[b.i], sa = chan.sampleS[a.i], sb = chan.sampleS[b.i];
+    for (let i = a.i; i <= b.i; i++) {
+      // half sampled shape, half even grade: the 27 m DEM concentrates
+      // whole metres of fall into single hundred-metre steps
+      const even = lerp(a.L, b.L, (chan.sampleS[i] - sa) / Math.max(1e-6, sb - sa));
+      S[i][2] = oa - ob > 0.05 ? lerp(b.L + (orig[i] - ob) * (a.L - b.L) / (oa - ob), even, 0.55) : even;
+    }
+  }
+  if (ctrl.length && ctrl[0].i > 0) for (let i = 0; i < ctrl[0].i; i++) S[i][2] = Math.max(S[i][2], ctrl[0].L);
+  for (let i = 1; i < n; i++) S[i][2] = Math.min(S[i][2], S[i - 1][2]);
+}
+harmonise(RIVER);
+for (const chan of STREAM_CHANNELS) harmonise(chan);
+
 // --------------------------------------------------------- pool & riffle ----
 // An alluvial channel does not have a flat bed. Scour pools sit at the bend
 // apexes, gravel riffles at the crossings between them, and the pair repeats
@@ -428,7 +472,7 @@ for (let i = 0; i < STREAM_CHANNELS.length; i++) {
     x: end[0], z: end[1], receivingLevel, approachDistance,
     receiverS: receiver.projection ? receiver.projection.s : null,
     bankSide: receiver.projection ? receiver.projection.side : 0,
-    submergedOffset: receiver.type === 'continuation' ? 0 : 0.3,
+    submergedOffset: 0,
     blendEndOffset: receiver.type === 'river' ? 12 : 0,
   };
   chan.confluence = mouth;
@@ -447,15 +491,20 @@ for (const mouth of CONFLUENCES) {
     ? mouth.receivingLevel
     : Math.min(endLevel, mouth.receivingLevel - mouth.submergedOffset);
   const startWidth = profileAtS(chan, Math.max(0, start)).hw;
+  const flush = mouth.type === 'river' || mouth.type === 'lake';
   for (let i = 0; i < chan.samples.length; i++) {
     if (chan.sampleS[i] < start) continue;
     const u = clamp((chan.sampleS[i] - start) / mouth.approachDistance, 0, 1);
     const ease = u * u * (2 - u);
-    chan.samples[i][2] = Math.min(chan.samples[i][2], lerp(chan.samples[i][2], target, ease));
+    // a mouth meets its receiver FLUSH — the old 0.3 m submerged hand-over
+    // stacked two transparent sheets at every confluence
+    chan.samples[i][2] = flush ? lerp(chan.samples[i][2], mouth.receivingLevel, ease)
+      : Math.min(chan.samples[i][2], lerp(chan.samples[i][2], target, ease));
     // Terrain's existing cohesive-bank lip reaches 1.35m inward; retain a
     // hair more half-width so the damp-pan centre remains in the bed branch.
     if (mouth.type === 'wetHollow') chan.samples[i][3] = lerp(startWidth, Math.max(1.36, startWidth * 0.4), ease);
   }
+  if (flush) for (const p of chan.samples) p[2] = Math.max(p[2], mouth.receivingLevel);
   for (let i = 1; i < chan.samples.length; i++) chan.samples[i][2] = Math.min(chan.samples[i][2], chan.samples[i - 1][2]);
   // Spread sourced drops and terminal blends upstream just enough to keep
   // every untagged reach at or below a 3.8% longitudinal grade.
@@ -636,49 +685,4 @@ export function bankCharSideAt(x, z, side = 1, chan = null) {
   let q = chan ? projectChannel(chan, x, z) : riverAt(x, z);
   if (!q) q = streamAt(x, z);
   return bankCharFromQuery(q, x, z, sideSign);
-}
-
-// ------------------------------------------------- shared mesh geometry ----
-// THE row list for a channel's water ribbon AND its bank skirt. Both meshes
-// must be built from the SAME rows or their shared edge opens black slivers
-// — putting the sampler here makes the weld structural, not a convention.
-// Each row: { x, z, y, dx, dz, hw, lake } — (dx,dz) is the unit tangent,
-// lake is the lake object when the row centre lies inside one (the caller
-// collapses skirts / sinks the ribbon below the lake sheet there).
-export function channelRows(chan, SEG) {
-  const rows = [];
-  const isStream = chan !== RIVER;
-  const step = Math.min(chan.length / SEG, 10);
-  const samples = evenSpline(chan.pts, step);
-  const rowS = new Float64Array(samples.length);
-  for (let i = 1; i < samples.length; i++) rowS[i] = rowS[i - 1] + Math.hypot(samples[i][0] - samples[i - 1][0], samples[i][1] - samples[i - 1][1]);
-  const sScale = chan.length / (rowS[rowS.length - 1] || 1);
-  for (let i = 0; i < samples.length; i++) {
-    const s = rowS[i] * sScale;
-    const [x, z] = samples[i];
-    const [xa, za] = samples[Math.max(0, i - 1)];
-    const [x2, z2] = samples[Math.min(samples.length - 1, i + 1)];
-    let dx = x2 - xa, dz = z2 - za;
-    const len = Math.hypot(dx, dz) || 1;
-    dx /= len; dz /= len;
-    const lake = lakeAt(x, z);
-    const profile = profileAtS(chan, s);
-    // inside a lake the channel surface ducks under the lake sheet — the
-    // lake plane renders on top and the "canal crossing the lake" vanishes
-    let yRow = lake ? Math.min(profile.level, lake.level - 0.35) : profile.level;
-    const mouth = isStream ? chan.confluence : null;
-    const mouthFactor = mouth && mouth.type !== 'continuation'
-      ? clamp((s - (chan.length - mouth.approachDistance)) / mouth.approachDistance, 0, 1)
-      : 0;
-    // The canonical profile already performs the approach blend. Only the
-    // final geometric overlap is submerged, and the segment query sees the
-    // same profile rather than an unducked source spline.
-    if (isStream && mouth && mouth.type === 'river' && !lake) {
-      const rv = riverAt(x, z);
-      if (rv && rv.d < rv.hw + 1.5) yRow = Math.min(yRow, rv.level - mouth.submergedOffset);
-    }
-    rows.push({ x, z, y: yRow, dx, dz, hw: profile.hw, lake, chan, s,
-      curvature: profile.curvature, mouthFactor, confluence: mouthFactor > 0 ? mouth : null });
-  }
-  return rows;
 }

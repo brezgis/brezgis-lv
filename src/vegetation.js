@@ -1054,6 +1054,12 @@ export function buildVegetation(scene, renderer) {
   let activeEra = 4;
   function setEra(era) {
     activeEra = era;
+    // Younger Dryas tundra lakes: sedge fens, not reedbeds — Phragmites,
+    // Typha and yellow flag came in with the Holocene warming
+    for (const name of ['reeds', 'cattails', 'irises']) {
+      const m = group.getObjectByName(name);
+      if (m) m.visible = era !== 0;
+    }
     const lists = placementsFor(era);
     // reset the promotion pool — far buffers are about to be refilled
     for (const key of SP_KEYS) {
@@ -1245,31 +1251,49 @@ export function buildVegetation(scene, renderer) {
   {
     // reed clumps along the real lake shorelines and slack river reaches
     const reedG = (() => {
+      // common reed (Phragmites): a dense clump of thin culms, each with a
+      // couple of arching leaves, half of them carrying the young purplish
+      // panicle of midsummer. Normals point UP so the clump lights like the
+      // sward — flat side-lit quads read as black sticks against the water.
       const pos = [], colArr = [], idx = [];
       const rr = makeNoise(2213).rng;
-      for (let b = 0; b < 7; b++) {
-        const a = rr() * Math.PI * 2, dist = rr() * 0.3;
-        const bx = Math.cos(a) * dist, bz = Math.sin(a) * dist;
-        const h = 1.6 + rr() * 1.2, lean = (rr() - 0.5) * 0.35;
-        const w = 0.035;
+      const quad = (a, b, c, d, ca, cb) => {
         const base = pos.length / 3;
-        const tx = bx + lean * h, tz = bz + lean * h * 0.6;
-        pos.push(bx - w, 0, bz, bx + w, 0, bz, tx + w * 0.4, h, tz, tx - w * 0.4, h, tz);
-        // dark base → pale tip; the windify flex keys on greenness
-        colArr.push(0.2, 0.28, 0.13, 0.2, 0.28, 0.13, 0.55, 0.6, 0.32, 0.55, 0.6, 0.32);
+        pos.push(...a, ...b, ...c, ...d);
+        colArr.push(...ca, ...ca, ...cb, ...cb);
         idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-        if (rr() < 0.5) { // seed head
-          const b2 = pos.length / 3;
-          pos.push(tx - 0.03, h - 0.02, tz, tx + 0.03, h - 0.02, tz, tx + 0.02, h + 0.24, tz, tx - 0.02, h + 0.24, tz);
-          colArr.push(0.4, 0.3, 0.2, 0.4, 0.3, 0.2, 0.45, 0.34, 0.22, 0.45, 0.34, 0.22);
-          idx.push(b2, b2 + 1, b2 + 2, b2, b2 + 2, b2 + 3);
+      };
+      for (let b = 0; b < 16; b++) {
+        const a = rr() * Math.PI * 2, dist = Math.sqrt(rr()) * 0.45;
+        const bx = Math.cos(a) * dist, bz = Math.sin(a) * dist;
+        const h = 1.5 + rr() * 1.3, lx = (rr() - 0.5) * 0.3, lz = (rr() - 0.5) * 0.3;
+        const w = 0.014, tx = bx + lx * h, tz = bz + lz * h;
+        const px = -Math.sin(a) * w, pz = Math.cos(a) * w;
+        quad([bx - px, 0, bz - pz], [bx + px, 0, bz + pz], [tx + px * 0.5, h, tz + pz * 0.5], [tx - px * 0.5, h, tz - pz * 0.5],
+          [0.2, 0.29, 0.12], [0.46, 0.55, 0.28]);
+        for (let k = 0; k < 2; k++) {                      // leaves: long, arching away
+          const y0 = h * (0.3 + rr() * 0.35), la = rr() * Math.PI * 2, L = 0.35 + rr() * 0.25;
+          const sx = bx + lx * y0, sz = bz + lz * y0;
+          const ex = sx + Math.cos(la) * L, ez = sz + Math.sin(la) * L, ey = y0 + 0.1 - rr() * 0.12;
+          const lw = 0.025, qx = -Math.sin(la) * lw, qz = Math.cos(la) * lw;
+          quad([sx - qx, y0, sz - qz], [sx + qx, y0, sz + qz], [ex + qx * 0.2, ey, ez + qz * 0.2], [ex - qx * 0.2, ey, ez - qz * 0.2],
+            [0.26, 0.38, 0.15], [0.42, 0.52, 0.24]);
+        }
+        if (rr() < 0.5) {                                   // panicle
+          const ph = 0.26;
+          quad([tx - 0.05, h - 0.05, tz], [tx + 0.05, h - 0.05, tz], [tx + 0.03 + lx * 0.1, h + ph, tz + lz * 0.1], [tx - 0.03 + lx * 0.1, h + ph, tz + lz * 0.1],
+            [0.34, 0.26, 0.24], [0.42, 0.32, 0.3]);
+          quad([tx, h - 0.05, tz - 0.05], [tx, h - 0.05, tz + 0.05], [tx + lx * 0.1, h + ph, tz + 0.03 + lz * 0.1], [tx + lx * 0.1, h + ph, tz - 0.03 + lz * 0.1],
+            [0.34, 0.26, 0.24], [0.42, 0.32, 0.3]);
         }
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
+      const nrm = new Float32Array(pos.length);
+      for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
+      g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
       g.setIndex(idx);
-      g.computeVertexNormals();
       return g;
     })();
     const reedMat = windify(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
@@ -1505,7 +1529,8 @@ export function buildVegetation(scene, renderer) {
       mergeIn(pos, nrm, colArr, idx, stem, [0.20, 0.30, 0.13]);
       const head = new THREE.CylinderGeometry(0.045, 0.05, 0.3, 6);
       head.translate(0, 0.83, 0);
-      mergeIn(pos, nrm, colArr, idx, head, [0.22, 0.14, 0.08]);
+      // at Jāņi the female spike is still green-olive; it browns in August
+      mergeIn(pos, nrm, colArr, idx, head, [0.28, 0.26, 0.12]);
       for (const rot of [0.2, -0.2]) {
         const leaf = new THREE.BoxGeometry(0.02, 1.02, 0.01);
         leaf.translate(0, 0.51, 0);
@@ -1513,11 +1538,15 @@ export function buildVegetation(scene, renderer) {
         leaf.rotateY(rot);
         mergeIn(pos, nrm, colArr, idx, leaf, [0.22, 0.34, 0.14]);
       }
+      // lit from above like the sward: thin side-lit cylinders and boxes
+      // read as black posts against bright water
+      for (let i = 0; i < nrm.length; i += 3) { nrm[i] = nrm[i] * 0.25; nrm[i + 1] = 1; nrm[i + 2] = nrm[i + 2] * 0.25; }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
       g.setIndex(idx);
+      g.normalizeNormals();
       return g;
     })();
 

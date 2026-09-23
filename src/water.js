@@ -21,7 +21,7 @@
 //    and sky as seen in the water — the main cue that water is water),
 //    falling back to the sky cube where the mirror's level doesn't apply.
 import * as THREE from 'three';
-import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, setPond, waterLevelAt } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, setPond, waterLevelAt, lakeAt as lakeAtFn } from './riverzone.js';
 import { shoreBodies, waterSampleOf, LAKE_DRIFT } from './shore.js';
 import { LOC } from './landuse.js';
 import { canvasTexture, makeNoise, lerp, smoothstep, clamp } from './util.js';
@@ -128,8 +128,9 @@ function buildSurface() {
       }
       if (deep) {
         const s = { level: lake.level, fx: 0.6 * LAKE_DRIFT, fz: 0.8 * LAKE_DRIFT };
-        // the whole block is ≥14 m from shore: deep, whatever its corners sample
-        const a = emitV(x0, z0, s, 3), b = emitV(x0 + BLOCK, z0, s, 3), c = emitV(x0 + BLOCK, z0 + BLOCK, s, 3), d = emitV(x0, z0 + BLOCK, s, 3);
+        // true corner depths: a forced minimum drew the block edges as
+        // squares of darker water beside the finely-sampled shallows
+        const a = emitV(x0, z0, s), b = emitV(x0 + BLOCK, z0, s), c = emitV(x0 + BLOCK, z0 + BLOCK, s), d = emitV(x0, z0 + BLOCK, s);
         idx.push(a, c, b, a, d, c);
         coarseQuads++;
         continue;
@@ -188,7 +189,7 @@ function buildSurface() {
       merged[sj * 4 + si] = 1;
       const s = { level: lake.level, fx: 0.6 * LAKE_DRIFT, fz: 0.8 * LAKE_DRIFT };
       const X0 = x0 + si * 16, Z0 = z0 + sj * 16;
-      const a = emitV(X0, Z0, s, 2), b = emitV(X0 + 16, Z0, s, 2), c = emitV(X0 + 16, Z0 + 16, s, 2), d = emitV(X0, Z0 + 16, s, 2);
+      const a = emitV(X0, Z0, s), b = emitV(X0 + 16, Z0, s), c = emitV(X0 + 16, Z0 + 16, s), d = emitV(X0, Z0 + 16, s);
       idx.push(a, c, b, a, d, c);
     }
     for (let j = 0; j < CH; j++) for (let i = 0; i < CH; i++) {
@@ -433,6 +434,104 @@ function pondGeometry(P) {
   return geo;
 }
 
+// ----------------------------------------------------------------- lilies ---
+function lilyPadGeometry() {
+  // a round leaf with the deep basal notch, lying flat
+  const sh = new THREE.Shape();
+  const N = 14, notch = 0.32;
+  sh.moveTo(0, 0);
+  for (let i = 0; i <= N; i++) {
+    const a = notch + (i / N) * (Math.PI * 2 - 2 * notch);
+    sh.lineTo(Math.cos(a), Math.sin(a));
+  }
+  sh.lineTo(0, 0);
+  const g = new THREE.ShapeGeometry(sh).rotateX(-Math.PI / 2);
+  return g;
+}
+function buildLilies() {
+  const group = new THREE.Group();
+  group.name = 'water:lilies';
+  const rng = makeNoise(6161).rng, patchN = makeNoise(6162);
+  const pads = [], flowers = [];
+  const tryBed = (x, z, level, pondOnly) => {
+    if (patchN.fbm(x * 0.02, z * 0.02, 2) < 0.52) return;
+    const n = 40 + (rng() * 90) | 0, R = 2.5 + rng() * 5;
+    for (let k = 0; k < n; k++) {
+      const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * R;
+      const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+      const d = level - meshHeightAt(px, pz);
+      if (d < 0.4 || d > 2.1) continue;
+      const rv = riverAt(px, pz);
+      if (!pondOnly && rv && rv.d < rv.hw && !lakeAtFn(px, pz)) continue;   // not in the current
+      const yellow = rng() < 0.55;
+      pads.push([px, level + 0.012 + rng() * 0.004, pz, rng() * 6.28, (yellow ? 0.16 : 0.13) + rng() * 0.1, rng(), pondOnly]);
+      if (rng() < 0.07) flowers.push([px + 0.05, level + 0.05, pz, yellow, pondOnly]);
+    }
+  };
+  for (const l of LAKE_SHORES) {
+    const P = l.poly;
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      for (let t = 0; t < L; t += 9) {
+        const x = a[0] + (b[0] - a[0]) * t / L, z = a[1] + (b[1] - a[1]) * t / L;
+        // step inward (the side lakeAt calls water)
+        let nx = -(b[1] - a[1]) / L, nz = (b[0] - a[0]) / L;
+        if (!lakeAtFn(x + nx * 4, z + nz * 4)) { nx = -nx; nz = -nz; }
+        const off = 6 + rng() * 16;
+        tryBed(x + nx * off, z + nz * off, l.level, false);
+      }
+    }
+  }
+  const P = LOC.DAM;   // the still mill reach, eras 3-4
+  if (P) for (let k = 0; k < 40; k++) {
+    const s = -30 - rng() * 400, q = riverAt(P.x - P.dx * -s, P.z - P.dz * -s);
+    if (!q) continue;
+    const side = rng() < 0.5 ? -1 : 1, off = q.hw - 1 - rng() * 3;
+    tryBed(q.x - q.dz * side * off, q.z + q.dx * side * off, LOC.POND_LEVEL, true);
+  }
+  const padMat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const mk = (list) => {
+    const m = new THREE.InstancedMesh(lilyPadGeometry(), padMat, Math.max(1, list.length));
+    const d = new THREE.Object3D(), c = new THREE.Color();
+    list.forEach(([x, y, z, rot, sc, tint], i) => {
+      d.position.set(x, y, z); d.rotation.set(0, rot, 0); d.scale.setScalar(sc); d.updateMatrix();
+      m.setMatrixAt(i, d.matrix);
+      // glossy mid-dark green; some white-lily leaves still bronzed young
+      if (tint > 0.95) c.setRGB(0.19, 0.14, 0.07);
+      else c.setRGB(0.07 + tint * 0.05, 0.17 + tint * 0.07, 0.05 + tint * 0.02);
+      m.setColorAt(i, c);
+    });
+    m.count = list.length;
+    m.receiveShadow = true;
+    m.computeBoundingSphere();
+    return m;
+  };
+  const padsLake = mk(pads.filter((p) => !p[6])), padsPond = mk(pads.filter((p) => p[6]));
+  padsLake.name = 'lily-pads'; padsPond.name = 'lily-pads-pond';
+  // flowers: a yellow cup (Nuphar) or a white star (Nymphaea)
+  const fGeo = new THREE.SphereGeometry(0.045, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+  const fMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const fl = new THREE.InstancedMesh(fGeo, fMat, Math.max(1, flowers.length));
+  { const d = new THREE.Object3D(), c = new THREE.Color();
+    flowers.forEach(([x, y, z, yellow], i) => {
+      d.position.set(x, y - 0.03, z); d.rotation.set(0, 0, 0);
+      d.scale.set(yellow ? 0.8 : 1.5, yellow ? 0.9 : 0.5, yellow ? 0.8 : 1.5); d.updateMatrix();
+      fl.setMatrixAt(i, d.matrix);
+      fl.setColorAt(i, yellow ? c.setRGB(0.95, 0.8, 0.15) : c.setRGB(0.95, 0.95, 0.9));
+    });
+    fl.count = flowers.length; fl.computeBoundingSphere(); fl.name = 'lily-flowers'; }
+  group.add(padsLake, padsPond, fl);
+  console.log(`[boot] water-lilies: ${pads.length} pads, ${flowers.length} flowers`);
+  return {
+    group,
+    setEra(era) {
+      group.visible = era !== 0;
+      padsPond.visible = era === 3 || era === 4;
+    },
+  };
+}
+
 // ------------------------------------------------------------ reflection ---
 // Planar mirror at the level of the water nearest the camera. Rendered at
 // half resolution, only while water that level is close enough to matter.
@@ -535,6 +634,13 @@ export function buildWater() {
   group.add(pond);
   console.log(`[boot] mill pond: ${(P.data.reduce((a, v) => a + v, 0) * 4 / 1e4).toFixed(1)} ha backwater at ${pondLevel.toFixed(2)} m`);
 
+  // Water-lilies: yellow (Nuphar lutea, dzeltenā lēpe) and white (Nymphaea
+  // alba, baltā ūdensroze) — patchy beds in sheltered lake shallows 0.4-2 m
+  // deep, and on the still mill reach when it exists. Holocene plants: none
+  // on the tundra lakes.
+  const lilies = buildLilies();
+  group.add(lilies.group);
+
   const mats = [mat, pondMat];
   const reflector = makeReflector();
   for (const m of mats) m.userData.u.uRefl.value = reflector.rt.texture;
@@ -580,6 +686,7 @@ export function buildWater() {
   // carry the humic tea of the bogs and spruce forests upstream
   function setEra(era) {
     riseEra = era;
+    lilies.setEra(era);
     const pondOn = era === 3 || era === 4;
     for (const m of mats) {
       const u = m.userData.u;

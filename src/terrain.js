@@ -685,10 +685,10 @@ function paintVertex(era, x, y, z) {
   const fa = fieldAt(era, x, z);
   if (fa) {
     const [fr, fg, fb] = FIELD_COLORS[fa.field.type];
+    // soft underpaint only: the draped parcel decals (eras.js) carry the
+    // sharp edges and the rows
     const t = smoothstep(0.05, 0.3, fa.edge);
-    // plough-row striping
-    const s = Math.sin((x * Math.cos(fa.field.rot) + z * Math.sin(fa.field.rot)) * 1.8) * 0.045;
-    r = lerp(r, fr + s, t); g = lerp(g, fg + s, t); b = lerp(b, fb + s * 0.6, t);
+    r = lerp(r, fr, t); g = lerp(g, fg, t); b = lerp(b, fb, t);
   }
 
   // roads & yard earth — the real network: asphalt on today's P30 and

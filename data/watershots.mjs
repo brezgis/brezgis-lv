@@ -35,6 +35,12 @@ const VIEWS = [
   ['fish-bank', 4, 0.4, [-374, 31, 2.2], [-392, 44, -1.2]],
   ['fish-reach', 2, 0.36, [-360, 20, 9], [-400, 60, -1]],
   ['fish-top', 4, 0.4, [-381, 38, 60], [-380, 36, -1]],
+  ['field-1860', 3, 0.36, [-120, -5, 1.7], [-50, -60, -1]],
+  ['field-1935', 4, 0.36, [-120, -5, 1.7], [-50, -60, -1]],
+  ['field-1935b', 4, 0.4, [-150, 150, 2], [-90, 190, -1]],
+  ['evening-lake', 3, 0.86, [-560, 3170, 4], [-700, 3000, -2]],
+  ['night-river', 4, 0.02, [-360, 20, 6], [-400, 60, -1]],
+  ['dawn-river', 2, 0.24, [-360, 20, 6], [-400, 60, -1]],
   ['pisla-top', 4, 0.4, [-1545, 3205, 45], [-1544, 3195, -2]],
 ];
 const browser = await puppeteer.launch({
@@ -80,7 +86,7 @@ try {
       window.__scene.traverse((o) => { if (set.has(o.name) || [...set].some((n) => n.endsWith('*') && o.name.startsWith(n.slice(0, -1)))) o.visible = false; });
     }, process.env.HIDE);
     if (process.env.EVAL) await page.evaluate(process.env.EVAL);
-    await new Promise((r) => setTimeout(r, 9000));
+    await new Promise((r) => setTimeout(r, +(process.env.SETTLE || 9000)));
     await page.screenshot({ path: `${OUT}/${name}-${tag}.png` });
     console.log('shot', name);
   }

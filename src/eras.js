@@ -15,10 +15,10 @@ import {
   barrowMounds,
 } from './buildings.js';
 import { MAT } from './textures.js';
-import { roadMaterial, buildingMaterial } from './surfaces.js';
+import { roadMaterial, buildingMaterial, fieldMaterial } from './surfaces.js';
 import { buildRoadside } from './roadside.js';
 import { heightAt, meshHeightAt } from './terrain.js';
-import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W } from './landuse.js';
+import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W, fieldsForEra, FIELD_COLORS } from './landuse.js';
 import { riverAt, streamAt, lakeAt, pondAt, vegExcluded, waterLevelAt, RIVER, STREAM_CHANNELS } from './riverzone.js';
 import { registerFootprints, registerTrample, buildingAt, stageFootprint } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
@@ -1356,7 +1356,15 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       group.add(mesh);
     };
     if (props.hay.length) {
-      const hayCone = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 2.4, 9), MAT.hay, props.hay.length);
+      // the stage stack's own profile (buildings.haystack): a kaudze built
+      // round its pole, bellied low and drawn in to a rounded top — the old
+      // 9-sided cone flat-shaded into a tent
+      const H = 2.4, prof = [];
+      for (let i = 0; i <= 14; i++) {
+        const t = i / 14;
+        prof.push(new THREE.Vector2(Math.max(0.02, H * 0.43 * Math.pow(1 - t * t, 0.7) * (1 + 0.05 * Math.sin(t * 13))), H * t - H / 2));
+      }
+      const hayCone = new THREE.InstancedMesh(new THREE.LatheGeometry(prof, 14), MAT.hay, props.hay.length);
       hayCone.name = `bg-prop-hay-era-${era}`;
       hayCone.userData.positions = props.hay;
       put(hayCone, props.hay, ([x, z, r, sc]) => {
@@ -1845,6 +1853,59 @@ function outhouse() {
   return shadowProps(g);
 }
 
+// Field parcels as draped decals: the terrain's 17 m vertex paint could
+// only ever draw fields as soft ovals. Each parcel is its own small grid,
+// seated on the rendered ground, carrying its crop colour and a row
+// coordinate the shader draws drill rows, potato ridges or furrows from.
+const FIELD_ROW_STYLE = { rye: 0, barley: 0, oats: 0, flax: 0, clover: 1, potato: 2, fallow: 3 };
+function fieldDecals(era) {
+  const parcels = fieldsForEra(era);
+  if (!parcels.length) return null;
+  const pos = [], col = [], row = [], idx = [];
+  for (const f of parcels) {
+    const c = Math.cos(f.rot), s = Math.sin(f.rot);
+    const nu = Math.max(2, Math.ceil((2 * f.hw) / 6)), nv = Math.max(1, Math.ceil((2 * f.hh) / 6));
+    const base = pos.length / 3;
+    const [r, g, b] = FIELD_COLORS[f.type];
+    // ~0.7: the terrain's detail shader darkens the ground it paints by
+    // about that much, and a crop is no brighter than the sward beside it
+    const tint = (0.9 + f.tint * 0.18) * 0.7;
+    for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+      const u = -f.hw + (2 * f.hw * i) / nu, v = -f.hh + (2 * f.hh * j) / nv;
+      const x = f.cx + u * c - v * s, z = f.cz + u * s + v * c;
+      pos.push(x, meshHeightAt(x, z) + 0.035, z);
+      col.push(r * tint, g * tint, b * tint);
+      // across-row coordinate, distance in from the nearest end, row style
+      row.push(v, f.hw - Math.abs(u), FIELD_ROW_STYLE[f.type] ?? 0);
+    }
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+      const a = base + j * (nu + 1) + i, b2 = a + 1, c2 = a + nu + 2, d = a + nu + 1;
+      idx.push(a, b2, c2, a, c2, d);
+    }
+  }
+  // wind every triangle CCW seen from above (rotations mirror some parcels)
+  for (let i = 0; i < idx.length; i += 3) {
+    const A = idx[i] * 3, B = idx[i + 1] * 3, C = idx[i + 2] * 3;
+    if ((pos[B + 2] - pos[A + 2]) * (pos[C] - pos[A]) - (pos[B] - pos[A]) * (pos[C + 2] - pos[A + 2]) < 0) {
+      const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('aRow', new THREE.Float32BufferAttribute(row, 3));
+  geo.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
+  const nrm = new Float32Array(pos.length); for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geo, fieldMaterial());
+  mesh.receiveShadow = true;
+  mesh.name = 'field-parcels';
+  mesh.userData.noCollide = true;
+  return mesh;
+}
+
 export function buildEra(era, ctx) {
   const g = new THREE.Group();
   g.name = `era${era}`;
@@ -1865,6 +1926,7 @@ export function buildEra(era, ctx) {
   };
   const smokes = [], fires = [];
   const spawns = [];
+  if (era >= 2 && era <= 4) { const fd = fieldDecals(era); if (fd) g.add(fd); }
   g.userData.fenceGates = {};
   const addStageFence = (kind, pts, label) => {
     refreshFootprints();

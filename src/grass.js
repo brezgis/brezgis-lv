@@ -480,11 +480,19 @@ export function buildGrass(scene) {
       if (trodden && cJ2 < (carpet ? 0.6 : 0.93)) continue;
       const gy = meshHeightAt(x, z);
       if (gy < cWater + 0.08) continue;              // no sward under the water
+      // crops at Jāņi: rye in ear stands ~1.3 m, spring barley and oats
+      // lower, flax knee-high, potato and clover short and dense, and black
+      // fallow is ploughed ground with a few weeds
+      const crop = fa ? fa.field.type : null;
+      if (crop === 'fallow' && cJ1 > 0.1) continue;
+      if (crop === 'potato' && cJ1 > 0.55) continue;
+      const cropH = crop === 'rye' ? 1.25 : crop === 'barley' || crop === 'oats' ? 0.8
+        : crop === 'flax' ? 0.7 : crop === 'potato' ? 0.45 : crop === 'clover' ? 0.32 : 0.18;
       dummy.position.set(x, gy - 0.02, z);
       dummy.rotation.set(0, rot, 0);
       const tall = (carpet
-        ? 0.13 + hJ * 0.14
-        : fa ? 1.0 + hJ * 0.25 : (trodden ? 0.2 : 0.42) + hJ * 0.5) * (band.tallK || 1);
+        ? (crop ? Math.min(cropH, 0.13 + hJ * 0.14) : 0.13 + hJ * 0.14)
+        : fa ? cropH * (0.85 + hJ * 0.3) : (trodden ? 0.2 : 0.42) + hJ * 0.5) * (band.tallK || 1);
       const w = (0.8 + wJ * 0.5) * wide;
       dummy.scale.set(w, tall * (era === 0 ? 0.5 : 1), w);
       dummy.updateMatrix();
@@ -493,9 +501,12 @@ export function buildGrass(scene) {
       if (era === 0) col.setRGB(1.35, 1.12, 0.8);            // straw tundra sedge
       else if (fa) {
         const t = fa.field.type;
-        if (t === 'rye' || t === 'barley') col.setRGB(1.5, 1.35, 0.8);
-        else if (t === 'flax') col.setRGB(1.0, 1.15, 1.5);
-        else col.setRGB(1.0, 1.05, 0.9);
+        if (t === 'rye') col.setRGB(1.45, 1.35, 0.85);           // grey-green going gold
+        else if (t === 'barley' || t === 'oats') col.setRGB(1.2, 1.3, 0.8);
+        else if (t === 'flax') col.setRGB(1.0, 1.15, 1.45);
+        else if (t === 'potato') col.setRGB(0.7, 0.9, 0.62);     // dark haulm
+        else if (t === 'clover') col.setRGB(0.95, 1.1, 0.85);
+        else col.setRGB(1.1, 1.0, 0.75);                         // fallow weeds
       } else {
         const wetK = Math.max(Math.max(0, 1 - dRiv / 60) * 0.25, (1 - cShoreK) * 0.3);
         col.setRGB(0.84 + cJ3 * 0.26 - wetK * 0.3, 0.95 + cJ2 * 0.28, 0.76 + cJ1 * 0.22);

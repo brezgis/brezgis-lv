@@ -94,9 +94,8 @@ function bakeBase(era) {
         ctx.save();
         ctx.translate(toPx(f.cx), toPy(f.cz));
         ctx.rotate(f.rot);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, (f.rx / HM_SPAN) * W, (f.rz / HM_SPAN) * W, 0, 0, 7);
-        ctx.fill();
+        const hw = (f.hw / HM_SPAN) * W, hh = (f.hh / HM_SPAN) * W;
+        ctx.fillRect(-hw, -hh, 2 * hw, 2 * hh);
         ctx.restore();
       }
     }

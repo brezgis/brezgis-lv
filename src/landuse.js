@@ -13,7 +13,7 @@ import { ROADS_OSM, DWELLINGS_OSM, BUILDINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
 import { forest1935At } from './forest1935.js';
-import { RIVER, STREAM_CHANNELS, riverAt, streamAt } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, riverAt, streamAt, inAnyLake } from './riverzone.js';
 import { makeNoise, mulberry32, clamp, lerp, smoothstep, distToPolyline, pointInPoly, chaikinOpen } from './util.js';
 
 const noise = makeNoise(4217);
@@ -335,19 +335,100 @@ function bgFieldsFor(era) {
 
 const fieldsCache = new Map();
 const FIELD_CELL = 128;
+// Fields are PARCELS: each generated field (an area and an orientation) is a
+// rotated rectangle of the same area, cut along its long axis into parcels
+// with grass balks (robežas) between them. 1860: the open-field strips of
+// the three-course rotation — winter rye, spring barley/oats, black fallow —
+// ~15-25 m wide. 1935: a reform farm's two or three parcels of mixed crops.
+// AD 950: small single plots. Sharp edges come from the draped decals in
+// eras.js; this table is what every rule (grass, trees, paint) asks.
+const ROTATION_1860 = ['rye', 'barley', 'fallow', 'rye', 'oats', 'fallow'];
+const CROPS_1935 = ['rye', 'barley', 'oats', 'flax', 'potato', 'clover', 'rye', 'barley'];
+function parcelsOf(fl, era, seed) {
+  const r = mulberry32(seed);
+  const K = 0.886;                                   // ellipse → rectangle of equal area
+  let hw = fl.rx * K, hh = fl.rz * K, rot = fl.rot;
+  if (hh > hw) { [hw, hh] = [hh, hw]; rot += Math.PI / 2; }   // hw = the long half-axis
+  const BALK = era === 2 ? 0 : 2.4;
+  let n = 1;
+  if (era === 3) n = Math.max(2, Math.round((2 * hh) / (16 + r() * 8)));
+  else if (era === 4) n = 2 + (r() < 0.4 ? 1 : 0);
+  // strips run the LENGTH of the field: cut across the short axis
+  const c = Math.cos(rot), s = Math.sin(rot);
+  const out = [];
+  const stripH = (2 * hh - BALK * (n - 1)) / n;
+  for (let k = 0; k < n; k++) {
+    const off = -hh + stripH / 2 + k * (stripH + BALK);
+    // local (u along the length, v across) → world; rotation convention as fieldAt
+    const cx = fl.cx + off * -s, cz = fl.cz + off * c;
+    let type = fl.type;
+    if (era === 3) type = ROTATION_1860[(k + ((seed >> 3) % 3)) % ROTATION_1860.length];
+    else if (era === 4 && k > 0) type = CROPS_1935[(r() * CROPS_1935.length) | 0];
+    out.push({ cx, cz, hw, hh: stripH / 2, rot, type, rx: hw, rz: stripH / 2, tint: r() });
+  }
+  return out;
+}
 function fieldsIndexed(era) {
   let f = fieldsCache.get(era);
   if (f) return f;
-  const fields = rawFieldsForEra(era).concat(era === 3 || era === 4 ? bgFieldsFor(era) : []);
-  const map = new Map();
-  fields.forEach((fl, i) => {
-    const R = Math.max(fl.rx, fl.rz);
+  const raw = rawFieldsForEra(era).concat(era === 3 || era === 4 ? bgFieldsFor(era) : []);
+  const fields = [], map = new Map();
+  const index = (fl, i) => {
+    const R = Math.hypot(fl.hw, fl.hh);
     for (let ix = Math.floor((fl.cx - R) / FIELD_CELL); ix <= Math.floor((fl.cx + R) / FIELD_CELL); ix++) {
       for (let iz = Math.floor((fl.cz - R) / FIELD_CELL); iz <= Math.floor((fl.cz + R) / FIELD_CELL); iz++) {
         const k = gridKey(ix, iz);
         let arr = map.get(k);
         if (!arr) map.set(k, arr = []);
         arr.push(i);
+      }
+    }
+  };
+  const inAccepted = (x, z, margin) => {
+    const arr = map.get(gridKey(Math.floor(x / FIELD_CELL), Math.floor(z / FIELD_CELL)));
+    if (!arr) return false;
+    for (const i of arr) {
+      const q = fields[i], dx = x - q.cx, dz = z - q.cz;
+      const c = Math.cos(-q.rot), s = Math.sin(-q.rot);
+      if (Math.abs(dx * c - dz * s) < q.hw + margin && Math.abs(dx * s + dz * c) < q.hh + margin) return true;
+    }
+    return false;
+  };
+  // Roads, water and neighbouring fields bound a field: a strip that runs
+  // into a lane stops at its verge and resumes beyond it (pieces under 12 m
+  // go to the balk), instead of the old ovals painted across everything.
+  const blocked = (x, z) => {
+    if (distToRiver(x, z) < 20 || distToStreams(x, z) < 7 || inAnyLake(x, z)) return true;
+    if (era >= 2 && distToRoadEx(era, x, z).d < 3) return true;
+    return inAccepted(x, z, 1.5);
+  };
+  raw.forEach((fl, ri) => {
+    for (const p of parcelsOf(fl, era, ri * 7919 + era * 131)) {
+      const c = Math.cos(p.rot), s = Math.sin(p.rot), STEP = 2;
+      const nU = Math.floor((2 * p.hw) / STEP);
+      const free = [];
+      for (let k = 0; k <= nU; k++) {
+        const u = -p.hw + k * STEP;
+        let ok = true;
+        for (const v of [-p.hh * 0.85, 0, p.hh * 0.85]) {
+          if (blocked(p.cx + u * c - v * s, p.cz + u * s + v * c)) { ok = false; break; }
+        }
+        free.push(ok);
+      }
+      let k0 = -1;
+      for (let k = 0; k <= nU + 1; k++) {
+        if (k <= nU && free[k]) { if (k0 < 0) k0 = k; continue; }
+        if (k0 >= 0) {
+          const u0 = -p.hw + k0 * STEP + 1, u1 = -p.hw + (k - 1) * STEP - 1;
+          if (u1 - u0 >= 12) {
+            const uc = (u0 + u1) / 2;
+            const q = { ...p, cx: p.cx + uc * c, cz: p.cz + uc * s, hw: (u1 - u0) / 2 };
+            q.rx = q.hw;
+            fields.push(q);
+            index(q, fields.length - 1);
+          }
+          k0 = -1;
+        }
       }
     }
   });
@@ -400,9 +481,10 @@ export function fieldAt(era, x, z) {
     const f = fields[i];
     const dx = x - f.cx, dz = z - f.cz;
     const c = Math.cos(-f.rot), s = Math.sin(-f.rot);
-    const u = (dx * c - dz * s) / f.rx, v = (dx * s + dz * c) / f.rz;
-    const d = u * u + v * v;
-    if (d < 1) return { field: f, edge: 1 - d };
+    const u = dx * c - dz * s, v = dx * s + dz * c;
+    const eu = f.hw - Math.abs(u), ev = f.hh - Math.abs(v);
+    // edge: metres in from the nearest side, normalised like the old ellipse
+    if (eu > 0 && ev > 0) return { field: f, edge: Math.min(1, Math.min(eu, ev) / 8) };
   }
   return null;
 }
@@ -768,10 +850,11 @@ export function forestDensity(era, x, z, y) {
 
 // Field palette (midsummer — Jāņi season, late June)
 export const FIELD_COLORS = {
-  rye: [0.5, 0.52, 0.26],
-  barley: [0.46, 0.53, 0.27],
-  flax: [0.44, 0.57, 0.52],
-  fallow: [0.46, 0.38, 0.26],
-  potato: [0.3, 0.44, 0.23],
-  clover: [0.34, 0.52, 0.25],
+  rye: [0.5, 0.53, 0.31],       // winter rye in ear: tall, grey-green going gold
+  barley: [0.42, 0.55, 0.25],   // spring barley: bright green
+  oats: [0.45, 0.55, 0.3],
+  flax: [0.39, 0.52, 0.37],     // just coming into its blue flower at Jāņi
+  fallow: [0.4, 0.33, 0.24],    // black fallow: ploughed bare
+  potato: [0.26, 0.4, 0.18],    // dark rows on ridged soil
+  clover: [0.33, 0.5, 0.24],
 };

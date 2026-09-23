@@ -133,7 +133,7 @@ async function boot() {
   cubeCam.children.forEach((c) => c.layers.set(1));
   cubeCam.position.set(LOC.STEAD.x - 200, meshHeightAt(LOC.STEAD.x - 200, LOC.STEAD.z) + 12, LOC.STEAD.z);
   water.applyEnvMap(cubeRT.texture);
-  let envAge = 1e9;
+  let envAge = 1e9, envT = -1;
 
   const effects = new Effects(scene);
   // left out of the water's mirror: grass is sub-pixel at half resolution,
@@ -689,8 +689,12 @@ async function boot() {
     WIND.time.value = t;
     grass.update(focus, currentEra, camera.position);
     envAge += dt;
-    if (envAge > 5) {
+    // a time-of-day jump (the noon/evening/dawn buttons, a harness) must not
+    // leave the water mirroring the old sky for up to 5 s: at night that
+    // lit the gaps between waterside leaves up like lamps
+    if (envAge > 5 || Math.abs(sky.state.t - envT) > 0.004) {
       envAge = 0;
+      envT = sky.state.t;
       cubeCam.position.copy(focus);
       // Capture the sky without consuming a pending main-view shadow update.
       const shadowEnabled = renderer.shadowMap.enabled;

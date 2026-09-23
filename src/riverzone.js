@@ -336,6 +336,27 @@ for (let i = 0; i < STREAMS.length; i++) {
   }));
 }
 
+// --------------------------------------------------------- pool & riffle ----
+// An alluvial channel does not have a flat bed. Scour pools sit at the bend
+// apexes, gravel riffles at the crossings between them, and the pair repeats
+// every 5-7 channel widths. The Gauja's real OSM course already carries that
+// rhythm — |curvature| peaks at the apexes — so the bed law reads it off the
+// mapped meanders instead of imposing an invented wave: 197 curvature sign
+// changes over 16.7 km of course = one crossing every ~85 m against a mean
+// width of 19.4 m, i.e. 4.4 widths, inside the textbook range.
+//
+// Both the coarse terrain field stamp and the query-time channel law call
+// this, so the carved bed and the rendered bed cannot disagree.
+export const BED_RIFFLE = 1.78;   // depth below the surface over a crossing
+export const BED_POOL = 3.05;     // ...and in the scour hole at a bend apex
+export function poolK(curvature) {
+  // |curvature| runs p25 0.0022 / p50 0.0064 / p90 0.026 on the Gauja
+  return smoothstep(0.0035, 0.0210, Math.abs(curvature || 0));
+}
+export function bedDropAt(curvature) {
+  return lerp(BED_RIFFLE, BED_POOL, poolK(curvature));
+}
+
 function profileAtS(chan, s) {
   s = clamp(s, 0, chan.length);
   let lo = 0, hi = chan.sampleS.length - 1;
@@ -469,13 +490,14 @@ function bucketsFor(chans) {
 }
 const rivBK = bucketsFor([RIVER]);
 const strmBK = bucketsFor(STREAM_CHANNELS);
-function nearest(m, x, z) {
+function nearest(m, x, z, channel = null) {
   const bx = Math.floor(x / BK), bz = Math.floor(z / BK);
   let best = null, bd = QUERY_R * QUERY_R;
   for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
     const arr = m.get((bx + dx) * 8192 + (bz + dz));
     if (!arr) continue;
     for (const seg of arr) {
+      if (channel && seg.chan !== channel) continue;
       const a = seg.chan.samples[seg.i], b = seg.chan.samples[seg.i + 1];
       const sx = b[0] - a[0], sz = b[1] - a[1], sl2 = sx * sx + sz * sz;
       const u = clamp(((x - a[0]) * sx + (z - a[1]) * sz) / (sl2 || 1), 0, 1);
@@ -498,6 +520,11 @@ function nearest(m, x, z) {
 // CENTERLINE; d - hw is the signed distance to the rugged water's edge.
 export function riverAt(x, z) { return nearest(rivBK, x, z); }
 export function streamAt(x, z) { return nearest(strmBK, x, z); }
+// Channel-specific query keeps neighbouring tributaries from stealing each
+// other's surface vertices at confluences. Uses the same spatial index.
+export function channelAt(channel, x, z) {
+  return nearest(channel === RIVER ? rivBK : strmBK, x, z, channel);
+}
 
 // True only where a tributary throat is physically inside its receiver.
 // Terrain uses this to suppress its stream-bank lip; vegetation can use the

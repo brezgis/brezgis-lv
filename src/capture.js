@@ -56,11 +56,17 @@ function withCaptureState(renderer, fn) {
   renderer.getClearColor(prevClear);
   const prevAlpha = renderer.getClearAlpha();
   const prevShadow = renderer.shadowMap.enabled;
+  const prevViewport = renderer.getViewport(new THREE.Vector4());
+  const prevScissor = renderer.getScissor(new THREE.Vector4());
+  const prevScissorTest = renderer.getScissorTest();
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.shadowMap.enabled = false;
   renderer.setClearColor(0x000000, 0);
   try { fn(); } finally {
     renderer.setRenderTarget(prevTarget);
+    renderer.setViewport(prevViewport);
+    renderer.setScissor(prevScissor);
+    renderer.setScissorTest(prevScissorTest);
     renderer.toneMapping = prevTone;
     renderer.shadowMap.enabled = prevShadow;
     renderer.setClearColor(prevClear, prevAlpha);
@@ -105,7 +111,7 @@ export function captureTwigAtlas(renderer, sp, seed) {
  * lit from a fixed noon-ish sun into one column of a wide atlas. Returns
  * { texture, tiles: [{u0, u1, halfW, height}] } for far-tier cross-quads.
  */
-export function captureImpostorAtlas(renderer, entries, res = 2048) {
+export function captureImpostorAtlas(renderer, entries, res = 4096) {
   const cols = entries.length;
   const tileW = Math.floor(res / cols), tileH = 512;
   const scene = new THREE.Scene();
@@ -125,8 +131,14 @@ export function captureImpostorAtlas(renderer, entries, res = 2048) {
     entries.forEach((e, i) => {
       holder.clear();
       for (const m of e.meshes) holder.add(m);
-      const halfW = Math.max(e.halfW, e.height * (tileW / tileH) / 2 * 0.999);
-      const height = Math.max(e.height, halfW * 2 * (tileH / tileW) * 0.999);
+      // Twig cards extend beyond the skeleton's nominal crown/height.
+      // Fit the finished geometry, including a filtering/wind guard band.
+      holder.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(holder);
+      const top = Math.max(e.height, bounds.max.y) * 1.09;
+      const extent = Math.max(e.halfW, Math.abs(bounds.min.x), Math.abs(bounds.max.x)) * 1.09;
+      const halfW = Math.max(extent, top * tileW / tileH / 2);
+      const height = Math.max(top, halfW * 2 * tileH / tileW);
       const cam = new THREE.OrthographicCamera(-halfW, halfW, height, 0, 0.1, 400);
       cam.position.set(0, 0, 120);
       cam.lookAt(0, 0, 0);
@@ -134,7 +146,9 @@ export function captureImpostorAtlas(renderer, entries, res = 2048) {
       renderer.setScissor(i * tileW, 0, tileW, tileH);
       renderer.setScissorTest(true);
       renderer.render(scene, cam);
-      tiles.push({ u0: i / cols, u1: (i + 1) / cols, halfW, height });
+      // Match the actual integer viewport and inset by half a texel so
+      // filtering cannot fetch an adjacent species at the edge of the tile.
+      tiles.push({ u0: (i * tileW + 0.5) / res, u1: ((i + 1) * tileW - 0.5) / res, halfW, height });
     });
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);

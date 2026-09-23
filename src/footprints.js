@@ -11,16 +11,20 @@ import { LOC } from './landuse.js';
 // stage structures outside any PADS clearing — generous rects, world coords
 const STATIC_RECTS = [
   // Dzērbene church silhouette (nave + tower), eras 3-5
-  { x: LOC.CHURCH.x, z: LOC.CHURCH.z, w: 38, d: 24, rot: 0.8, eras: [3, 4, 5] },
+  { x: LOC.CHURCH.x, z: LOC.CHURCH.z, w: 38, d: 24, rot: -0.8, eras: [3, 4, 5] },
   // the watermill on the pond bend, eras 3-4 (offset per the era-3 builder)
-  { x: LOC.POND.x + 30, z: LOC.POND.z + 16, w: 18, d: 14, rot: Math.PI * 0.75, eras: [3, 4] },
+  { x: LOC.POND.x + 30, z: LOC.POND.z + 16, w: 18, d: 14, rot: -Math.PI * 0.75, eras: [3, 4] },
   // the 2017 observation tower base (vegetation is thinned there already —
   // this is the belt to that braces)
-  { x: LOC.BREZGA.x, z: LOC.BREZGA.z, w: 9, d: 9, rot: 0.2, eras: [5] },
+  { x: LOC.BREZGA.x, z: LOC.BREZGA.z, w: 9, d: 9, rot: -0.2, eras: [5] },
 ];
 
 const CELL = 32;
 const reg = new Map();       // era -> { rects, grid: Map<cellKey, idx[]> }
+
+// Registry rectangles use the planar GIS angle; Three's positive Y rotation
+// runs the opposite way in X/Z. Convert staged mesh rotations at the boundary.
+export function stageFootprint(x,z,w,d,rotationY=0){return {x,z,w,d,rot:-rotationY};}
 
 function indexRects(rects) {
   const grid = new Map();

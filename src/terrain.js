@@ -4,8 +4,8 @@
 import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
-import { PADS, BUMPS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
-import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, bankCharFromQuery, confluenceAt, lakeShoreSignedDistAt } from './riverzone.js';
+import { PADS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
+import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, bankCharFromQuery, confluenceAt, lakeShoreSignedDistAt, bedDropAt } from './riverzone.js';
 import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
@@ -104,7 +104,7 @@ function cellToWorld(gx, gy) {
     for (let i = 0; i < RIVER.samples.length; i++) {
       const [x, z, y, hw] = RIVER.samples[i];
       const [nx, nz] = normalAt(RIVER.samples, i);
-      pin(x, z, y - 2.45);
+      pin(x, z, y - bedDropAt(RIVER.curvature[i]));
       pin(x + nx * hw * 0.6, z + nz * hw * 0.6, y - 0.55);
       pin(x - nx * hw * 0.6, z - nz * hw * 0.6, y - 0.55);
     }
@@ -123,8 +123,11 @@ function cellToWorld(gx, gy) {
   const waterSamples = [];   // [x, z, level, halfWidth] along every carved channel
   // riverzone owns the RUGGED water edge, so the carve follows the same
   // width the ribbon and skirt render instead of a fixed centerline collar
-  for (const [x, z, y, hw] of RIVER.samples) {
-    stamp(x, z, hw * 2.0, hw * 0.72, y - 2.45);
+  for (let ri = 0; ri < RIVER.samples.length; ri++) {
+    const [x, z, y, hw] = RIVER.samples[ri];
+    // pool at the bend apex, riffle at the crossing — same law the water
+    // surface reads for its depth grading and its chop
+    stamp(x, z, hw * 2.0, hw * 0.72, y - bedDropAt(RIVER.curvature[ri]));
     // shallow SHELF beyond the rendered edge: guarantees no 17m-cell
     // terrain triangle can bulge up through the ribbon or skirt
     stamp(x, z, hw + 5.5, hw + 3.5, y - 0.55);
@@ -226,7 +229,8 @@ function cellToWorld(gx, gy) {
       const i = gy * G + gx;
       const dSh = lakeShoreWavyAt(x, z);
       if (pointInPoly(x, z, shore)) {
-        const bed = lake.level - lerp(0.18, 1.7, smoothstep(0, 30, dSh));
+        // Inferred littoral shelf and basin, not surveyed bathymetry.
+        const bed = lake.level - lerp(0.18, 4.8, smoothstep(0, 90, dSh));
         field[i] = Math.min(field[i], bed);
       } else if (dSh < 9 && field[i] > lake.level && !lakeAt(x, z)) {
         const rv = riverAt(x, z);
@@ -234,19 +238,6 @@ function cellToWorld(gx, gy) {
           field[i] = Math.min(field[i], lake.level + 0.12 + (dSh / 9) * 1.1);
         }
       }
-    }
-  }
-  // burial barrows (low mounds — they stay in the land once raised)
-  for (const b of BUMPS) {
-    const gr = Math.ceil((b.r + 2) / CELL);
-    const cgx = Math.round((((b.x - OX) / SPAN) + 0.5) * (G - 1));
-    const cgy = Math.round((((b.z - OZ) / SPAN) + 0.5) * (G - 1));
-    for (let dy = -gr; dy <= gr; dy++) for (let dx = -gr; dx <= gr; dx++) {
-      const gx = cgx + dx, gy = cgy + dy;
-      if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
-      const [x, z] = cellToWorld(gx, gy);
-      const d = Math.hypot(x - b.x, z - b.z);
-      if (d < b.r) field[gy * G + gx] += b.h * (0.5 + 0.5 * Math.cos((d / b.r) * Math.PI));
     }
   }
 })();
@@ -304,7 +295,7 @@ export function heightAt(x, z) {
       if (rv.d <= rv.hw + 4.2) {
         // bed → shelf used to be a hard cut at 0.72×hw (≈1.9m one-sample jumps)
         const k = smoothstep(rv.hw * 0.65, rv.hw * 0.79, rv.d);
-        h = Math.min(h, rv.level - lerp(2.45, 0.55, k));
+        h = Math.min(h, rv.level - lerp(bedDropAt(rv.curvature), 0.55, k));
         // the bench outer edge was a bare wall: shelf only CEILINGS terrain
         // while the ramp beyond hw+4.2 floors it at level−0.5 — floor the
         // bench too, fading inward, and open the floor where a tributary
@@ -404,7 +395,15 @@ function detailify(material, strength) {
        vSlope = 1.0 - normalize(normal).y;`
     );
     sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; varying vec3 vWp; varying float vSlope;\n' +
-      sh.fragmentShader.replace(
+      sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+        #ifdef SATELLITE_ALBEDO
+          // Satellite imagery already contains illumination and deep canopy
+          // shadows. Recover a usable diffuse albedo before lighting it again;
+          // multiplying the raw photo made the entire modern meadow black.
+          diffuseColor.rgb = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(0.65)) * 0.9
+            + vec3(0.025, 0.035, 0.016);
+        #endif
+      `).replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
@@ -498,7 +497,7 @@ export function paintEra(era) {
       // the raw Sentinel composite reads darker than the painted eras under
       // the same Lambert rig — lift it so era-5 noon matches their noon
       satMaterial = detailify(new THREE.MeshLambertMaterial({ map: tex }), 0.55);
-      satMaterial.color.setScalar(1.35);
+      satMaterial.defines = { SATELLITE_ALBEDO: 1 };
     }
     terrainMesh.material = satMaterial;
     return;
@@ -589,9 +588,9 @@ export function paintEra(era) {
     const riverCh = rv ? bankCharFromQuery(rv, x, z) : null;
 
     // base meadow green, dryer on heights, lusher near water
-    let r = 0.275 + n1 * 0.14 + smoothstep(200, 245, y) * 0.10;
-    let g = 0.44 + n1 * 0.12 + smoothstep(60, 12, dRiv) * 0.05;
-    let b = 0.155 + n2 * 0.05;
+    let r = 0.17 + n1 * 0.09 + smoothstep(200, 245, y) * 0.06;
+    let g = 0.29 + n1 * 0.09 + smoothstep(60, 12, dRiv) * 0.035;
+    let b = 0.085 + n2 * 0.035;
 
     // wildflower sparkle on open meadow (midsummer)
     if (n2 > 0.82 && dRiv < 120 && era < 3) { r += 0.16; g += 0.1; b += 0.12; }
@@ -605,7 +604,7 @@ export function paintEra(era) {
       const dStage = Math.hypot(x - LOC.STEAD.x, z - LOC.STEAD.z);
       const falloff = clamp(560 / Math.max(dStage, 1), 0.85, 1);
       const t = smoothstep(0.4, 0.75, fd) * (0.35 + 0.65 * falloff);
-      r = lerp(r, 0.16, t); g = lerp(g, 0.2, t); b = lerp(b, 0.09, t);
+      r = lerp(r, 0.09, t); g = lerp(g, 0.14, t); b = lerp(b, 0.055, t);
     }
 
     // fields

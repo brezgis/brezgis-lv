@@ -2,43 +2,49 @@
 // Verified against research/*.md; bracketed numbers cite the Chronicle sources.
 export const ERAS = [
   {
-    year: -12750, label: '~10,800 BC', title: 'Ledus laikmets — before anyone',
+    year: -10800, label: '~10,800 BC', title: 'Ledus laikmets — after the ice',
+    evidence: 'Environmental reconstruction. Ancient watercourses, ice blocks and animal locations are illustrative.',
     body: `The ice sheet has gone, but its dead remains lie buried in these hollows — great
 stranded blocks slowly melting into the lakes this parish will one day be named around
 [21]. This is Younger Dryas tundra: dwarf birch, juniper, sedge and till, and reindeer
-bands drifting the valley of a milky, braided young Gauja. No human has stood here yet;
-the first reindeer hunters will reach Latvia's river valleys within a few centuries
-[22]. On clear nights the aurora stands over the moraines. Wait for dusk.`,
-    facts: ['Dead ice melting into today\'s lakes', 'Reindeer tundra, no humans yet', 'First hunters ~10,500 BC at the Daugava'],
+bands drifting the valley. The modern terrain and river outline provide a geographic
+reference; the actual Younger Dryas drainage cannot be reconstructed from them alone.
+Late Palaeolithic hunters are known from Latvia, but no occupation of this exact terrace
+is established here [22]. The unoccupied landscape is an interpretation.`,
+    facts: ['Younger Dryas, ~12,750 years before 1950', 'Dwarf shrubs, sedges and reindeer', 'Ancient drainage is approximate'],
   },
   {
-    year: -1900, label: '~AD 50', title: 'Kur tauri ganījās — where the aurochs grazed',
+    year: 50, label: '~AD 50', title: 'Kur tauri ganījās — where the aurochs grazed',
+    evidence: 'Regional analogy. The camp and aurochs herd are plausible scenes, not documented occupants of this site.',
     body: `Two thousand years ago the Vidzeme Upland was near-wilderness: heavy mixed forest
 of spruce, pine, birch and oak, broken by lakes and the young Gauja threading its chain of
 lake basins [4][15]. Settlement was sparse — scattered Baltic and Finnic groups, known
 mostly from their graves [13]. Aurochs, the wild ox the parish is named for, were by then
 rare in the Baltic but plausibly still grazed openings like this river terrace — the
-place-name itself is counted as evidence they lived in these woods [16][17]. The camp is a
+place-name recalls the animal, but cannot date a herd at this site [16][17]. The camp is a
 seasonal hunters' shelter; elk watch from the forest edge.`,
     facts: ['Aurochs: rare but defensible at AD 50', 'Sparse Early Iron Age settlement', 'The Gauja lake-chain corridor'],
   },
   {
     year: 950, label: '~AD 950', title: 'A Latgalian farmstead',
+    evidence: 'Archaeological analogy: Āraiši. The farm layout, refuge palisade, cemetery and neighbouring households are interpretive.',
     body: `By the Late Iron Age this was Latgalian country — the Baltic people whose name
 Latvia carries [13]. The buildings follow the extraordinary evidence of Āraiši lake
-fortress, 25 km west, its timbers felled in AD 835: small corner-joined log dwellings with
+fortress, about 25 km west, with its ninth- and tenth-century occupation: small corner-joined log dwellings with
 a clay stove at the centre, bark-sheet roofs weighted with poles, a granary raised on
 posts [11][12]. Barley, rye and flax grow in small fields; small cattle, dark sheep, pigs
 and pony-sized horses graze the clearing; a few chickens scratch in the yard [14]. Across
 the river on its hill stands the palisaded refuge fort — Lejstupu pilskalns, still marked
 on the monument register today [10]. Seven more homesteads smoke within an hour's walk —
 Latgalian settlement was dispersed single farmsteads loosely gathered on a hillfort
-district, not lone outposts, eight to fifteen to a district like this one [13][27]. Smoke seeps through the gable; under the old oak,
-offerings; low fresh barrows by the field, men buried facing east, women west [13].`,
-    facts: ['Modelled on Āraiši (dendro-dated AD 835)', 'Lejstupu pilskalns — real hillfort on this spot', 'Dispersed viensētas round a hillfort district', 'Chimneyless smoke-dwellings'],
+district [13][27]. Their number and positions here are illustrative. Smoke seeps through
+the gable; offerings and burial mounds evoke regional traditions, whose use at this
+particular farm has not been established.`,
+    facts: ['Inspired by ninth–tenth-century Āraiši', 'Lejstupu: documented hillfort, interpreted defences', 'Chimneyless smoke-dwellings'],
   },
   {
     year: 1860, label: '1860', title: 'Brezgi under Nēķens manor',
+    evidence: 'Documented manor history; representative farm buildings. The central Brezgi farm and family-name connection are conjectural.',
     body: `The parish now bears a German name — Nötkenshof, Nēķene, after the Notken family
 who held it from 1601; since 1856 the lords are the von Panders [2][3]. Serfdom ended in
 Vidzeme in 1819 and families took surnames in 1826 — often from the farm or hill where
@@ -52,33 +58,34 @@ hill, on the old road that climbs right over it [2]. Ride south and see.`,
   },
   {
     year: 1935, label: '1935', title: 'Taurene, Latvia',
+    evidence: 'Historical maps guide settlement and woodland. Building forms and field boundaries remain approximate.',
     body: `Independent Latvia's 1920 agrarian reform broke the manors — Nēķena's fields
 alone became 72 new farms — and the German aristocrats left [9][3]. In 1925 the
 schoolteacher Kārlis Bormanis, author of Latvia's first geography textbook, persuaded the
-parish council to restore the ancient name: Taurene, for the aurochs (tauri) that once
+parish council to adopt the name Taurene, recalling the aurochs (tauri) that once
 grazed these forests. It took effect on New Year's Day 1926 [1][2][3]. The brick new
-manor — neo-Renaissance, 1888 — now houses the parish's civic life, the Latvian flag over
-its door [2][3]. The farm has glass windows, a shingle roof, an orchard; telephone poles
+manor — neo-Renaissance, its roof-raising celebrated in 1888 — stands beside the
+older palace, which the parish acquired for use as a clinic [3]. The farm has glass windows, a shingle roof, an orchard; telephone poles
 follow the gravel road; the stork keeps its wheel-top nest. And on Jāņi night the bonfire
 burns on Brežģa kalns — the parish's festival hill, with open-air theatre under the summit
 oak in the last summers before 1940 [7][2]. Wait for dusk, then look south.`,
-    facts: ['Renamed by teacher K. Bormanis, effective 1926', 'New manor 1888, arch. R. G. Šmēlings', 'Jāņi fires on Brežģa kalns until 1940'],
+    facts: ['Taurene name effective 1 January 1926', 'Manor roof-raising 1888; architect R. G. Šmēlings', 'Jāņi fires and open-air theatre'],
   },
   {
-    year: 2025, label: '2025', title: 'Šodiena — today',
-    body: `The land you see now wears its real present-day colours — Sentinel-2 satellite
-imagery draped over the same terrain — and the forest stands exactly where the satellite
-sees it [23]. Taurene counts around 347 people, down from the 1,303 of the 1935 parish
-description (the census itself counted 1,535); the parish is
-quiet, the forest has been coming back [4][3]. The new manor still keeps the parish's
-civic life, the stork still keeps the nest, and the storks' Latvia holds more of them
-than anywhere. On Brežģa kalns stands the observation tower raised in 2017 — eleven
+    year: 2025, label: '2025', title: 'Taurene — a 2025 landscape',
+    evidence: 'A 2025 interpretation using 2020 satellite imagery and 2026 OSM extracts. Building elevations, tree cover, water depths and shelter designs are inferred, not surveyed.',
+    body: `The modern view combines dated sources — a 2020 Sentinel-2 cloudless mosaic
+and 2026 OpenStreetMap extracts, not a survey taken in 2025. Woodland is estimated from land-cover
+colours [23]. Individual trees and houses are procedural approximations. Taurene village
+and the wider parish are different geographic units, so their population totals cannot
+be used interchangeably to measure decline [4][3]. The new manor keeps the parish's
+civic life, and the stork still keeps its nest. On Brežģa kalns stands the observation tower raised in 2017 — eleven
 metres of timber above the family hill, looking out over Alauksts, the lake chain and
 the whole country of this chronicle [7][24]. The Jāņi fire still burns beside it each
 midsummer. The aurochs are four hundred years gone — but wild grazing returned: in 2008
-the Dutch rewilding foundation ARK released a herd of Konik horses, the tarpan's hardy
-descendants, onto Taurene meadowland [25]. The name holds.`,
-    facts: ['Real Sentinel-2 land cover', 'Observation tower on Brežģa kalns, 2017', 'ARK Konik grazing herd since 2008', '347 people (2022) — the quiet century'],
+the Dutch rewilding foundation ARK released a herd of Konik horses, a hardy Polish
+landrace, onto privately owned Taurene meadowland [28]. The name holds.`,
+    facts: ['2020 imagery; 2026 OSM geometry', 'Brežģa observation tower: 2017, 11 m', 'Konik grazing introduced in 2008'],
   },
 ];
 
@@ -96,7 +103,7 @@ export const SOURCES = [
   { n: 8, t: 'The Latvian Farmstead (viensēta) — Latvijas Kultūras kanons; Latvian Ethnographic Open-Air Museum', u: 'https://kulturaskanons.lv/en/archive/latviesu-vienseta/' },
   { n: 9, t: 'Latvian Agrarian Reform Law of 1920 — Wikipedia', u: 'https://en.wikipedia.org/wiki/Latvian_Agrarian_Reform_Law_of_1920' },
   { n: 10, t: 'Archaeological monuments of Taurenes pagasts (13 sites incl. Lejstupu pilskalns #585)', u: 'http://vidzemes-arheologija.blogspot.com/p/vecpiebalgas-novads.html' },
-  { n: 11, t: 'Āraiši lake fortress — single-year ¹⁴C dating to AD 835 (Meadows et al., Radiocarbon 2023)', u: 'https://en.wikipedia.org/wiki/%C4%80rai%C5%A1i_lake_fortress' },
+  { n: 11, t: 'Meadows et al., Single-Year ¹⁴C Dating of the Lake-Fortress at Āraiši, Latvia (online 2023; Radiocarbon 66, 2024)', u: 'https://doi.org/10.1017/RDC.2023.24' },
   { n: 12, t: 'Āraiši building construction — Medieval Heritage EU', u: 'https://medievalheritage.eu/en/main-page/heritage/latvia/araisi-open-air-museum/' },
   { n: 13, t: 'Latgalians — Wikipedia (territory; burial customs)', u: 'https://en.wikipedia.org/wiki/Latgalians' },
   { n: 14, t: 'Iron Age livestock; earliest Baltic chickens (Rannamäe et al. 2021)', u: 'https://kirj.ee/wp-content/plugins/kirj/pub/arch-2-2021-160-181_20210930090939.pdf' },
@@ -113,4 +120,5 @@ export const SOURCES = [
   { n: 25, t: 'Camera feel, wind model and realism standards adapted from LAAS (MIT) — a fully procedural WebGPU world', u: 'https://github.com/Braffolk/fable5-world-demo' },
   { n: 26, t: 'Latvian Army 1:75,000 topographic map, 1920–1940 (Nēķina mž. sheet — 1935 farms, roads and forests verified against it), via vesture.dodies.lv', u: 'https://vesture.dodies.lv/' },
   { n: 27, t: 'Iron Age settlement density of NE Vidzeme — research/iron-age-settlement.md (Stivriņš et al. 2015 pollen record; Radiņš; Vasks; Āraiši hinterland estimates)', u: 'https://en.wikipedia.org/wiki/%C4%80rai%C5%A1i_lake_fortress' },
+  { n: 28, t: 'ARK Rewilding Latvia project — Konik horses and bovines introduced to Latvian grazing areas from 2005 onward', u: 'https://arkrewilding.nl/en/projects/latvia' },
 ];

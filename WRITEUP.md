@@ -1,14 +1,24 @@
 # Brezgi — a chronicle of one spot of earth
 
 *Companion write-up to the interactive reconstruction of Taurenes pagasts, Vidzeme, Latvia.
-Four moments in time on the same real terrain: ~AD 50, ~AD 950, 1860, and 1935.*
+Six moments on the same real terrain: ~10,800 BC, ~AD 50, ~AD 950, 1860, 1935, and 2025.*
+
+The modern geography anchors an interpretive reconstruction, not a surveyed model
+of each historic date. Ancient drainage, farm layouts, palisades, burial mounds and
+individual vegetation are approximate. The central family farm is staged near
+Taurene; the real Brezģis settlement is farther south. See
+[the evidence audit](research/accuracy-review.md) for source checks and limits.
+
+The modern scene is labelled 2025 but combines a 2020 Sentinel-2 cloudless mosaic
+with 2026 OpenStreetMap extracts. Building elevations, tree positions, lake and
+river depths, and bus-shelter designs are inferred rather than surveyed.
 
 ---
 
 ## 1. The place, and how it was rebuilt
 
-The simulation covers a real 4.8 × 4.8 km square of the Vidzeme Upland centred on
-**57.15944 N, 25.66472 E** — the centre of Taurene village, in the old Cēsis district.
+The simulation covers a real 8.8 × 8.8 km square of the Vidzeme Upland, extending
+south from Taurene village to Brezģis and Brežģa kalns in the old Cēsis district.
 The ground you stand on is the actual elevation model of that square [18]; the Gauja's
 course, the outline of Taurenes ezers and the little Dzērbe stream are the mapped,
 real geometries [19]; Dabaru ezers, which the young Gauja flows through just southwest
@@ -46,14 +56,12 @@ midsummer, open-air theatre in 1937–39, until the Soviet army came in 1940 [7]
 1826, and very commonly took them from the farmstead or landmark where they lived
 [5][6].
 
-**The inference:** a family named Brezgis almost certainly carries the name of this
-place — the tavern, the farm, the hill. That is not documented in a published
-genealogy we could find; it is the ordinary, overwhelmingly common pattern of Latvian
-surname formation applied to a name that exists exactly once in the landscape, in this
-parish. The simulated farmstead is placed near the village core (where the manor,
-school and river ensemble can be seen together); the real Brezgi ground lies just
-beyond the southern edge of the map, up the river valley. The southern river view
-looks toward it.
+**The inference:** a family named Brezgis may carry the name of this place — the
+tavern, the farm, or the hill. That link is plausible within ordinary Vidzeme surname
+formation, but it is not documented in a published genealogy we could find. The
+simulated family farmstead is placed near the village core (where the manor, school and
+river ensemble can be seen together); the real Brezģis settlement and Brežģa kalns lie
+in the southern part of the expanded map, up the river valley.
 
 ## 3. ~AD 50 — where the aurochs grazed
 
@@ -93,14 +101,12 @@ at the shoulder, the horses were pony-sized forest animals ancestral to the
 eastern Baltic, so the yard has just a few [14]. Across the river, the palisaded
 refuge on Lejstupu hill guards the lake shore — hillforts of this kind were the
 storm-shelters and chiefly seats of the Latgalian landscape [10][13]. The low, fresh
-barrow mounds by the field follow Latgalian practice exactly as the transition to
-barrow burial began in the 9th–10th centuries: hemispherical, four to seven metres
-across, men laid with heads to the east, women to the west [13]. Under the old oak,
-offerings — the Balts worshipped at trees and groves, not in temples.
+barrow mounds by the field and offerings under the oak evoke regional burial and
+ritual traditions [13]. Their placement at this farm is interpretive; there is no
+site-specific excavation underpinning these details.
 
-*A note on honesty:* the barrows are kept in the terrain in all four eras (earth
-mounds persist), which slightly haunts the AD 50 scene where they would not yet
-exist. Consider them a memory the land is about to acquire.
+The barrows enter the landscape in this era and persist as progressively eroded
+earthworks afterward; they are absent from the earlier wilderness and glacial scenes.
 
 ## 5. 1860 — Brezgi under Nēķens manor
 
@@ -138,7 +144,7 @@ The man who renamed it was **Kārlis Bormanis** (1877–1958) — born on a farm
 this parish, teacher at the Taurene primary school, choir director, author of
 *"Zeme"*, Latvia's first school geography textbook, holder of the Order of the Three
 Stars. At the parish council he argued that the community should not forget its own
-history, and proposed restoring the ancient name recorded here in the 1430s:
+history, and proposed reviving the name of the medieval Tauren estate:
 **Taurene** — from *taurs*, the aurochs. It took effect on 1 January 1926 [1][2][3].
 The parish coat of arms bears aurochs horns to this day [2]. The exact phrase "where
 the aurochs once grazed" survives as local tradition rather than a documented quote —
@@ -147,9 +153,9 @@ later Māra Zālīte wrote the lines the parish still quotes, *"Kur tu skriesi, 
 mans? — Uz Taureni, uz Taureni!"* [20]. The memorial stone by the road in the
 simulation carries that inheritance.
 
-The scene: the brick **new manor** (1888, architect R. G. Šmēlings, neo-Renaissance
-with its Italian villa air) now houses the parish's civic life, the Latvian flag over
-the door [2][3]. The farm has a shingle roof, framed glass windows, a porch, an
+The scene: the brick **new manor** (roof-raising in 1888, architect R. G. Šmēlings, neo-Renaissance
+with its Italian villa air) stands beside the older palace, acquired by the parish
+for a clinic [3]. The farm has a shingle roof, framed glass windows, a porch, an
 orchard; telephone poles follow the gravel road; the white stork keeps its wheel-top
 nest; the cream goes to the cooperative dairy. And on Jāņi night, fires burn on the
 hills — in the simulation on the old fort hill, and in life, most famously, on Brežģa
@@ -166,9 +172,8 @@ roofs [11][12]; the viensēta building set [8]; the manor ensemble, brewery and 
 [2][3]; livestock species and sizes [14]; burial customs [13]; the renaming [1][3];
 Brežģa kalns and its fires [7].
 
-**Interpretive license, flagged:** the farmstead's placement at the village core
-(the real Brezgi ground is ~6 km south, just off the map); the barrow mounds visible
-in eras before they were raised; the watermill (typical for a Gauja manor, not
+**Interpretive license, flagged:** the family farmstead's placement at the village core
+(the real Brezģis ground is ~6 km south, elsewhere in the map); the watermill (typical for a Gauja manor, not
 specifically documented at Nēķena); the exact yard layouts; everything about the
 weather. No people are depicted — the village keeps their traces instead: smoke,
 laundry, a loaded cart, an axe left in the block.
@@ -189,11 +194,12 @@ Brezgi tavern, now has its tavern [2].
 Two eras were added at the ends of time. **~10,800 BC**: Younger Dryas tundra —
 dwarf-birch heath, glacial erratics, reindeer, a milky meltwater Gauja, dead ice
 melting in the future lake basins (kettle-hole collapse continued into the early
-Holocene [21]); no humans yet — Latvia's first reindeer hunters arrive ~10,500 BC at
-Salaspils Laukskola on the Daugava [22]; the aurora stands over the moraines at dusk.
+Holocene [21]). No humans are depicted; this is an artistic choice, not evidence
+of an unvisited site. Late Palaeolithic hunters are known from Latvia [22].
 **2025**: the terrain draped in real Sentinel-2 imagery (EOX s2cloudless, CC-BY 4.0
-[23]) with the simulated forest placed exactly where the satellite sees forest; the
-quiet parish of ~347 people; the tower on the family hill.
+[23]) with woodland estimated from image colours and procedural individual trees;
+the tower on the family hill. Village and parish population totals refer to
+different areas and must not be compared directly as a population trend.
 
 The engine gained a physical sky driving the light, wind through every plant, a
 walked-at-eye-level mode and free flight, near-field grass, terrain detail and water
@@ -204,6 +210,59 @@ Additional sources: [21] Stivriņš et al. 2017, *The Holocene* (dead-ice meltdo
 Zelčs et al., *Deglaciation history of Latvia*. [22] *Salaspils Laukskola Revisited*,
 Archaeologia Baltica. [23] Sentinel-2 cloudless by EOX (CC-BY 4.0, modified Copernicus
 data). [24] EnterGauja — Brežģa kalns tower. [25] github.com/Braffolk/fable5-world-demo.
+
+## Third edition: the river becomes a river
+
+The Gauja had been a flat blue sheet with a texture sliding diagonally across
+it. It is now built the way `~/projects/brook` builds water, on the same
+principle: **depth and turbulence are baked into the mesh from the same ground
+the terrain draws, so the shader and the geometry cannot disagree about where
+the shallows are.**
+
+What that bought, and what it cost:
+
+- **The bed is no longer flat.** An alluvial channel scours pools at its bend
+  apexes and leaves gravel riffles at the crossings between them, one pair every
+  five to seven channel widths. The Gauja's real mapped course already carries
+  that rhythm — 197 curvature sign changes over 16.7 km, one crossing every 85 m
+  against a mean width of 19.4 m — so the bed law reads the meanders off OSM
+  rather than imposing an invented wave. Pools carve to 3.05 m, riffles to 1.78.
+- **The water flows downstream.** Every water body shared one normal map, and
+  the ripples were animated by moving that texture's offset — so the river, the
+  seven lakes and the mill pond all slid north-west together, as one sheet, at
+  the same speed, regardless of which way the channel ran. Flow is now a
+  per-material uniform, and the ribbon's v axis is arc length along the course,
+  so scrolling it *is* downstream advection: 0.45 m/s on the Gauja (1.1 m/km of
+  fall), 0.75 on the brooks (6.9 m/km), a wind-drift on the lakes.
+- **You can see the bottom.** Shallow water is now clear and warm-toned, deep
+  water dark; but the terrain paints its riverbed on a 17.2 m mesh, and the
+  Gauja is 19 m wide, so most cells crossing the channel have no vertex inside
+  it and the "bed" was largely interpolated meadow. The channel now carries its
+  own bed mesh — silt in the pools, washed gravel over the crossings, pale
+  cobble on the point bars.
+- **The banks have trees on them.** The tree grid only plants where the forest
+  masks say "forest", and along most of the Gauja both the 1935 Army sheet and
+  the satellite say "meadow" — so the river ran through mown grass from source
+  to edge of tile. A river corridor carries its own fringe regardless: alder in
+  the wet ground at the foot of the bank, and a new **willow** species leaning
+  out over the water. Not continuous — farmers mowed to the water where they
+  could — so a low-frequency noise gates it into stands with open reaches
+  between them.
+
+Two hard-won fixes turned out never to have run. `onBeforeCompile` fires
+*before* three.js expands `#include`, so a `.replace()` aimed at a string that
+lives inside a ShaderChunk matches nothing and the patch is simply absent — no
+error, no warning. The water's second ripple octave and the grass's
+double-sided lighting fix were both written that way. Both now splice the
+resolved chunk and assert the substitution took.
+
+And the roads: 10–12% of every carriageway vertex in the parish sat *under* the
+ground it crossed, up to 1.26 m deep, because the ribbon seated its edges off
+the **centreline** height. A road is a graded bench — cut on the uphill side,
+filled on the downhill one — so on any cross-slope the uphill edge sank into
+the hill and the road visibly dipped in and out of the landscape.
+`data/roadcheck.mjs` now guards this, along with the shrubs that were standing
+in the middle of it.
 
 ## Sources
 
@@ -217,7 +276,7 @@ data). [24] EnterGauja — Brežģa kalns tower. [25] github.com/Braffolk/fable5
 8. The Latvian Farmstead — Latvijas Kultūras kanons; Latvian Ethnographic Open-Air Museum. <https://kulturaskanons.lv/en/archive/latviesu-vienseta/>
 9. Latvian Agrarian Reform Law of 1920 — Wikipedia. <https://en.wikipedia.org/wiki/Latvian_Agrarian_Reform_Law_of_1920>
 10. Arheoloģiskie pieminekļi Vidzemē — Vecpiebalgas novads (register nos. 580–592). <http://vidzemes-arheologija.blogspot.com/p/vecpiebalgas-novads.html>
-11. Āraiši lake fortress — Wikipedia; Meadows et al., single-year ¹⁴C dating (AD 835), *Radiocarbon* 2023. <https://en.wikipedia.org/wiki/%C4%80rai%C5%A1i_lake_fortress>
+11. Meadows et al., *Single-Year ¹⁴C Dating of the Lake-Fortress at Āraiši, Latvia*. Online 2023; *Radiocarbon* 66(6), 2024, 1929–1939. <https://doi.org/10.1017/RDC.2023.24>
 12. Āraiši — building construction. Medieval Heritage EU. <https://medievalheritage.eu/en/main-page/heritage/latvia/araisi-open-air-museum/>
 13. Latgalians — Wikipedia (territory; burial customs). <https://en.wikipedia.org/wiki/Latgalians>
 14. Rannamäe et al., "In Search of Estonia's Earliest Chicken," *Est. J. Archaeology* 25(2) 2021; Iron Age livestock zooarchaeology. <https://kirj.ee/wp-content/plugins/kirj/pub/arch-2-2021-160-181_20210930090939.pdf>

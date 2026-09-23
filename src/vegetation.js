@@ -6,7 +6,7 @@
 // Species mix follows Vidzeme Upland ecology: spruce/pine on the high
 // moraine, birch and alder along water, oaks on the terrace, manor lindens.
 import * as THREE from 'three';
-import { heightAt } from './terrain.js';
+import { heightAt, meshHeightAt } from './terrain.js';
 import { forestDensity, distToRiver, fieldAt, farmSiteKept, nearStagePOI, distToRoadEx, ROAD_HALF_W, LOC } from './landuse.js';
 import { RIVER_PTS } from './geodata.js';
 import { RIVER, STREAM_CHANNELS, LAKE_SHORES, vegExcluded, lakeAt, riverAt, bankCharAt, bankCharSideAt, lakeShoreDistAt, waterLevelAt } from './riverzone.js';
@@ -150,6 +150,13 @@ function barkTex(kind) {
         ctx.fillStyle = `rgba(180,170,150,${0.2 + bn.rng() * 0.3})`;
         ctx.fillRect(bn.rng() * w, bn.rng() * h, 4 + bn.rng() * 8, 1.4);
       }
+    } else if (kind === 'willow') {
+      // deeply ridged grey-brown, coarser and paler than alder
+      vstreaks('#6b6152', 'rgba(28,24,18,0.85)', 58, 3.4);
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = `rgba(150,142,124,${0.14 + bn.rng() * 0.22})`;
+        ctx.fillRect(bn.rng() * w, bn.rng() * h, 2 + bn.rng() * 4, 18 + bn.rng() * 60);
+      }
     } else if (kind === 'linden') {
       vstreaks('#77705f', 'rgba(40,36,28,0.7)', 55, 2.4);
     } else if (kind === 'snag') {
@@ -196,14 +203,34 @@ function cardMaterial(atlas) {
        sampledDiffuseColor.rgb *= sampledDiffuseColor.rgb;
        diffuseColor *= sampledDiffuseColor;
        #endif`);
+    // Crown-bent normals describe a volume, not the plane of a card.
+    // Flipping them on backfaces turns half of each canopy inward and black.
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>',
+      THREE.ShaderChunk.normal_fragment_begin.replace(
+        'float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;', 'float faceDirection = 1.0;'));
   };
   m.customDepthMaterial = null; // set on the mesh, not the material
   return m;
 }
 function cardDepthMaterial(atlas) {
-  return new THREE.MeshDepthMaterial({
+  return windifyVeg(new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking, map: atlas, alphaTest: 0.38,
-  });
+  }));
+}
+
+// Complementary cutout transitions preserve a tree's physical size. Scaling
+// one tree down while growing its replacement made the forest visibly sprout.
+function promotionMaterial(base, far=false) {
+  const m=base.clone(),compile=base.onBeforeCompile,key=base.customProgramCacheKey();
+  m.onBeforeCompile=sh=>{
+    compile.call(base,sh);
+    sh.vertexShader='attribute float aLodFade; varying float vLodFade;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n vLodFade=aLodFade;');
+    sh.fragmentShader='varying float vLodFade;\n'+sh.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
+      float lodNoise=fract(sin(dot(floor(gl_FragCoord.xy),vec2(12.9898,78.233)))*43758.5453);
+      ${far?'if(vLodFade>=1.0 || lodNoise<vLodFade) discard;':'if(vLodFade<=0.0 || lodNoise>vLodFade) discard;'}
+    `);
+  };
+  m.customProgramCacheKey=()=>key+(far?':lod-far':':lod-near');return m;
 }
 
 function makeInstanced(geo, mat, count, shadows) {
@@ -218,6 +245,8 @@ function makeInstanced(geo, mat, count, shadows) {
 
 function refreshBounds(m) {
   m.computeBoundingSphere();
+  // Shader wind moves vertices outside their static geometry bounds.
+  if (m.boundingSphere) m.boundingSphere.radius += 3;
   m.frustumCulled = true;
 }
 
@@ -299,11 +328,11 @@ function osmBuildingAt(x, z, margin = 0) {
 
 const CROWN_R = {
   alder: 4.2, birch: 6.4, spruce: 8.5, pine: 7.7, oak: 9.6,
-  linden: 8.6, apple: 3.3, snag: 4.0, shrub: 1.2,
+  linden: 8.6, apple: 3.3, snag: 4.0, shrub: 1.2, willow: 6.2,
 };
 const CROWN_REF_H = {
   alder: 8.2, birch: 13.3, spruce: 17.4, pine: 19.5, oak: 13.3,
-  linden: 15, apple: 4, snag: 10.3, shrub: 1.2,
+  linden: 15, apple: 4, snag: 10.3, shrub: 1.2, willow: 9.5,
 };
 function crownRadius(kind, h, tier = 'full') {
   const scale = clamp(h / CROWN_REF_H[kind], 0.72, 1.35);
@@ -336,13 +365,13 @@ function cellRng(ix, iz, salt) {
 }
 
 // species build order (also impostor atlas order)
-const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'linden', 'apple', 'shrub', 'snag'];
+const SP_KEYS = ['spruce', 'pine', 'birch', 'oak', 'alder', 'willow', 'linden', 'apple', 'shrub', 'snag'];
 // instance capacity per species: [full, far]. Two tiers only — real geometry
 // close to the points of interest, captured impostors beyond.
 const CAPS = {
   spruce: [2100, 175000], pine: [1400, 125000], birch: [1700, 150000],
   oak: [700, 42000], alder: [1100, 61000], linden: [330, 13000],
-  apple: [110, 1700], shrub: [8000, 55000], snag: [260, 0],
+  apple: [110, 1700], shrub: [8000, 55000], snag: [260, 0], willow: [900, 26000],
 };
 const FULL_R = 260; // full-detail radius around points of interest
 
@@ -384,46 +413,48 @@ export function buildVegetation(scene, renderer) {
   // reads as fragmented, crawling silhouettes — a plain mid alpha test keeps
   // far crowns solid
   const impostorMat = new THREE.MeshBasicMaterial({
-    map: impostor.texture, alphaTest: 0.22, side: THREE.DoubleSide, fog: true,
+    map: impostor.texture, alphaTest: 0.16, side: THREE.DoubleSide, fog: true,
   });
+  impostorMat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <project_vertex>', `
+      // One view-facing silhouette, not intersecting cards and a square lid.
+      // Centre anchoring also preserves the canopy from elevated viewpoints.
+      mat4 treeMatrix = modelMatrix * instanceMatrix;
+      vec3 centre = (treeMatrix * vec4(0.0, 0.5, 0.0, 1.0)).xyz;
+      float sx = length(treeMatrix[0].xyz), sy = length(treeMatrix[1].xyz);
+      vec3 right = normalize(vec3(viewMatrix[0][0], 0.0, viewMatrix[2][0]));
+      vec3 up = vec3(0.0, 1.0, 0.0);
+      vec3 facingPosition = centre + right * position.x * sx + up * (position.y - 0.5) * sy;
+      vec4 mvPosition = viewMatrix * vec4(facingPosition, 1.0);
+      gl_Position = projectionMatrix * mvPosition;
+    `);
+  };
+  impostorMat.customProgramCacheKey = () => 'tree-view-facing-v1';
+  const fadingImpostorMat=promotionMaterial(impostorMat,true);
   const farMeshes = {};
   impostorEntries.forEach((e, i) => {
     const tile = impostor.tiles[i];
-    // unit-height cross-quads, uv from the atlas tile
-    const w = tile.halfW / tile.height;
+    // Preserve skeleton-scale height despite transparent capture padding.
+    const referenceHeight = e.height / 1.04;
+    const w = tile.halfW / referenceHeight, top = tile.height / referenceHeight;
     const pos = [], uv = [], idx = [], nrm = [];
-    // three planes at 60°: two-plane crosses read as flat cutouts from the
-    // diagonals — exactly where a walking player usually approaches them
-    for (const ang of [0, Math.PI / 3, (2 * Math.PI) / 3]) {
+    // A single yaw-facing silhouette with the trunk rooted in the terrain.
+    for (const ang of [0]) {
       const c = Math.cos(ang), s = Math.sin(ang);
       const b = pos.length / 3;
-      pos.push(-w * c, 0, -w * s, w * c, 0, w * s, w * c, 1, w * s, -w * c, 1, -w * s);
+      pos.push(-w * c, 0, -w * s, w * c, 0, w * s, w * c, top, w * s, -w * c, top, -w * s);
       uv.push(tile.u0, 0, tile.u1, 0, tile.u1, 1, tile.u0, 1);
       for (let k = 0; k < 4; k++) nrm.push(-s, 0.25, c);
       idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-    }
-    // horizontal canopy lid at crown height: from the bird's-eye view the
-    // vertical planes vanish into stroke marks — the lid samples the crown
-    // half of the same tile and reads as foliage mass from above
-    {
-      const b = pos.length / 3;
-      const yl = 0.66;
-      pos.push(-w, yl, -w, w, yl, -w, w, yl, w, -w, yl, w);
-      // sample the CROWN CORE of the tile, not the whole crown half: the
-      // wispy crown edges are mostly alpha and the lid discarded to specks —
-      // the dense core reads as closed canopy from the air
-      const uw = tile.u1 - tile.u0;
-      uv.push(tile.u0 + uw * 0.24, 0.56, tile.u1 - uw * 0.24, 0.56,
-              tile.u1 - uw * 0.24, 0.92, tile.u0 + uw * 0.24, 0.92);
-      for (let k = 0; k < 4; k++) nrm.push(0, 1, 0);
-      idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
     geo.setIndex(idx);
-    farMeshes[e.key] = makeInstanced(geo, impostorMat, CAPS[e.key][1], false);
+    geo.setAttribute('aLodFade',new THREE.InstancedBufferAttribute(new Float32Array(CAPS[e.key][1]),1).setUsage(THREE.DynamicDrawUsage));
+    farMeshes[e.key] = makeInstanced(geo, fadingImpostorMat, CAPS[e.key][1], false);
+    farMeshes[e.key].name = `far:${e.key}`;
     group.add(farMeshes[e.key]);
   });
 
@@ -434,8 +465,10 @@ export function buildVegetation(scene, renderer) {
   for (const key of SP_KEYS) {
     const S = species[key];
     const depthMat = S.cMat ? cardDepthMaterial(S.twigAtlas) : null;
+    const barkDepth = windifyVeg(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }));
     const mk = (variant, cap, vi, cell) => {
       const bark = makeInstanced(variant.bark, S.bMat, cap, true);
+      bark.customDepthMaterial = barkDepth;
       let cards = null;
       if (S.cMat) {
         cards = makeInstanced(variant.cards, S.cMat, cap, true);
@@ -459,23 +492,28 @@ export function buildVegetation(scene, renderer) {
   // ---- impostor promotion pool ---------------------------------------------
   // The two LOD tiers are keyed to POI distance, so a walker OUTSIDE the six
   // full-detail discs met flat billboard impostors at arm's length. A small
-  // pool of real trees follows the camera instead: the nearest impostors
-  // collapse to zero scale and a full-geometry stand-in takes each one's
-  // place until the camera moves on.
-  const PROM_CAP = 56, PROM_R = 78, PROM_CELL = 64;
+  // pool of real trees follows the camera: complementary coverage fades
+  // replace the nearest impostors until the camera moves on.
+  const PROM_CAP = 72, PROM_R = 125, PROM_CELL = 64;
   const promPool = {};
   for (const key of SP_KEYS) {
     if (!CAPS[key][1]) continue;
     const S = species[key];
-    const bark = makeInstanced(S.full[0].bark, S.bMat, PROM_CAP, true);
+    const fade=new THREE.InstancedBufferAttribute(new Float32Array(PROM_CAP),1).setUsage(THREE.DynamicDrawUsage);
+    const barkGeo=S.full[0].bark.clone();barkGeo.setAttribute('aLodFade',fade);
+    const bark = makeInstanced(barkGeo, promotionMaterial(S.bMat), PROM_CAP, true);
+    bark.customDepthMaterial = promotionMaterial(windifyVeg(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking })));
+    bark.name = `promoted:${key}:bark`;
     let cards = null;
     if (S.cMat) {
-      cards = makeInstanced(S.full[0].cards, S.cMat, PROM_CAP, true);
-      cards.customDepthMaterial = cardDepthMaterial(S.twigAtlas);
+      const cardGeo=S.full[0].cards.clone();cardGeo.setAttribute('aLodFade',fade);
+      cards = makeInstanced(cardGeo, promotionMaterial(S.cMat), PROM_CAP, true);
+      cards.name = `promoted:${key}:cards`;
+      cards.customDepthMaterial = promotionMaterial(cardDepthMaterial(S.twigAtlas));
     }
     group.add(bark);
     if (cards) group.add(cards);
-    promPool[key] = { bark, cards, hRef: S.full[0].skel.height, active: new Map(), free: [], trans: new Map() };
+    promPool[key] = { bark, cards, fade, hRef: S.full[0].skel.height, active: new Map(), free: [], trans: new Map() };
   }
   const farPlaced = {};   // per species: { entries, byCell, widen } for the ACTIVE era
 
@@ -532,42 +570,61 @@ export function buildVegetation(scene, renderer) {
   const twigGeo = new THREE.CylinderGeometry(0.014, 0.02, 1, 4);
   twigGeo.rotateZ(Math.PI / 2);
   const twigs = makeInstanced(twigGeo, plainM(0x594836), 2000, false);
-  // leaf drift: an IRREGULAR 12-gon — the old 7-segment circle read as an
-  // angular plate with straight edges from any walking distance
+  // Leaf drift is a loose cluster of individual leaves. A single metre-wide
+  // plate could never follow terrain curvature and visibly sliced slopes.
   const litterGeo = (() => {
     const lr = makeNoise(4242).rng;
-    const pts = [];
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const r = 0.68 + lr() * 0.46;
-      pts.push(new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r));
+    const pos = [], color = [], idx = [];
+    for (let i = 0; i < 11; i++) {
+      const a = lr() * Math.PI * 2, rr = Math.sqrt(lr()) * 0.72;
+      const cx = Math.cos(a) * rr, cz = Math.sin(a) * rr;
+      const yaw = lr() * Math.PI * 2, c = Math.cos(yaw), s = Math.sin(yaw);
+      const w = 0.035 + lr() * 0.045, l = 0.09 + lr() * 0.1;
+      const base = pos.length / 3;
+      for (const [lx, ly, lz] of [[-w, 0, 0], [0, 0.006, l], [w, 0, 0], [0, 0.003, -l]]) {
+        pos.push(cx + lx * c - lz * s, ly, cz + lx * s + lz * c);
+        const tint = 0.82 + lr() * 0.24;
+        color.push(0.42 * tint, 0.32 * tint, 0.19 * tint);
+      }
+      idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
-    const g = new THREE.ShapeGeometry(new THREE.Shape(pts));
-    g.rotateX(-Math.PI / 2);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(color, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
     return g;
   })();
   const litterMat = new THREE.MeshLambertMaterial({
-    color: 0x6a5638, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    vertexColors: true, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
   });
   const litter = makeInstanced(litterGeo, litterMat, 1000, false);
+  const groundUp = new THREE.Vector3(0, 1, 0);
+  const groundNormal = new THREE.Vector3();
+  const groundYaw = new THREE.Quaternion();
+  const alignToGround = (d, x, z, yaw, sample = 0.7) => {
+    const gx = (meshHeightAt(x + sample, z) - meshHeightAt(x - sample, z)) / (2 * sample);
+    const gz = (meshHeightAt(x, z + sample) - meshHeightAt(x, z - sample)) / (2 * sample);
+    groundNormal.set(-gx, 1, -gz).normalize();
+    d.quaternion.setFromUnitVectors(groundUp, groundNormal);
+    groundYaw.setFromAxisAngle(groundNormal, yaw);
+    d.quaternion.premultiply(groundYaw);
+  };
   const microProps = [
-    ['anthill', anthills, (d, e) => { d.position.set(e[0], e[1] + e[3] * 0.12, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
-    ['molehill', molehills, (d, e) => { d.position.set(e[0], e[1] + 0.02, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
-    ['shroomC', shroomsC, (d, e) => { d.position.set(e[0], e[1], e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
-    ['shroomB', shroomsB, (d, e) => { d.position.set(e[0], e[1], e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
-    ['cone', conesM, (d, e) => { d.position.set(e[0], e[1] + 0.03, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0.4, e[4], 0); }],
-    ['twig', twigs, (d, e) => { d.position.set(e[0], e[1] + 0.03, e[2]); d.scale.set(e[3], 1, 1); d.rotation.set((e[4] % 0.2) - 0.1, e[4], 0); }],
+    ['anthill', anthills, (d, e) => { d.position.set(e[0], meshHeightAt(e[0], e[2]) + e[3] * 0.12, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['molehill', molehills, (d, e) => { d.position.set(e[0], meshHeightAt(e[0], e[2]) + 0.02, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['shroomC', shroomsC, (d, e) => { d.position.set(e[0], meshHeightAt(e[0], e[2]), e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['shroomB', shroomsB, (d, e) => { d.position.set(e[0], meshHeightAt(e[0], e[2]), e[2]); d.scale.setScalar(e[3]); d.rotation.set(0, e[4], 0); }],
+    ['cone', conesM, (d, e) => { d.position.set(e[0], meshHeightAt(e[0], e[2]) + 0.03, e[2]); d.scale.setScalar(e[3]); d.rotation.set(0.4, e[4], 0); }],
+    ['twig', twigs, (d, e) => { d.position.set(e[0], meshHeightAt(e[0], e[2]) + 0.03, e[2]); d.scale.set(e[3], 1, 1); d.rotation.set((e[4] % 0.2) - 0.1, e[4], 0); }],
     ['litter', litter, (d, e) => {
-      // tilt to the local slope and stay small — flat metre discs sliced
-      // into sloped ground on one side while hovering on the other
-      const gx = (heightAt(e[0] + 0.8, e[2]) - heightAt(e[0] - 0.8, e[2])) / 1.6;
-      const gz = (heightAt(e[0], e[2] + 0.8) - heightAt(e[0], e[2] - 0.8)) / 1.6;
-      d.position.set(e[0], e[1] + 0.05, e[2]);
+      d.position.set(e[0], meshHeightAt(e[0], e[2]) + 0.018, e[2]);
       d.scale.setScalar(e[3] * 0.65);
-      d.rotation.set(Math.atan(gz), e[4], -Math.atan(gx));
+      alignToGround(d, e[0], e[2], e[4]);
     }],
   ];
-  microProps.forEach(([, m]) => group.add(m));
+  microProps.forEach(([key, m]) => { m.name = `micro:${key}`; group.add(m); });
 
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
@@ -665,11 +722,19 @@ export function buildVegetation(scene, renderer) {
 
         // understory in closed forest, near tiers only: ferns, hazel-like
         // underbrush and bramble tangles — an old-growth floor is BUSY
+        //
+        // Every item below is scattered 4.5-6 m off its parent sample, so it
+        // must be gated at its FINAL position — the same lesson the micro
+        // props learned. These checked water and buildings but never the
+        // road, which is how bushes ended up standing on the carriageway.
+        const okUnder = (px, pz, py, m, crown) =>
+          !vegExcluded(px, pz, py, era, m) && !buildingAt(era, px, pz, m * 0.5)
+          && roadClear(era, px, pz, crown);
         if (tier !== 'far' && d > 0.42) {
           if (era >= 1 && rng() < 0.28) {
             const ux = x + (rng() - 0.5) * 9, uz = z + (rng() - 0.5) * 9;
             const uy = heightAt(ux, uz);
-            if (!vegExcluded(ux, uz, uy, era, 2.5) && !buildingAt(era, ux, uz, 1.2)) {
+            if (okUnder(ux, uz, uy, 2.5, 1.1)) {
               // low dark tangle (bramble) or a taller hazel-ish bush.
               // hazel capped at ~1.9m and WIDENED: the shrub species is
               // grown for 0.7-1.3m — stretched to 2.8m it was all trunk
@@ -685,27 +750,27 @@ export function buildVegetation(scene, renderer) {
           if (rng() < (era <= 2 ? 0.55 : 0.3)) {
             const fx = x + (rng() - 0.5) * 10, fz = z + (rng() - 0.5) * 10;
             const fy = heightAt(fx, fz);
-            if (!vegExcluded(fx, fz, fy, era, 3) && !buildingAt(era, fx, fz, 1)) {
+            if (okUnder(fx, fz, fy, 3, 0.6)) {
               lists.fern.push([fx, fy, fz, 0.7 + rng() * 0.9, rng() * 6.3]);
             }
           }
           if (rng() < 0.08) {
             const rx = x + (rng() - 0.5) * 10, rz = z + (rng() - 0.5) * 10;
             const ry = heightAt(rx, rz);
-            if (!vegExcluded(rx, rz, ry, era, 1) && !buildingAt(era, rx, rz, 0.8)) {
+            if (okUnder(rx, rz, ry, 1, 0.5)) {
               lists.rock.push([rx, ry, rz, 0.12 + Math.pow(rng(), 1.7) * 0.55, rng() * 6.3]);
             }
           }
           if ((era === 1 || era === 2) && rng() < 0.12) {
             const lx = x + (rng() - 0.5) * 12, lz = z + (rng() - 0.5) * 12;
             const ly = heightAt(lx, lz);
-            if (!vegExcluded(lx, lz, ly, era, 1) && !buildingAt(era, lx, lz, 0.8)) {
+            if (okUnder(lx, lz, ly, 1, 1.0)) {
               lists.log.push([lx, ly, lz, rng() * 6.3, 0.8 + rng() * 0.7, (rng() * 3) | 0]);
             }
           } else if (era >= 3 && rng() < 0.05) {
             const sx = x + (rng() - 0.5) * 9, sz = z + (rng() - 0.5) * 9;
             const sy = heightAt(sx, sz);
-            if (!vegExcluded(sx, sz, sy, era, 1) && !buildingAt(era, sx, sz, 0.8)) {
+            if (okUnder(sx, sz, sy, 1, 0.7)) {
               lists.stump.push([sx, sy, sz, rng() * 6.3, 0.8 + rng() * 0.6]);
             }
           }
@@ -743,6 +808,73 @@ export function buildVegetation(scene, renderer) {
         }
       }
     }
+    // ---- RIPARIAN GALLERY --------------------------------------------------
+    // The banks came out bare. The tree grid only plants where forestDensity
+    // says "forest", and along most of the Gauja the 1935 sheet and the
+    // satellite both say "meadow" — so the river ran through mown grass from
+    // source to edge of tile, which is not what a Vidzeme river looks like.
+    //
+    // A river corridor carries its own wooded fringe regardless of what the
+    // land beyond it is doing: black and grey alder in the wet ground at the
+    // foot of the bank, willow leaning out over the water
+    // (research/taurene-local-history.md §1, "alder in wetter lowlands and
+    // streamsides"). It is NOT continuous — farmers mowed to the water where
+    // they could, and left scrub where the bank was too steep or too wet — so
+    // a low-frequency noise gates it into stands with open meadow between.
+    {
+      const galleryNoise = makeNoise(5309);
+      // `inset` starts the band OUTSIDE riverzone's exclusion zone, which
+      // reaches hw+10 wherever the ground sits under waterline+0.45 — i.e.
+      // across the whole carved shelf. Planting inside it (the obvious place
+      // for a bank tree) silently placed nothing at all: the first cut of
+      // this pass produced twelve alders along 16.7 km of river.
+      const chans = [{ chan: RIVER, step: 7, inset: 11.5, reach: 17, density: 1 },
+        ...STREAM_CHANNELS.map((c) => ({ chan: c, step: 6, inset: 5.5, reach: 9, density: 0.8 }))];
+      for (const { chan, step, inset, reach, density } of chans) {
+        const gap = Math.max(1, Math.round(step / (chan.sampleS[1] - chan.sampleS[0] || 4)));
+        for (let i = 2; i < chan.samples.length - 2; i += gap) {
+          const [sx, sz, , hw] = chan.samples[i];
+          // stands ~130 m long with open reaches between them
+          const stand = smoothstep(0.40, 0.58, galleryNoise.fbm(chan.sampleS[i] / 130, chan.seedY, 2));
+          if (stand <= 0) continue;
+          const [ax, az] = chan.samples[i - 1], [bx, bz] = chan.samples[i + 1];
+          let tx = bx - ax, tz = bz - az;
+          const tl = Math.hypot(tx, tz) || 1;
+          tx /= tl; tz /= tl;
+          for (const side of [-1, 1]) {
+            const n = 1 + ((rng() * 4.5 * density * stand) | 0);
+            for (let k = 0; k < n; k++) {
+              // just outside the excluded margin, thinning outward
+              const off = hw + inset + Math.pow(rng(), 0.8) * reach;
+              const jitter = (rng() - 0.5) * step * 1.3;
+              const x = sx - tz * off * side + tx * jitter;
+              const z = sz + tx * off * side + tz * jitter;
+              const y = heightAt(x, z);
+              // a willow standing in a ploughed field is worse than a bare bank
+              if (era >= 2 && fieldAt(era, x, z)) continue;
+              if (forestDensity(era, x, z, y) > 0.55) continue;   // real forest already handles it
+              // willow takes the front rank nearest the water, alder behind it
+              const willowy = off < hw + inset + reach * 0.5 && rng() < 0.72;
+              const kind = willowy ? 'willow' : rng() < 0.78 ? 'alder' : 'birch';
+              const h = (willowy ? 7.5 : kind === 'alder' ? 8.5 : 12) * (0.7 + rng() * 0.6);
+              const crownR = crownRadius(kind, h);
+              // keep the crown out of the channel, the roads and the yards
+              if (!finalTreeGate(era, x, z, y, crownR * 0.55, crownR * 0.7)) continue;
+              const dp = dPOI(x, z);
+              const tier = dp < FULL_R ? 'full' : 'far';
+              // Willows lean out over the open water — that is where the
+              // light is. Same Euler convention as the grid pass's alders:
+              // for a lean direction (dx, dz), tilt is (dz, -dx) * amount.
+              const lean = (willowy ? 0.10 : 0.045) + rng() * 0.05;
+              const outX = -tz * side, outZ = tx * side;       // outward unit normal
+              lists[kind][tier].push([x, y, z, h, rng() * 6.3, 0.86 + rng() * 0.28,
+                -outZ * lean, outX * lean]);
+            }
+          }
+        }
+      }
+    }
+
     // molehills: fresh dark casts on open meadow (any era with soil life)
     if (era >= 1) {
       const stepM = 34, NM = Math.floor(EXT / stepM);
@@ -895,7 +1027,7 @@ export function buildVegetation(scene, renderer) {
         for (let j = 0; j < cellList.length; j++) {
           const [[x, y, z, h, rot, tint, leanX = 0, leanZ = 0], i] = cellList[j];
           const s = h / hRef;
-          dummy.position.set(x, y - 0.08 * s, z);
+          dummy.position.set(x, meshHeightAt(x, z) - 0.08 * s, z);
           dummy.rotation.set(leanX, rot, leanZ);
           dummy.scale.set(s * (0.92 + 0.16 * ((i * 7919) % 13) / 13), s, s * (0.92 + 0.16 * ((i * 104729) % 17) / 17));
           dummy.updateMatrix();
@@ -919,7 +1051,9 @@ export function buildVegetation(scene, renderer) {
     });
   }
 
+  let activeEra = 4;
   function setEra(era) {
+    activeEra = era;
     const lists = placementsFor(era);
     // reset the promotion pool — far buffers are about to be refilled
     for (const key of SP_KEYS) {
@@ -927,8 +1061,14 @@ export function buildVegetation(scene, renderer) {
       if (!pool) continue;
       pool.active.clear();
       pool.free.length = 0;
+      // Cross-fades in flight index the OUTGOING era's far-tier entry list.
+      // Carried into the new era they either address a shrunken list (throwing
+      // inside the animation loop, which kills the frame callback for good) or
+      // silently animate an unrelated tree down to zero scale.
+      pool.trans.clear();
+      pool.fade.array.fill(0);pool.fade.needsUpdate=true;
       for (let s = 0; s < PROM_CAP; s++) {
-        pool.free.push(s);
+        pool.free.push(PROM_CAP - 1 - s);
         dummy.position.set(0, -500, 0);
         dummy.rotation.set(0, 0, 0);
         dummy.scale.set(0.001, 0.001, 0.001);
@@ -936,15 +1076,16 @@ export function buildVegetation(scene, renderer) {
         pool.bark.setMatrixAt(s, dummy.matrix);
         if (pool.cards) pool.cards.setMatrixAt(s, dummy.matrix);
       }
-      pool.bark.count = PROM_CAP;
+      pool.bark.count = 0;
       pool.bark.instanceMatrix.needsUpdate = true;
-      if (pool.cards) { pool.cards.count = PROM_CAP; pool.cards.instanceMatrix.needsUpdate = true; }
+      if (pool.cards) { pool.cards.count = 0; pool.cards.instanceMatrix.needsUpdate = true; }
     }
     promLast.x = NaN;
     for (const key of SP_KEYS) {
       fillTier(meshes[key].full, meshes[key].fullH, lists[key].full);
       const farM = farMeshes[key];
       if (farM) {
+        farM.geometry.attributes.aLodFade.array.fill(0);farM.geometry.attributes.aLodFade.needsUpdate=true;
         const arr = lists[key].far;
         const n = Math.min(arr.length, farM.instanceMatrix.count);
         // over cap: stride-subsample (unbiased thin — first-n deforested the
@@ -957,7 +1098,7 @@ export function buildVegetation(scene, renderer) {
         const fp = { entries: new Array(n), byCell: new Map(), widen };
         for (let i = 0; i < n; i++) {
           const [x, y, z, h, , tint, leanX = 0, leanZ = 0] = arr[(i * stride) | 0];
-          dummy.position.set(x, y - 0.4, z);
+          dummy.position.set(x, meshHeightAt(x, z) - 0.4, z);
           dummy.rotation.set(leanX, (i * 2.399) % 6.283, leanZ);
           dummy.scale.set(h * 1.12 * widen, h, h * 1.12 * widen); // crowns overlap -> closed canopy
           dummy.updateMatrix();
@@ -987,7 +1128,7 @@ export function buildVegetation(scene, renderer) {
       const stride = n > 0 ? arr.length / n : 1;
       for (let i = 0; i < n; i++) {
         const [x, y, z, sc, rot] = arr[(i * stride) | 0];
-        dummy.position.set(x, y - sc * 0.3, z);
+        dummy.position.set(x, meshHeightAt(x, z) - sc * 0.3, z);
         dummy.rotation.set(0, rot, 0);
         dummy.scale.set(sc, sc * 0.7, sc);
         dummy.updateMatrix();
@@ -1018,7 +1159,7 @@ export function buildVegetation(scene, renderer) {
       const stride = n > 0 ? arr.length / n : 1;
       for (let i = 0; i < n; i++) {
         const [x, y, z, s, rot] = arr[(i * stride) | 0];
-        dummy.position.set(x, y - 0.02, z);
+        dummy.position.set(x, meshHeightAt(x, z) - 0.02, z);
         dummy.rotation.set(0, rot, 0);
         dummy.scale.set(s, s * (0.85 + ((i * 31) % 7) / 14), s);
         dummy.updateMatrix();
@@ -1033,7 +1174,7 @@ export function buildVegetation(scene, renderer) {
       let n = 0;
       for (const [x, y, z, rot, s, which] of lists.log) {
         if (which !== mi || n >= mesh.instanceMatrix.count) continue;
-        dummy.position.set(x, y + 0.02, z);
+        dummy.position.set(x, meshHeightAt(x, z) + 0.02, z);
         dummy.rotation.set(0, rot, 0);
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
@@ -1047,7 +1188,7 @@ export function buildVegetation(scene, renderer) {
       let n = 0;
       for (const [x, y, z, rot, s] of lists.stump) {
         if (n >= stumps.instanceMatrix.count) break;
-        dummy.position.set(x, y, z);
+        dummy.position.set(x, meshHeightAt(x, z), z);
         dummy.rotation.set(0, rot, 0);
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
@@ -1092,7 +1233,7 @@ export function buildVegetation(scene, renderer) {
       // the new final gate so the unchanged candidates retain their transforms.
       if (!unionRoadClear(x, z, margin) || osmBuildingAt(x, z, margin)) continue;
       if ([3, 4, 5].some((era) => vegExcluded(x, z, y, era, margin))) continue;
-      dummy.position.set(x, y - s * 0.3, z);
+      dummy.position.set(x, meshHeightAt(x, z) - s * 0.3, z);
       dummy.rotation.set(rx, ry, rz);
       dummy.scale.set(sx, sy, sz);
       dummy.updateMatrix();
@@ -1152,7 +1293,7 @@ export function buildVegetation(scene, renderer) {
           if (lakeAt(px, pz) !== lake || lakeShoreDistAt(px, pz) > 4) continue;
           if (!unionRoadClear(px, pz, 0.3) || osmBuildingAt(px, pz, 0.3)) continue;
           const y = heightAt(px, pz);
-          dummy.position.set(px, y, pz); // roots follow carved terrain: no floating clumps
+          dummy.position.set(px, meshHeightAt(px, pz), pz);
           dummy.rotation.y = rng() * 6.3;
           const s = 0.7 + rng() * 0.8;
           dummy.scale.set(s, s, s);
@@ -1175,7 +1316,7 @@ export function buildVegetation(scene, renderer) {
           if (!unionRoadClear(px, pz, 0.3) || osmBuildingAt(px, pz, 0.3)) continue;
           // raw OSM points sit off the smoothed spline on bends; verify
           // against the rugged edge so reeds keep wet feet, not deep water
-          dummy.position.set(px, y - 0.1, pz);
+          dummy.position.set(px, meshHeightAt(px, pz) - 0.1, pz);
           dummy.rotation.y = rng() * 6.3;
           const s = 0.45 + rng() * 0.6;
           dummy.scale.set(s, s, s);
@@ -1245,7 +1386,7 @@ export function buildVegetation(scene, renderer) {
       for (const e of arr) {
         const [x, y, z, s, yaw, tiltX, tiltZ, jitter, warm, wet] = e;
         const h = s * ySquash * 2;
-        dummy.position.set(x, y - h * 0.3, z);
+        dummy.position.set(x, meshHeightAt(x, z) - h * 0.3, z);
         dummy.rotation.set(tiltX, yaw, tiltZ);
         dummy.scale.setScalar(s);
         dummy.updateMatrix();
@@ -1623,7 +1764,7 @@ export function buildVegetation(scene, renderer) {
 
   // day-night tint for the unlit far impostors (sun colour × ambient level)
   function tick(sunColor, ambient) {
-    impostorMat.color.setRGB(
+    fadingImpostorMat.color.setRGB(
       (0.45 + 0.55 * sunColor.r) * ambient,
       (0.45 + 0.55 * sunColor.g) * ambient,
       (0.45 + 0.55 * sunColor.b) * ambient);
@@ -1668,8 +1809,8 @@ export function buildVegetation(scene, renderer) {
       for (let i = 0; i < cand.length && want.size < PROM_CAP; i++) want.add(cand[i][1]);
       // the swap used to be a one-frame binary flip — flying through a
       // non-POI forest read as "trees generating around me". Promotion and
-      // demotion are now CROSS-FADED by promoteTransitions(): the impostor
-      // scales out while the real tree scales in over ~0.45s.
+      // demotion use complementary coverage masks over ~0.45s; neither
+      // representation changes physical size.
       // demote: start (or continue) a fade-out for trees no longer wanted
       for (const [idx] of pool.active) {
         if (want.has(idx)) {
@@ -1705,22 +1846,31 @@ export function buildVegetation(scene, renderer) {
       if (!pool || !fp || !farM || !pool.trans.size) continue;
       let farDirty = false, nearDirty = false;
       for (const [idx, tr] of pool.trans) {
+        const entry = fp.entries[idx];
+        if (!entry) {                                   // belt to setEra's braces
+          pool.trans.delete(idx);
+          const stale = pool.active.get(idx);
+          if (stale !== undefined) { pool.active.delete(idx); pool.free.push(stale); }
+          continue;
+        }
         tr.k = Math.min(1, Math.max(0, tr.k + step * tr.dir));
         const k = tr.k * tr.k * (3 - 2 * tr.k);
         const slot = pool.active.get(idx);
-        const [x, y, z, h, , leanX = 0, leanZ = 0] = fp.entries[idx];
-        // impostor shrinks as the real tree grows (and vice versa)
-        const ik = Math.max(0.0001, 1 - k);
-        dummy.position.set(x, y - 0.4, z);
+        const [x, y, z, h, , leanX = 0, leanZ = 0] = entry;
+        // Both representations stay full-sized throughout the transition.
+        const ik = 1;
+        dummy.position.set(x, meshHeightAt(x, z) - 0.4, z);
         dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
         dummy.scale.set(h * 1.12 * fp.widen * ik, Math.max(0.0001, h * ik), h * 1.12 * fp.widen * ik);
         dummy.updateMatrix();
         farM.setMatrixAt(idx, dummy.matrix);
         farM.instanceMatrix.addUpdateRange(idx * 16, 16);
+        farM.geometry.attributes.aLodFade.setX(idx,k);
         farDirty = true;
         if (slot !== undefined) {
-          const s = (h / pool.hRef) * Math.max(0.0001, k);
-          dummy.position.set(x, y - 0.08 * s, z);
+          const s = h / pool.hRef;
+          pool.fade.setX(slot,k);
+          dummy.position.set(x, meshHeightAt(x, z) - 0.08 * s, z);
           dummy.rotation.set(leanX, (idx * 2.399) % 6.283, leanZ);
           dummy.scale.set(s, s, s);
           dummy.updateMatrix();
@@ -1734,13 +1884,35 @@ export function buildVegetation(scene, renderer) {
           if (slot !== undefined) { pool.active.delete(idx); pool.free.push(slot); }
         }
       }
-      if (farDirty) farM.instanceMatrix.needsUpdate = true;
+      if (farDirty) {farM.instanceMatrix.needsUpdate = true;farM.geometry.attributes.aLodFade.needsUpdate=true;}
       if (nearDirty) {
+        pool.fade.needsUpdate=true;
+        // Empty slots used to submit 56 full trees of EVERY species on every
+        // frame, including a second shadow pass. Tiny scale does not avoid
+        // vertex processing. Draw only the occupied prefix of this pool.
+        let count = 0;
+        for (const slot of pool.active.values()) count = Math.max(count, slot + 1);
+        pool.bark.count = count;
+        if (pool.cards) pool.cards.count = count;
         pool.bark.instanceMatrix.needsUpdate = true;
         if (pool.cards) pool.cards.instanceMatrix.needsUpdate = true;
       }
     }
   }
 
-  return { setEra, group, tick, getColliders, promote, promoteTransitions };
+  // Debug hook for data/floracount.mjs: what did the placement rules actually
+  // produce for the active era? The far tier and the promotion pool share
+  // unnamed meshes, so instance counts alone cannot answer this.
+  function counts() {
+    const out = {};
+    const lists = placementsFor(activeEra);
+    for (const key of Object.keys(lists)) {
+      const v = lists[key];
+      if (Array.isArray(v)) { if (v.length) out[key] = v.length; continue; }
+      const n = (v.full ? v.full.length : 0) + (v.far ? v.far.length : 0);
+      if (n) out[key] = n;
+    }
+    return out;
+  }
+  return { setEra, group, tick, getColliders, promote, promoteTransitions, counts };
 }

@@ -14,7 +14,7 @@ import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
 import { forestMaskAt } from './sat2025.js';
 import { forest1935At } from './forest1935.js';
 import { RIVER, STREAM_CHANNELS, riverAt, streamAt, setPond } from './riverzone.js';
-import { makeNoise, mulberry32, clamp, smoothstep, distToPolyline, pointInPoly, chaikinOpen } from './util.js';
+import { makeNoise, mulberry32, clamp, lerp, smoothstep, distToPolyline, pointInPoly, chaikinOpen } from './util.js';
 
 const noise = makeNoise(4217);
 const ROAD_CELL = 48;
@@ -527,6 +527,7 @@ export function osmRoadsForEra(era) {
   if (era < 3) return [];
   const out = [];
   for (const r of ROADS_OSM_SMOOTH) {
+    if (era < (r.minEra ?? 3)) continue;
     if (era === 3 && r.c === 2) continue;
     out.push(r);
   }
@@ -700,10 +701,16 @@ export function forestDensity(era, x, z, y) {
     // today: the real forest pattern from Sentinel-2. Where the satellite
     // says forest, it IS forest — near-certain keep, or the Bernoulli thinning
     // reads as savanna (clumps of 2-4 stems, then 40m gaps)
-    d = forestMaskAt(x, z) ? 0.97 + n * 0.03 : 0;
+    // Anti-alias the 50 m classification boundary, retaining mapped forest
+    // interiors. A binary nearest-cell mask made square-edged plantations.
+    const fx=(x-500+4400)/50-.5,fz=(z-1700+4400)/50-.5;
+    const ix=Math.floor(fx),iz=Math.floor(fz),u=fx-ix,v=fz-iz;
+    const sample=(dx,dz)=>forestMaskAt(-3900+(ix+dx+.5)*50,-2700+(iz+dz+.5)*50);
+    const coverage=lerp(lerp(sample(0,0),sample(1,0),u),lerp(sample(0,1),sample(1,1),u),v);
+    d = smoothstep(.15,.85,coverage) * (0.97+n*.03);
     d *= 1 - settlementK(x, z) * 0.9;   // town yards: cap at ~10% of mask density
-    d *= smoothstep(55, 140, dStead) * 0.94 + 0.06;
-    d *= smoothstep(60, 150, dManor) * 0.94 + 0.06;
+    d *= smoothstep(20, 55, dStead) * 0.94 + 0.06;
+    d *= smoothstep(25, 65, dManor) * 0.94 + 0.06;
     // the 2017 tower crowns an open summit — 19m trees right up to an 11m
     // tower buried it (its whole point is the view)
     d *= smoothstep(15, 36, Math.hypot(x - B.x, z - B.z));

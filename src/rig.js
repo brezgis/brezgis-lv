@@ -8,7 +8,7 @@
 // input the rig idles in a 'cinema' state (the intro orbit, driven by main).
 // Feel constants adapted from LAAS (MIT, github.com/Braffolk/fable5-world-demo).
 import * as THREE from 'three';
-import { heightAt } from './terrain.js';
+import { meshHeightAt } from './terrain.js';
 import { waterLevelAt } from './riverzone.js';
 import { clamp } from './util.js';
 
@@ -71,12 +71,21 @@ export class Rig {
     this.lastWT = -1e9;
 
     let unlockAt = -1e9;
+    const inputBlocked = () => !!document.querySelector('#about.open, #mapwrap.open')
+      || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)
+      || document.activeElement?.isContentEditable;
     const requestLock = () => {
+      if (!dom.requestPointerLock || inputBlocked()) return;
+      const lock = () => {
+        if (inputBlocked()) return;
+        try { dom.requestPointerLock()?.catch(() => {}); } catch { /* dragging remains available */ }
+      };
       const wait = unlockAt + LOCK_COOLDOWN_MS - performance.now();
-      if (wait > 0) setTimeout(() => this.mode !== 'cinema' && dom.requestPointerLock(), wait + 30);
-      else dom.requestPointerLock();
+      if (wait > 0) setTimeout(() => this.mode !== 'cinema' && lock(), wait + 30);
+      else lock();
     };
-    dom.addEventListener('click', () => {
+    dom.addEventListener('click', (e) => {
+      if (e.pointerType === 'touch') return;
       if (this.mode === 'cinema') this.setMode('fly');
       if (!this.locked) requestLock();
     });
@@ -89,8 +98,41 @@ export class Rig {
       this.yawT -= e.movementX * LOOK_SENS;
       this.pitchT = clamp(this.pitchT - e.movementY * LOOK_SENS, -1.45, 1.45);
     });
+    // Pointer capture supports touch and pen without Pointer Lock support.
+    let drag = null;
+    dom.style.touchAction = 'none';
+    dom.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' || inputBlocked()) return;
+      if (this.mode === 'cinema') this.setMode('fly');
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      dom.setPointerCapture(e.pointerId);
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      this.yawT -= (e.clientX - drag.x) * 0.004;
+      this.pitchT = clamp(this.pitchT - (e.clientY - drag.y) * 0.004, -1.45, 1.45);
+      drag.x = e.clientX; drag.y = e.clientY;
+    });
+    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      dom.addEventListener(event, () => { drag = null; });
+    }
+    document.querySelectorAll('[data-move-key]').forEach((button) => {
+      const code = button.dataset.moveKey;
+      button.addEventListener('pointerdown', (e) => {
+        if (inputBlocked()) return;
+        e.preventDefault();
+        if (this.mode === 'cinema') this.setMode('fly');
+        button.setPointerCapture(e.pointerId);
+        this.keys.add(code);
+        if (code === 'Space' && this.mode === 'walk') this.jumpAt = performance.now();
+      });
+      for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        button.addEventListener(event, () => this.keys.delete(code));
+      }
+    });
     addEventListener('keydown', (e) => {
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (inputBlocked() || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.code === 'Space' && e.target?.tagName === 'BUTTON') return;
       const code = KEY_ALIAS[e.code] || e.code;
       if (KEY_ALIAS[e.code]) e.preventDefault();     // arrows must never scroll
       // first input leaves the intro orbit flying — and is CONSUMED: letting
@@ -162,7 +204,7 @@ export class Rig {
     if (mode !== 'fly') this.sprint = false;
     if (mode === 'walk') {
       // do NOT snap to the ground: if you were flying you now fall to it
-      const g = heightAt(this.basePos.x, this.basePos.z) + EYE_HEIGHT;
+      const g = meshHeightAt(this.basePos.x, this.basePos.z) + EYE_HEIGHT;
       if (this.basePos.y <= g + LAND_EPS) {
         this.basePos.y = g;
         this.grounded = true;
@@ -200,7 +242,7 @@ export class Rig {
       let up = 0;
       if (this.keys.has('Space') || this.keys.has('KeyE')) up += 1;
       if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.keys.has('KeyQ')) up -= 1;
-      const eyeGround = heightAt(this.basePos.x, this.basePos.z) + EYE_HEIGHT;
+      const eyeGround = meshHeightAt(this.basePos.x, this.basePos.z) + EYE_HEIGHT;
       const alt = this.basePos.y - (eyeGround - EYE_HEIGHT);
       const speed = this.flySpeed * flyBoostFor(alt) * (this.sprint ? 2.3 : 1);
       if (wish.lengthSq() > 0) wish.normalize();
@@ -233,7 +275,7 @@ export class Rig {
     this.basePos.z += this.vel.z * dt;
     this.applyCollision(this.basePos.y - EYE_HEIGHT);
 
-    const ground = heightAt(this.basePos.x, this.basePos.z);
+    const ground = meshHeightAt(this.basePos.x, this.basePos.z);
     const water = waterLevelAt(this.basePos.x, this.basePos.z, this.era);
 
     if (this.grounded && this.jumpAt > 0 && performance.now() - this.jumpAt < 150) {

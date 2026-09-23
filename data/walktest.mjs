@@ -7,8 +7,9 @@ const browser = await puppeteer.launch({
 });
 try {
   const page = await browser.newPage();
+  let browserErrors = 0;
   await page.setViewport({ width: 900, height: 560 });
-  page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 300)));
+  page.on('pageerror', (e) => { browserErrors++; console.log('[pageerror]', e.message.slice(0, 300)); });
   await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 30000 });
   // __sim is exposed before the initial era finishes activating. Switching
@@ -55,7 +56,10 @@ try {
   });
   const walked = Math.hypot(after.x - walkBefore.x, after.z - walkBefore.z);
   console.log(`cinema->${mid.mode} flew ${flew.toFixed(1)}m; walk grounded=${after.grounded} walked ${walked.toFixed(1)}m`);
-  console.log(mid.mode === 'fly' && flew > 0.5 && after.mode === 'walk' && after.grounded && walked > 0.5 ? 'PASS' : 'FAIL');
+  const passed = mid.mode === 'fly' && flew > 0.5 && after.mode === 'walk'
+    && after.grounded && walked > 0.5 && browserErrors === 0;
+  console.log(passed ? 'PASS' : 'FAIL');
+  process.exitCode = passed ? 0 : 1;
   if (process.argv[2]) await page.screenshot({ path: process.argv[2] });
 } finally {
   await browser.close();

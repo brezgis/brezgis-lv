@@ -1,10 +1,18 @@
 {
   "name": "village",
   "version": "1.0.0",
+  "type": "module",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.mjs",
+    "start": "node serve.mjs",
+    "test": "node data/corecheck.mjs && node data/hydrocheck.mjs && npm run build && node data/qualitycheck.mjs",
+    "test:world": "node data/worldcheck.mjs",
+    "test:walk": "node data/walktest.mjs",
+    "test:items": "node data/itemshowcase.mjs",
+    "test:environment": "node data/environmentcheck.mjs",
+    "test:roads": "node data/roadcheck.mjs"
   },
   "keywords": [],
   "author": "",

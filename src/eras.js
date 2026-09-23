@@ -11,13 +11,16 @@ import {
   manorNew, manorOutbuilding, watermill, brewery, bridge, campfire, haystack,
   woodpile, choppingBlock, dugoutCanoe, rowboat, cart, beehiveLog, laundryLine,
   poemStone, storkNestPole, churchSilhouette, barrowStones, palisadeRing, pyre,
-  krogs, observationTower, modernHouse, car, erratics, deadIce, placeOnGround,
+  krogs, observationTower, modernHouse, car, motorcar1930s, erratics, deadIce, placeOnGround,
+  barrowMounds,
 } from './buildings.js';
 import { MAT } from './textures.js';
+import { roadMaterial, buildingMaterial } from './surfaces.js';
+import { buildRoadside } from './roadside.js';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W } from './landuse.js';
 import { riverAt, streamAt, lakeAt, pondAt, vegExcluded } from './riverzone.js';
-import { registerFootprints, registerTrample, buildingAt } from './footprints.js';
+import { registerFootprints, registerTrample, buildingAt, stageFootprint } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
 import { mulberry32, pointInPoly, chaikinPoly } from './util.js';
@@ -26,29 +29,34 @@ import { HM_OFF_X, HM_OFF_Z, HM_SPAN } from './heightmap.js';
 
 const S = LOC.STEAD, C = LOC.CAMP, Mn = LOC.MANOR, P = LOC.POND, B = LOC.BREZGA, K = LOC.KROGS;
 
-function leanTo() {
-  const g = new THREE.Group();
-  for (const s of [-1, 1]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 1.9, 5), MAT.logOld);
-    post.position.set(s * 1.6, 0.95, 0);
-    g.add(post);
+export function leanTo() {
+  const g = new THREE.Group(); g.name = 'hunters-shelter';
+  const branch = (a,b,r=.055) => {
+    const av=new THREE.Vector3(...a),bv=new THREE.Vector3(...b),dir=bv.clone().sub(av);
+    const m=new THREE.Mesh(new THREE.CylinderGeometry(r*.75,r,dir.length(),8),MAT.roundwood);
+    m.position.copy(av.add(bv).multiplyScalar(.5));m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());g.add(m);
+  };
+  for(const side of [-1,1]){
+    branch([side*1.6,-.1,0],[side*1.6,1.94,0],.075);
+    branch([side*1.6,-.1,-2.6],[side*1.6,.35,-2.6],.065);
   }
-  const ridge = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.6, 5), MAT.logOld);
-  ridge.rotation.z = Math.PI / 2;
-  ridge.position.y = 1.85;
-  g.add(ridge);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.08, 2.9), MAT.thatchOld);
-  roof.position.set(0, 1.2, -1.15);
-  roof.rotation.x = 1.0;
-  g.add(roof);
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  branch([-1.8,1.85,0],[1.8,1.85,0],.08);
+  branch([-1.8,.25,-2.6],[1.8,.25,-2.6],.06);
+  for(let i=0;i<7;i++){const x=-1.6+i*3.2/6;branch([x,1.85,.08],[x,.22,-2.7],.038);}
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(3.65,.10,3.25),MAT.thatchOld);
+  roof.position.set(0,1.09,-1.3);roof.rotation.x=-Math.atan2(1.6,2.6);g.add(roof);
+  // A low brush bed under the cover, not another floating roof slab.
+  const bedding=new THREE.Mesh(new THREE.SphereGeometry(1,16,8),MAT.hay);bedding.scale.set(1.12,.075,.48);
+  bedding.position.set(0,.035,-1.22);g.add(bedding);
+  for(const s of [-1,1])branch([s*1.6,.1,-2.6],[s*1.6,1.8,0],.045);
+  g.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
   return g;
 }
 
-function fishRack() {
+export function fishRack() {
   const g = new THREE.Group();
   for (const s of [-1, 1]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.7, 4), MAT.logOld);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.7, 8), MAT.roundwood);
     post.position.set(s * 1.1, 0.85, 0);
     g.add(post);
   }
@@ -57,9 +65,11 @@ function fishRack() {
   bar.position.y = 1.55;
   g.add(bar);
   for (let i = 0; i < 4; i++) {
-    const fish = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.42, 4), new THREE.MeshLambertMaterial({ color: 0x9aa3a8 }));
+    const fish = new THREE.Mesh(new THREE.SphereGeometry(1,12,8), new THREE.MeshLambertMaterial({ color: 0x8c8d78 }));
+    fish.scale.set(.046,.18,.025);
     fish.position.set(-0.8 + i * 0.55, 1.28, 0);
     g.add(fish);
+    const cord=new THREE.Mesh(new THREE.CylinderGeometry(.003,.003,.12,4),MAT.darkWood);cord.position.set(fish.position.x,1.50,0);g.add(cord);
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;
@@ -121,7 +131,7 @@ function utilityPoles(group, modern) {
   let i = 0;
   const tops = [];
   for (const [x, zz] of stops) {
-    const yBase = heightAt(x, zz);
+    const yBase = meshHeightAt(x, zz);
     dummy.position.set(x, yBase + 3.2, zz);
     dummy.rotation.set(0, 0, 0);
     dummy.updateMatrix();
@@ -161,24 +171,195 @@ function utilityPoles(group, modern) {
   group.add(wires);
 }
 
+// A cart standing on the verge with its horse cropping the grass — the pose
+// the baked model actually holds. (Driving it would slide a frozen horse
+// along the road; motor traffic below moves instead.)
+function horseDrawnCart() {
+  const g = cart();
+  const horse = new THREE.Mesh(
+    bakeSpeciesGeometry('horseBay'),
+    new THREE.MeshLambertMaterial({ vertexColors: true }),
+  );
+  horse.position.set(4.15, 0, 0);
+  horse.rotation.y = Math.PI / 2; // baked horse faces +z; cart shafts face +x
+  horse.castShadow = true;
+  g.add(horse);
+  for (const side of [-1, 1]) {
+    const trace = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 3.0, 4), MAT.darkWood);
+    trace.rotation.z = Math.PI / 2;
+    trace.position.set(2.9, 0.72, side * 0.42);
+    g.add(trace);
+  }
+  g.name = 'horse-drawn-cart';
+  return g;
+}
+
+// The rendered road surface: the ribbon crowns 0.16 m over the ground, and
+// lifts onto a deck ≥ 1.9 m over the water where it bridges. Anything that
+// stands or rolls on the road must use THIS height, not the bare terrain —
+// placeOnGround's terrain seat buried a quarter of every wheel.
+const ROAD_CROWN = 0.16;
+// camber rise from edge to crown, per road class
+const CROWN_RISE = [0.095, 0.067, 0.058, 0.04];
+// ...and it crowns over the HIGHEST ground under the carriageway, not over
+// the centreline. A road is a graded bench: cut on the uphill side, filled on
+// the downhill one. Seating the edges off the centreline height instead let
+// the uphill edge sink into every hillside the road traversed — 10-12% of all
+// carriageway vertices sat under the terrain, up to 1.26 m deep, and the road
+// visibly dipped in and out of the ground. `data/roadcheck.mjs` guards this.
+function roadBenchY(x, z, dx, dz, half) {
+  let m = -Infinity;
+  for (const off of [-half, -half * 0.5, 0, half * 0.5, half]) {
+    const h = meshHeightAt(x + dz * off, z - dx * off);
+    if (h > m) m = h;
+  }
+  return m + ROAD_CROWN;
+}
+function waterDeckLevel(x, z) {
+  const rv = riverAt(x, z);
+  const st = streamAt(x, z);
+  let level = -Infinity;
+  if (rv && rv.d < rv.hw + 7) level = Math.max(level, rv.level);
+  if (st && st.d < st.hw + 4) level = Math.max(level, st.level);
+  return level > -Infinity ? level + 1.9 : null;
+}
+// The mapped main road as a real route: arc-length segments plus a sampler
+// that returns position, surface height, heading and grade at any distance
+// along it. Used both to park things beside it and to drive things down it.
+function mainRoadRoute(era) {
+  let road = null, bestLength = 0;
+  for (const r of osmRoadsForEra(era)) {
+    if (r.c !== 0 || r.pts.length < 2) continue;
+    let length = 0;
+    for (let i = 0; i < r.pts.length - 1; i++) length += Math.hypot(r.pts[i + 1][0] - r.pts[i][0], r.pts[i + 1][1] - r.pts[i][1]);
+    if (length > bestLength) { bestLength = length; road = r; }
+  }
+  if (!road) return null;
+  const segs = [];
+  let total = 0;
+  for (let i = 0; i < road.pts.length - 1; i++) {
+    const [ax, az] = road.pts[i], [bx, bz] = road.pts[i + 1];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len > 0.1) { segs.push({ ax, az, bx, bz, len, at: total }); total += len; }
+  }
+  if (!segs.length) return null;
+  const at = (distance) => {
+    const d = Math.max(0, Math.min(total, distance));
+    let lo = 0, hi = segs.length - 1;                 // binary search: runs per frame
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (segs[mid].at <= d) lo = mid; else hi = mid - 1;
+    }
+    const seg = segs[lo];
+    const t = Math.max(0, Math.min(1, (d - seg.at) / seg.len));
+    return {
+      x: seg.ax + (seg.bx - seg.ax) * t, z: seg.az + (seg.bz - seg.az) * t,
+      dx: (seg.bx - seg.ax) / seg.len, dz: (seg.bz - seg.az) / seg.len, s: d,
+    };
+  };
+  // Bridge decks, resolved once: a deck is a plateau over its whole run, so
+  // sample the water crossings along the route and dilate them ±16 m. Doing
+  // this per frame would mean a channel query per wheel-turn.
+  const DS = 4, N = Math.ceil(total / DS) + 1;
+  const raw = new Float32Array(N).fill(-Infinity);
+  for (let i = 0; i < N; i++) {
+    const p = at(i * DS);
+    const deck = waterDeckLevel(p.x, p.z);
+    if (deck !== null) raw[i] = deck;
+  }
+  const deck = new Float32Array(N).fill(-Infinity);
+  const R = Math.round(16 / DS);
+  for (let i = 0; i < N; i++) {
+    let m = -Infinity;
+    for (let j = Math.max(0, i - R); j <= Math.min(N - 1, i + R); j++) m = Math.max(m, raw[j]);
+    deck[i] = m;
+  }
+  const poseAt = (distance) => {
+    const p = at(distance);
+    const y0 = meshHeightAt(p.x - p.dx * 2, p.z - p.dz * 2);
+    const y1 = meshHeightAt(p.x + p.dx * 2, p.z + p.dz * 2);
+    // ride the graded bench, not the bare centreline — on a cross-slope the
+    // two differ by up to a metre and the wheels sank into the carriageway
+    const ground = roadBenchY(p.x, p.z, p.dx, p.dz, ROAD_HALF_W[0] + (era === 5 ? 1.2 : 0))
+      + CROWN_RISE[0];
+    const lift = deck[Math.max(0, Math.min(N - 1, Math.round(p.s / DS)))];
+    return { ...p, y: Math.max(ground, lift), rot: Math.atan2(-p.dz, p.dx), pitch: Math.atan2(y1 - y0, 4) };
+  };
+  return { segs, total, poseAt };
+}
+
+// Spread `count` sites along the route, each locally searched for dry ground
+// clear of buildings and of the other sites.
+function mainRoadPoses(route, era, count) {
+  if (!route || !count) return [];
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const target = route.total * (0.18 + ((i + 0.5) / count) * 0.64);
+    let found = null;
+    for (let j = 0; j < 18 && !found; j++) {
+      const offset = (j ? Math.ceil(j / 2) * (j % 2 ? 1 : -1) : 0) * 55;
+      const p = route.poseAt(target + offset);
+      if (distToRiver(p.x, p.z) < 18 || distToStreams(p.x, p.z) < 10) continue;
+      if (buildingAt(era, p.x, p.z, 3.2)) continue;
+      if (out.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < 90)) continue;
+      found = p;
+    }
+    if (found) out.push(found);
+  }
+  return out;
+}
+
+// Right-hand lane centre (Latvia drives on the right), offset from the
+// surveyed centreline the ribbon is built around.
+function laneOffset(p, side = 1, dist = 1.6) {
+  return [p.x - p.dz * dist * side, p.z + p.dx * dist * side];
+}
+
+// Motor traffic that actually travels: sparse, lane-correct, riding the road
+// surface with the road's own grade. A parked car on a highway reads as a
+// breakdown; a village with three of them reads as a car park.
+function drivingTraffic(group, route, vehicles) {
+  if (!route || !vehicles.length) return null;
+  const fleet = [];
+  for (const v of vehicles) {
+    const obj = v.build();
+    obj.name = v.name;
+    obj.userData.noCollide = true;         // it moves; a frozen AABB would not
+    group.add(obj);
+    fleet.push({ obj, s: v.s, dir: v.dir, speed: v.speed });
+  }
+  const place = (car) => {
+    const p = route.poseAt(car.s);
+    const [lx, lz] = laneOffset(p, car.dir);
+    // -0.04: the camber drop from crown to lane centre on a class-0 road
+    car.obj.position.set(lx, p.y - 0.04, lz);
+    car.obj.rotation.set(0, car.dir > 0 ? p.rot : p.rot + Math.PI,
+      car.dir > 0 ? p.pitch : -p.pitch);
+  };
+  fleet.forEach(place);
+  return (t, dt) => {
+    for (const car of fleet) {
+      car.s += car.speed * car.dir * dt;
+      if (car.s > route.total) car.s -= route.total;
+      else if (car.s < 0) car.s += route.total;
+      place(car);
+    }
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The main roads as real draped ribbons: paint alone lands on 17m-spaced
 // terrain vertices, so narrow lanes all but vanished. The P30 is paved
 // today; the V-roads, lanes and tracks keep their gravel or dirt skin.
 function roadRibbons(group, era) {
   if (era < 3) return;
-  const mkMat = (color, offset) => new THREE.MeshLambertMaterial({
-    color, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset,
-  });
+  const mkMat = (color, offset) => roadMaterial(color, offset);
   const surf = {
     asphalt: { mat: mkMat(0x393c40, -2), positions: [], indices: [] },
     gravel: { mat: mkMat(0x9d947f, -1), positions: [], indices: [] },
     darkGravel: { mat: mkMat(0x8d8570, -1), positions: [], indices: [] },
     dirt: {
-      mat: new THREE.MeshLambertMaterial({
-        color: 0xffffff, vertexColors: true,
-        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-      }),
+      mat: roadMaterial(0xffffff,-1,true),
       positions: [], colors: [], indices: [],
     },
   };
@@ -274,11 +455,14 @@ function roadRibbons(group, era) {
     const t = (dists[i] - dists[run.from]) / run.len;
     return run.y0 + (run.y1 - run.y0) * t;
   };
-  const rowYAt = (pts, runs, dists, i) => {
+  // Centreline paint rides the CROWN, so it must use the same graded bench
+  // the asphalt does or the dashes sink through their own road.
+  const rowYAt = (pts, runs, dists, i, half) => {
     const run = bridgeAt(runs, i);
     if (run) return bridgeYAt(run, dists, i);
     const [x, z] = pts[i];
-    return meshHeightAt(x, z) + 0.16;
+    const [dx, dz] = tangentAt(pts, i);
+    return roadBenchY(x, z, dx, dz, half + 1.2) + CROWN_RISE[0];
   };
   const queueBridgeFixtures = (runs, pts, dists, half, c) => {
     for (const run of runs) {
@@ -326,20 +510,34 @@ function roadRibbons(group, era) {
     }
     fixtureClusterCount = clusters.length;
   };
-  const CROWN_RISE = [0.095, 0.067, 0.058, 0.04];
-  const pushCamberedRow = (positions, x, z, dx, dz, half, c, deckY = null) => {
-    const skirt = 0.3, crownY = deckY !== null ? deckY : meshHeightAt(x, z) + 0.16;
-    const edgeY = deckY !== null ? deckY : crownY - CROWN_RISE[c];
-    for (const off of [-half - skirt, -half, 0, half, half + skirt]) {
-      let y = off === 0 ? crownY : edgeY;
-      if (Math.abs(off) > half) y = deckY !== null ? deckY - 0.35
-        : Math.min(edgeY - 0.08, meshHeightAt(x + dz * off, z - dx * off) + 0.02);
+  // Batter the verge down to grade at roughly 45°, so a filled edge reads as
+  // a low embankment rather than a floating lip. Returns [offset, y] for the
+  // outer skirt vertex on the given side.
+  const shoulderVert = (x, z, dx, dz, half, edgeY, side, deckY) => {
+    if (deckY !== null) return [half + 0.3, deckY - 0.35];
+    const g = meshHeightAt(x + dz * side * half, z - dx * side * half);
+    const w = 0.3 + Math.max(0, edgeY - 0.08 - (g + 0.02)) * 0.9;
+    const gy = meshHeightAt(x + dz * side * (half + w), z - dx * side * (half + w));
+    return [half + w, Math.min(edgeY - 0.08, gy + 0.02)];
+  };
+  // benchHalf: how wide a strip of ground the bench must clear. The paved
+  // P30 carries gravel shoulders 1.2 m beyond the asphalt, and both must be
+  // graded off the SAME bench or the shoulder stands proud of its own road.
+  const pushCamberedRow = (positions, x, z, dx, dz, half, c, deckY = null, benchHalf = half) => {
+    const bench = deckY !== null ? deckY : roadBenchY(x, z, dx, dz, benchHalf);
+    const edgeY = deckY !== null ? deckY : bench;
+    const crownY = deckY !== null ? deckY : bench + CROWN_RISE[c];
+    const [wl, yl] = shoulderVert(x, z, dx, dz, half, edgeY, -1, deckY);
+    const [wr, yr] = shoulderVert(x, z, dx, dz, half, edgeY, 1, deckY);
+    for (const [off, y] of [[-wl, yl], [-half, edgeY], [0, crownY], [half, edgeY], [wr, yr]]) {
       positions.push(x + dz * off, y, z - dx * off);
     }
   };
   const pushShoulderRow = (positions, x, z, dx, dz, half, deckY = null) => {
-    const crownY = deckY !== null ? deckY : meshHeightAt(x, z) + 0.16;
-    const edgeY = deckY !== null ? deckY : crownY - CROWN_RISE[0];
+    // The gravel shoulders under today's asphalt: same graded bench, sampled
+    // over the full shoulder width so the verge cannot bury itself either.
+    const bench = deckY !== null ? deckY : roadBenchY(x, z, dx, dz, half + 1.2);
+    const edgeY = deckY !== null ? deckY : bench;
     for (const off of [-half - 1.2, -half - 0.9, -half, half, half + 0.9, half + 1.2]) {
       let y = edgeY - Math.max(0, Math.abs(off) - half) * 0.025;
       if (Math.abs(off) > half + 0.9) y = deckY !== null ? deckY - 0.35
@@ -350,15 +548,15 @@ function roadRibbons(group, era) {
   const pushDirtRow = (positions, colors, x, z, dx, dz, half, deckY = null) => {
     const rut = half * 0.45;
     const rows = [
-      [-half - 0.25, null, [0.45, 0.42, 0.28]],
-      [-half, -CROWN_RISE[3], [0.45, 0.42, 0.28]],
-      [-rut, -CROWN_RISE[3] * 0.45, [0.36, 0.30, 0.22]],
-      [0, 0, [0.45, 0.42, 0.28]],
-      [rut, -CROWN_RISE[3] * 0.45, [0.36, 0.30, 0.22]],
-      [half, -CROWN_RISE[3], [0.45, 0.42, 0.28]],
-      [half + 0.25, null, [0.45, 0.42, 0.28]],
+      [-half - 0.25, null, [0.31, 0.26, 0.17]],
+      [-half, -CROWN_RISE[3], [0.38, 0.30, 0.20]],
+      [-rut, -CROWN_RISE[3] * 0.45, [0.20, 0.15, 0.095]],
+      [0, 0, [0.34, 0.29, 0.17]],
+      [rut, -CROWN_RISE[3] * 0.45, [0.20, 0.15, 0.095]],
+      [half, -CROWN_RISE[3], [0.38, 0.30, 0.20]],
+      [half + 0.25, null, [0.31, 0.26, 0.17]],
     ];
-    const crownY = deckY !== null ? deckY : meshHeightAt(x, z) + 0.16;
+    const crownY = deckY !== null ? deckY : roadBenchY(x, z, dx, dz, half) + CROWN_RISE[3];
     for (const [off, lift, rgb] of rows) {
       let y = deckY !== null ? deckY : crownY + (lift ?? -CROWN_RISE[3] - 0.08);
       if (lift === null) y = deckY !== null ? deckY - 0.35
@@ -373,23 +571,9 @@ function roadRibbons(group, era) {
     if (pts.length < 2) continue;
     roadRowCount += pts.length;
     const dists = roadDists(pts);
-    // open ends taper to nothing over ~22m — a road that stops dead
-    // mid-field reads as a data artifact; junction ends (another road
-    // within 4m of a probe 10m past the end) keep full width
-    const totalLen = dists[dists.length - 1];
-    const openEnd = (iEnd) => {
-      const pE = pts[iEnd], q = pts[iEnd === 0 ? Math.min(4, pts.length - 1) : Math.max(0, iEnd - 4)];
-      const ddx = pE[0] - q[0], ddz = pE[1] - q[1];
-      const l = Math.hypot(ddx, ddz) || 1;
-      return distToRoadEx(era, pE[0] + (ddx / l) * 10, pE[1] + (ddz / l) * 10).d >= 4;
-    };
-    const taperA = openEnd(0), taperB = openEnd(pts.length - 1);
-    const endK = (i) => {
-      let k = 1;
-      if (taperA) k = Math.min(k, dists[i] / 22);
-      if (taperB) k = Math.min(k, (totalLen - dists[i]) / 22);
-      return Math.max(0.05, Math.min(1, k));
-    };
+    // Mapped ends retain the road width. Tapering every dangling OSM way
+    // produced spearheads, including at data boundaries and driveway ends.
+    const endK = () => 1;
     const runs = bridgeRuns(pts, dists);
     bridgeRunCount += runs.length;
     for (const run of runs) {
@@ -409,7 +593,7 @@ function roadRibbons(group, era) {
       }
       continue;
     }
-    if (era === 5 && r.c === 0) {
+    if (era === 5 && (r.c === 0 || ['asphalt','paved','paving_stones'].includes(r.surface))) {
       {
         const { positions, indices } = surf.gravel;
         const base = positions.length / 3;
@@ -428,17 +612,30 @@ function roadRibbons(group, era) {
           const [x, z] = pts[i];
           const [dx, dz] = tangentAt(pts, i);
           const run = bridgeAt(runs, i);
-          pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c, run ? bridgeYAt(run, dists, i) : null);
+          pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c,
+            run ? bridgeYAt(run, dists, i) : null, half * endK(i) + 1.2);
           if (i > 0) {
             addIndices(indices, base, i, 5, [1, 2]);
+            if(r.c===0){
+              const [px,pz]=pts[i-1],[pdx,pdz]=tangentAt(pts,i-1);
+              const ya=rowYAt(pts,runs,dists,i-1,half)-CROWN_RISE[0]+.025;
+              const yb=rowYAt(pts,runs,dists,i,half)-CROWN_RISE[0]+.025;
+              for(const side of [-1,1]){
+                const b=dashPos.length/3,off=side*(half-.23);
+                dashPos.push(px+pdz*(off-.055),ya,pz-pdx*(off-.055),px+pdz*(off+.055),ya,pz-pdx*(off+.055),
+                  x+dz*(off+.055),yb,z-dx*(off+.055),x+dz*(off-.055),yb,z-dx*(off-.055));
+                dashIdx.push(b,b+2,b+1,b,b+3,b+2);
+              }
+            }
             // dashed centreline on the paved P30: ~3.4m of paint per 18m cycle
             // (the full-span 9m dashes read like runway markings from the air)
-            if (i % 2 === 0) {
+            if (r.c === 0 && i % 2 === 0) {
               const b2 = dashPos.length / 3;
               const px = pts[i - 1][0], pz = pts[i - 1][1];
               const sx = px + (x - px) * 0.31, sz = pz + (z - pz) * 0.31;
               const ex = px + (x - px) * 0.69, ez = pz + (z - pz) * 0.69;
-              const yPrev = rowYAt(pts, runs, dists, i - 1), yNow = rowYAt(pts, runs, dists, i);
+              const yPrev = rowYAt(pts, runs, dists, i - 1, half * endK(i - 1));
+              const yNow = rowYAt(pts, runs, dists, i, half * endK(i));
               const sy = yPrev + (yNow - yPrev) * 0.31 + 0.03;
               const ey = yPrev + (yNow - yPrev) * 0.69 + 0.03;
               dashPos.push(
@@ -497,13 +694,20 @@ function roadRibbons(group, era) {
       : dominant <= 1 ? 'gravel' : dominant === 2 ? 'darkGravel' : 'dirt';
     const patch = patchSurf[key], base = patch.positions.length / 3;
     patch.count++;
+    // A junction is a flat pad. Hold it at least at the bench height of every
+    // arm meeting here, or the ribbons now ride above their own junction.
+    let nodeBench = -Infinity;
+    const armHalf = Math.max(...node.arms.map((a) => a.halfW));
+    for (const arm of node.arms) {
+      nodeBench = Math.max(nodeBench, roadBenchY(node.x, node.z, arm.dx, arm.dz, armHalf));
+    }
     const yAt = (x, z) => {
       const water = crossingAt(x, z);
-      return Math.max(meshHeightAt(x, z) + 0.18, water === null ? -Infinity : water + 1.9);
+      return Math.max(nodeBench, meshHeightAt(x, z) + 0.18, water === null ? -Infinity : water + 1.9);
     };
     patch.positions.push(node.x, yAt(node.x, node.z), node.z);
     for (const [x, z] of hull) patch.positions.push(x, yAt(x, z), z);
-    for (let i = 0; i < hull.length; i++) patch.indices.push(base, base + 1 + i, base + 1 + (i + 1) % hull.length);
+    for (let i = 0; i < hull.length; i++) patch.indices.push(base, base + 1 + (i + 1) % hull.length, base + 1 + i);
   }
   for (const fixture of bridgeFixtures) group.add(fixture);
   if (dashPos.length) {
@@ -718,7 +922,7 @@ function grazerAssets() {
 function bgSettlement(group, era, smokes, stageItems = []) {
   const rng = mulberry32(4300 + era * 17);
   const trampleRects = [];   // paddocks: grazed bare by the stock inside
-  const props = { hay: [], wood: [], vinda: [], fence: [], boxWell: [], garden: [], tuft: [], cow: [], sheep: [], horse: [] };
+  const props = { hay: [], wood: [], vinda: [], fence: [], boxWell: [], garden: [], tuft: [], cabbage: [], peas: [], cow: [], sheep: [], horse: [] };
   const { wall, roof, door, window4, window6, chimney } = bgAssets();
   const skip = (x, z) => nearStagePOI(x, z);
   const cornersOf = (it, pad = 0) => {
@@ -798,9 +1002,10 @@ function bgSettlement(group, era, smokes, stageItems = []) {
   const items = [];
   if (era === 5) {
     let osmWaterSkipped = 0;
-    for (const [x, z, w, d, rot] of BUILDINGS_OSM) {
+    for (const [x, z, w, d, rot, metadata = {}] of BUILDINGS_OSM) {
       if (skip(x, z)) continue;
-      const it = { x, z, w, d, rot, big: w * d > 220, kind: 'new' };
+      const dwelling=['house','detached','residential','apartments'].includes(metadata.kind);
+      const it = { x, z, w, d, rot, metadata, big: !dwelling && w * d > 220, kind: 'new' };
       if (waterBlocked(it)) { osmWaterSkipped++; continue; }
       items.push(it);
     }
@@ -901,12 +1106,23 @@ function bgSettlement(group, era, smokes, stageItems = []) {
           if (!placementBlocked(garden) && !insideSiteItem(garden.x, garden.z, siteItems)) {
             const gardenId = props.garden.length;
             props.garden.push([garden.x, garden.z, garden.rot, gardenId]);
+            // A sakņu dārzs is laid out in STRIPS, one crop to a strip.
+            // Cabbage, onions, beets, peas, carrots and turnips are what the
+            // Piebalga kitchen garden actually held (research/manor-and-
+            // interwar.md, "Orchard, Garden, Bees"), with potatoes the
+            // 19th-century staple. Rendering every row as the same 22 cm
+            // green cone made the whole plot read as one patch of weeds.
             const rows = 3 + ((sr() * 3) | 0);
             for (let gr = 0; gr < rows; gr++) {
               const ox = -garden.w / 2 + ((gr + 1) * garden.w) / (rows + 1);
-              for (let lz = -garden.d / 2 + 0.55; lz < garden.d / 2 - 0.3; lz += 0.85) {
+              const roll = sr();
+              // peas and beans climb sticks and stand a metre proud of the
+              // rest; cabbages are the unmistakable glaucous ball
+              const crop = roll < 0.30 ? 'cabbage' : roll < 0.46 ? 'peas' : 'tuft';
+              const spacing = crop === 'cabbage' ? 0.62 : crop === 'peas' ? 0.5 : 0.85;
+              for (let lz = -garden.d / 2 + 0.55; lz < garden.d / 2 - 0.3; lz += spacing) {
                 const [tx, tz] = localPoint(garden.x, garden.z, garden.rot, ox + (sr() - 0.5) * 0.14, lz + (sr() - 0.5) * 0.18);
-                props.tuft.push([tx, tz, sr() * 6.3, 0.7 + sr() * 0.45, gardenId]);
+                props[crop].push([tx, tz, sr() * 6.3, 0.7 + sr() * 0.45, gardenId]);
               }
             }
           }
@@ -929,13 +1145,19 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     if (ok) keptGardens.add(id);
     return ok;
   });
-  props.tuft = props.tuft.filter(([x, z, , , id]) => keptGardens.has(id) && propOK(era, x, z, 0.16));
-  const walls = new THREE.InstancedMesh(wall, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, emissive: 0x0b0b0d }), items.length);
-  const roofs = new THREE.InstancedMesh(roof, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide, emissive: 0x0a0a0b }), items.length);
+  for (const crop of ['tuft', 'cabbage', 'peas']) {
+    props[crop] = props[crop].filter(([x, z, , , id]) => keptGardens.has(id) && propOK(era, x, z, 0.16));
+  }
+  const walls = new THREE.InstancedMesh(wall.clone(), buildingMaterial(false), items.length);
+  const roofs = new THREE.InstancedMesh(roof.clone(), buildingMaterial(true), items.length);
+  const wallFinishes=new Float32Array(items.length),roofFinishes=new Float32Array(items.length);
+  walls.geometry.setAttribute('aFinish',new THREE.InstancedBufferAttribute(wallFinishes,1));
+  roofs.geometry.setAttribute('aFinish',new THREE.InstancedBufferAttribute(roofFinishes,1));
   walls.castShadow = roofs.castShadow = true;
+  walls.receiveShadow = roofs.receiveShadow = true;
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
-  const facades = { door: [], window4: [], window6: [], chimney: [] };
+  const facades = { door: [], window4: [], window6: [], chimney: [], foundation: [] };
   const facadeAt = (arr, it, parent, lx, ly, lz, ry, sx, sy, sz = 1) => {
     const ca = Math.cos(it.rot), sa = Math.sin(it.rot);
     arr.push({
@@ -948,14 +1170,17 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     // highest — a single centre sample floated corners 2m+ on slopes
     let minH = Infinity, maxH = -Infinity;
     for (const [cx, cz] of cornersOf(it)) {
-      const hh = heightAt(cx, cz);
+      const hh = meshHeightAt(cx, cz);
       if (hh < minH) minH = hh;
       if (hh > maxH) maxH = hh;
     }
     const y = minH - 0.1;
-    const plinth = Math.min(1.4, maxH - minH);
-    const wallH = (it.big ? 4.6 + rng() * 1.4 : Math.min(3.4, Math.max(2.3, Math.min(it.w, it.d) * 0.5))) + plinth;
-    const roofH = Math.min(it.w, it.d) * (era === 3 ? 0.52 : 0.42);
+    const plinth = maxH - minH;
+    const levels=it.metadata?.levels;
+    const wallH = (levels ? Math.min(5,levels)*2.8 : it.big ? 4.6 + rng() * 1.4 : Math.min(3.4, Math.max(2.3, Math.min(it.w, it.d) * 0.5))) + plinth;
+    const roofH = it.metadata?.roof==='flat' ? .12 : Math.min(5.5,Math.min(it.w, it.d) * (era === 3 ? 0.52 : it.big ? .20 : .42));
+    wallFinishes[i]=era===5?(i%4===0?1:i%3===0?2:0):2;
+    roofFinishes[i]=era===5?i%3===0?1:0:1;
     dummy.position.set(it.x, y, it.z);
     dummy.rotation.set(0, -it.rot, 0);
     dummy.scale.set(it.w, wallH, it.d);
@@ -978,7 +1203,11 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     } else {
       col.setRGB(0.42 + (rng() - 0.5) * 0.1, 0.34 + (rng() - 0.5) * 0.1, 0.24 + (rng() - 0.5) * 0.1);
     }
+    if(it.metadata?.color && /^(#[0-9a-f]{3,6}|white|brown|grey|gray|yellow|red|beige)$/i.test(it.metadata.color))col.set(it.metadata.color);
+    if(it.metadata?.material==='wood')wallFinishes[i]=2;
+    if(it.metadata?.material==='brick')wallFinishes[i]=1;
     walls.setColorAt(i, col);
+    facadeAt(facades.foundation,it,i,0,y+(plinth+.25)/2,0,0,it.w+.08,plinth+.25,it.d+.08);
     // roof: ridge along the longer footprint axis
     const along = it.w >= it.d;
     dummy.position.set(it.x, y + wallH - 0.05, it.z);
@@ -1000,6 +1229,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     } else {
       col.setRGB(0.5 + rng() * 0.08, 0.42 + rng() * 0.06, 0.25);  // thatch
     }
+    if(it.metadata?.roofColor && /^(#[0-9a-f]{3,6}|brown|grey|gray|red|black|green)$/i.test(it.metadata.roofColor))col.set(it.metadata.roofColor);
     roofs.setColorAt(i, col);
     const dwelling = it.kind === 'dwell' || it.kind === 'dairy' || (era === 5 && !it.big);
     const alongX = it.w >= it.d;
@@ -1009,12 +1239,27 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       const doorH = era <= 2 ? 1.45 : era === 3 ? 1.78 : 2.02;
       const doorW = era <= 2 ? 1.22 : 0.94;
       const off = (i % 2 ? -1 : 1) * Math.min(longSpan * 0.22, longSpan / 2 - doorW * 0.7);
-      if (alongX) facadeAt(facades.door, it, i, off, y + 0.02, shortSpan / 2 + 0.045, 0, doorW, doorH);
-      else facadeAt(facades.door, it, i, it.w / 2 + 0.045, y + 0.02, off, Math.PI / 2, doorW, doorH);
+      if (alongX) facadeAt(facades.door, it, i, off, y + plinth + 0.02, shortSpan / 2 + 0.045, 0, doorW, doorH);
+      else facadeAt(facades.door, it, i, it.w / 2 + 0.045, y + plinth + 0.02, off, Math.PI / 2, doorW, doorH);
     }
     if (era >= 3) {
       let windowCount = dwelling ? 2 + (i % 3) : it.kind === 'barn' || it.big ? (i % 3 === 0 ? 1 : 0) : i % 2;
       if (it.kind === 'klets') windowCount = i % 2;
+      if(era===5&&dwelling){
+        windowCount=0;
+        const floors=Math.max(1,Math.min(4,Math.floor(levels??1)));
+        for(let floor=0;floor<floors;floor++)for(const side of [-1,1])for(const axis of [0,1]){
+          const span=axis?it.d:it.w,count=Math.max(1,Math.floor(span/3.0));
+          for(let j=0;j<count;j++){
+            const across=-span/2+(j+.5)*span/count;
+            const doorOff=(i%2?-1:1)*Math.min(longSpan*.22,longSpan/2-.94*.7);
+            if(floor===0&&side===1&&((alongX&&!axis)||(!alongX&&axis))&&Math.abs(across-doorOff)<1.25)continue;
+            const yy=y+plinth+1.55+floor*2.8;
+            if(axis)facadeAt(facades.window4,it,i,side*(it.w/2+.048),yy,across,side>0?Math.PI/2:-Math.PI/2,1.03,1.12);
+            else facadeAt(facades.window4,it,i,across,yy,side*(it.d/2+.048),side>0?0:Math.PI,1.03,1.12);
+          }
+        }
+      }
       // windows scale with the wall (0.7m panes on a 5m shed read as
       // portholes), and front-wall windows sit OPPOSITE the door — the old
       // ±0.24 span landed j=0 on top of the door whenever i was odd
@@ -1039,8 +1284,8 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       }
       if (dwelling) {
         const ch = 0.9 + (i % 3) * 0.12;
-        facadeAt(facades.chimney, it, i, 0, y + wallH + roofH * 0.62, 0, 0, 0.55, ch, 0.55);
-        it.chimneyTop = y + wallH + roofH * 0.62 + ch / 2;
+        facadeAt(facades.chimney, it, i, 0, y + wallH + roofH + .28, 0, 0, 0.55, ch, 0.55);
+        it.chimneyTop = y + wallH + roofH + .28 + ch / 2;
       }
     }
   });
@@ -1071,6 +1316,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
   facadeMesh(window4, windowMat, facades.window4, 'window-4');
   facadeMesh(window6, windowMat, facades.window6, 'window-6');
   facadeMesh(chimney, new THREE.MeshLambertMaterial({ color: 0x6f4030 }), facades.chimney, 'chimney');
+  facadeMesh(chimney, new THREE.MeshLambertMaterial({ color: 0x6e6a60 }), facades.foundation, 'foundation');
   group.userData.backgroundSettlement = {
     era, itemCount: items.length,
     facadeCounts: {
@@ -1085,7 +1331,8 @@ function bgSettlement(group, era, smokes, stageItems = []) {
 
   // --- yard props, all instanced: haystacks, woodpiles, wells, fences ------
   if (era < 5 && props.hay.length + props.wood.length + props.vinda.length + props.fence.length +
-      props.boxWell.length + props.garden.length + props.tuft.length + props.cow.length + props.sheep.length + props.horse.length > 0) {
+      props.boxWell.length + props.garden.length + props.tuft.length + props.cabbage.length
+      + props.peas.length + props.cow.length + props.sheep.length + props.horse.length > 0) {
     const put = (mesh, arr, fill) => {
       if (!arr.length) return;
       arr.forEach((p, i) => { fill(p, i); mesh.setMatrixAt(i, dummy.matrix); });
@@ -1099,7 +1346,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       hayCone.name = `bg-prop-hay-era-${era}`;
       hayCone.userData.positions = props.hay;
       put(hayCone, props.hay, ([x, z, r, sc]) => {
-        dummy.position.set(x, heightAt(x, z) + 1.2 * sc - 0.05, z);
+        dummy.position.set(x, meshHeightAt(x, z) + 1.2 * sc - 0.05, z);
         dummy.rotation.set(0, r, 0);
         dummy.scale.setScalar(sc);
         dummy.updateMatrix();
@@ -1111,7 +1358,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       wood.name = `bg-prop-wood-era-${era}`;
       wood.userData.positions = props.wood;
       put(wood, props.wood, ([x, z, r, sc]) => {
-        dummy.position.set(x, heightAt(x, z) + 0.5 * sc, z);
+        dummy.position.set(x, meshHeightAt(x, z) + 0.5 * sc, z);
         dummy.rotation.set(0, r, 0);
         dummy.scale.setScalar(sc);
         dummy.updateMatrix();
@@ -1131,7 +1378,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       rodGeo.translate(2.9, 2.2, 0);
       const rod = new THREE.InstancedMesh(rodGeo, MAT.lightWood, props.vinda.length);
       props.vinda.forEach(([x, z, r], i) => {
-        dummy.position.set(x, heightAt(x, z) + 1.55, z);
+        dummy.position.set(x, meshHeightAt(x, z) + 1.55, z);
         dummy.rotation.set(0, r, 0);
         dummy.scale.setScalar(1);
         dummy.updateMatrix();
@@ -1154,7 +1401,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       shaft.name = `bg-prop-well-era-${era}`;
       shaft.userData.positions = props.boxWell;
       props.boxWell.forEach(([x, z, r], i) => {
-        const y = heightAt(x, z);
+        const y = meshHeightAt(x, z);
         dummy.position.set(x, y, z);
         dummy.rotation.set(0, -r, 0);
         dummy.scale.set(1, 0.82, 1);
@@ -1173,29 +1420,58 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       }
     }
     if (props.garden.length) {
-      const gardenGeo = new THREE.PlaneGeometry(4, 7);
-      gardenGeo.rotateX(-Math.PI / 2);
+      // Bake each plot directly onto the rendered terrain triangles. The old
+      // 4x7 m horizontal plane used one centre height, so sloped gardens had a
+      // buried uphill half and a floating downhill half.
+      const pos = [], color = [], idx = [];
+      for (const [x, z, r] of props.garden) {
+        const ca = Math.cos(r), sa = Math.sin(r);
+        const base = pos.length / 3;
+        const NX = 4, NZ = 7;
+        for (let iz = 0; iz <= NZ; iz++) for (let ix = 0; ix <= NX; ix++) {
+          const lx = -2 + (ix / NX) * 4, lz = -3.5 + (iz / NZ) * 7;
+          const px = x + lx * ca - lz * sa, pz = z + lx * sa + lz * ca;
+          pos.push(px, meshHeightAt(px, pz) + 0.035, pz);
+          const row = 0.86 + (iz % 2) * 0.08;
+          color.push(0.30 * row, 0.23 * row, 0.15 * row);
+        }
+        for (let iz = 0; iz < NZ; iz++) for (let ix = 0; ix < NX; ix++) {
+          const a = base + iz * (NX + 1) + ix, b = a + 1, c = a + NX + 1, d = c + 1;
+          idx.push(a, c, b, b, c, d);
+        }
+      }
+      const gardenGeo = new THREE.BufferGeometry();
+      gardenGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      gardenGeo.setAttribute('color', new THREE.Float32BufferAttribute(color, 3));
+      gardenGeo.setIndex(idx);
+      gardenGeo.computeVertexNormals();
       const gardenMat = new THREE.MeshLambertMaterial({
-        color: 0x4d3d2b, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+        vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
       });
-      const gardens = new THREE.InstancedMesh(gardenGeo, gardenMat, props.garden.length);
+      const gardens = new THREE.Mesh(gardenGeo, gardenMat);
       gardens.name = `bg-prop-garden-era-${era}`;
       gardens.userData.positions = props.garden;
-      put(gardens, props.garden, ([x, z, r]) => {
-        dummy.position.set(x, heightAt(x, z) + 0.04, z);
-        dummy.rotation.set(0, -r, 0);
-        dummy.scale.setScalar(1);
-        dummy.updateMatrix();
-      });
       gardens.receiveShadow = true;
+      group.add(gardens);
     }
-    if (props.tuft.length) {
-      const tuftGeo = new THREE.ConeGeometry(0.08, 0.22, 5);
-      const tufts = new THREE.InstancedMesh(tuftGeo, new THREE.MeshLambertMaterial({ color: 0x3f6f2d }), props.tuft.length);
-      tufts.name = `bg-prop-tuft-era-${era}`;
-      tufts.userData.positions = props.tuft;
-      put(tufts, props.tuft, ([x, z, r, sc]) => {
-        dummy.position.set(x, heightAt(x, z) + 0.11 * sc, z);
+    // three crop habits, one instanced mesh each: root-crop haulm (potato,
+    // beet, turnip, carrot), cabbage heads, and pea/bean rows up their sticks
+    const CROPS = [
+      ['tuft', new THREE.ConeGeometry(0.13, 0.34, 5), 0x3c6b2a, 0.17],
+      ['cabbage', (() => {
+        const cg = new THREE.SphereGeometry(0.17, 7, 5);
+        cg.scale(1, 0.62, 1);
+        return cg;
+      })(), 0x8ba579, 0.11],
+      ['peas', new THREE.ConeGeometry(0.11, 0.95, 5), 0x5c8438, 0.47],
+    ];
+    for (const [key, geo, color, lift] of CROPS) {
+      if (!props[key].length) continue;
+      const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color }), props[key].length);
+      mesh.name = `bg-prop-${key}-era-${era}`;
+      mesh.userData.positions = props[key];
+      put(mesh, props[key], ([x, z, r, sc]) => {
+        dummy.position.set(x, meshHeightAt(x, z) + lift * sc, z);
         dummy.rotation.set(0, r, 0);
         dummy.scale.setScalar(sc);
         dummy.updateMatrix();
@@ -1209,7 +1485,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       fence.name = `bg-prop-fence-era-${era}`;
       fence.userData.positions = props.fence;
       props.fence.forEach(([x, z, r], i) => {
-        dummy.position.set(x, heightAt(x, z) + 0.8, z);
+        dummy.position.set(x, meshHeightAt(x, z) + 0.8, z);
         dummy.rotation.set(0, r, 0);
         dummy.scale.setScalar(1);
         dummy.updateMatrix();
@@ -1229,7 +1505,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       mesh.name = `bg-prop-${kind}-era-${era}`;
       mesh.userData.positions = props[kind];
       put(mesh, props[kind], ([x, z, r, sc]) => {
-        dummy.position.set(x, heightAt(x, z), z);
+        dummy.position.set(x, meshHeightAt(x, z), z);
         dummy.rotation.set(0, -r, 0);
         dummy.scale.setScalar(sc);
         dummy.updateMatrix();
@@ -1246,7 +1522,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
       .sort((a, b) => a.d - b.d)
       .slice(0, 6);
     for (const it of dwells) {
-      smokes.push([it.x, it.chimneyTop || heightAt(it.x, it.z) + 4.2, it.z, { rate: 0.3, gray: 0.86 }]);
+      smokes.push([it.x, it.chimneyTop || meshHeightAt(it.x, it.z) + 4.2, it.z, { rate: 0.3, gray: 0.86 }]);
     }
   }
 }
@@ -1335,9 +1611,9 @@ function wildSpawns(era, spawns) {
         const pa = (i / 9) * Math.PI * 2 + 0.4;
         const pr = 9 + (i % 3) * 4.5;
         const px = cx + Math.cos(pa) * pr, pz = cz + Math.sin(pa) * pr;
-        pts.push([px, heightAt(px, pz) + 0.95 + (i % 2) * 0.35, pz]);
+        pts.push([px, meshHeightAt(px, pz) + 0.95 + (i % 2) * 0.35, pz]);
       }
-      pts.push([cx + 4, heightAt(cx + 4, cz - 3) + 4.1, cz - 3]);   // the roof ridge perch
+      pts.push([cx + 4, meshHeightAt(cx + 4, cz - 3) + 4.1, cz - 3]);   // the roof ridge perch
       return pts;
     };
     spawns.push(['wagtail', 3, { x: S2.x, z: S2.z, r: 30 }, { medium: 'air', fly: 'perch', perches: mkPerches(S2.x, S2.z) }]);
@@ -1483,7 +1759,7 @@ export function buildEra(era, ctx) {
   g.name = `era${era}`;
   const ticks = [];
   const stageFootprints = [];
-  const markBuilding = (x, z, w, d, rot = 0) => stageFootprints.push({ x, z, w, d, rot });
+  const markBuilding = (x, z, w, d, rot = 0) => stageFootprints.push(stageFootprint(x,z,w,d,rot));
   const refreshFootprints = () => registerFootprints(era, stageFootprints);
   const add = (obj, x, z, rot = 0, sink = 0.08) => {
     placeOnGround(obj, x, z, rot, sink);
@@ -1531,14 +1807,13 @@ export function buildEra(era, ctx) {
   // ======================= 1 · ~AD 50 ======================================
   if (era === 1) {
     add(leanTo(), C.x, C.z, -0.6);
-    markBuilding(C.x, C.z, 3.6, 2.9, -0.6);
+    markBuilding(C.x-1.3*Math.sin(-.6), C.z-1.3*Math.cos(-.6), 3.8, 3.2, -0.6);
     refreshFootprints();
-    add(campfire(), C.x + 3.4, C.z + 2.2);
-    fires.push([C.x + 3.4, heightAt(C.x + 3.4, C.z + 2.2) + 0.15, C.z + 2.2]);
-    smokes.push([C.x + 3.4, heightAt(C.x + 3.4, C.z + 2.2) + 0.9, C.z + 2.2, { rate: 1.1, gray: 0.8 }]);
+    add(campfire({cooking:false}), C.x + 3.4, C.z + 2.2);
+    fires.push([C.x + 3.4, meshHeightAt(C.x + 3.4, C.z + 2.2) + 0.15, C.z + 2.2]);
+    smokes.push([C.x + 3.4, meshHeightAt(C.x + 3.4, C.z + 2.2) + 0.9, C.z + 2.2, { rate: 1.1, gray: 0.8 }]);
     add(fishRack(), C.x - 3, C.z + 3.5, 0.4);
     add(dugoutCanoe(), riverXAt(C.z + 20) + 7, C.z + 20, 1.2);
-    addRaw(barrowStones(BUMPS.slice(0, 3)));
     const meadow = { x: S.x - 20, z: S.z + 30, r: 70 };
     spawns.push(['aurochsBull', 1, meadow]);
     spawns.push(['aurochsCow', 3, meadow]);
@@ -1548,10 +1823,11 @@ export function buildEra(era, ctx) {
 
   // ======================= 2 · ~AD 950 =====================================
   if (era === 2) {
+    addRaw(barrowMounds(BUMPS, 1));
     const dw = add(logCabin({ w: 5, d: 6, wallH: 2.0, roofH: 2.2, roof: 'barkGable', doorEnd: true }), S.x - 5, S.z - 9, 0.15);
     markBuilding(S.x - 5, S.z - 9, 5, 6, 0.15);
     void dw;
-    smokes.push([S.x - 5, heightAt(S.x - 5, S.z - 9) + 4.0, S.z - 6.6, { rate: 0.65, gray: 0.74 }]);
+    smokes.push([S.x - 5, meshHeightAt(S.x - 5, S.z - 9) + 4.0, S.z - 6.6, { rate: 0.65, gray: 0.74 }]);
     add(logCabin({ w: 4, d: 5, wallH: 1.8, roofH: 1.9, roof: 'barkGable', old: true }), S.x + 10, S.z + 6, 1.62);
     markBuilding(S.x + 10, S.z + 6, 4, 5, 1.62);
     add(postGranary(), S.x + 2, S.z + 13, -0.1);
@@ -1567,8 +1843,8 @@ export function buildEra(era, ctx) {
     add(postGranary(), LOC.HILLFORT.x - 9, LOC.HILLFORT.z - 7, 1.9);
     markBuilding(LOC.HILLFORT.x - 9, LOC.HILLFORT.z - 7, 3, 3.6, 1.9);
     add(campfire(), S.x + 1.5, S.z - 1);
-    fires.push([S.x + 1.5, heightAt(S.x + 1.5, S.z - 1) + 0.15, S.z - 1]);
-    smokes.push([S.x + 1.5, heightAt(S.x + 1.5, S.z - 1) + 0.9, S.z - 1, { rate: 1.0, gray: 0.8 }]);
+    fires.push([S.x + 1.5, meshHeightAt(S.x + 1.5, S.z - 1) + 0.15, S.z - 1]);
+    smokes.push([S.x + 1.5, meshHeightAt(S.x + 1.5, S.z - 1) + 0.9, S.z - 1, { rate: 1.0, gray: 0.8 }]);
     addStageFence('wattle', [
       [S.x - 20, S.z - 16], [S.x + 16, S.z - 16], [S.x + 18, S.z + 18], [S.x - 8, S.z + 20],
     ], 'stead-wattle');
@@ -1592,7 +1868,7 @@ export function buildEra(era, ctx) {
         roof: fr() < 0.5 ? 'barkGable' : 'thatchGableOld', doorEnd: true, old: true,
       }), f.x, f.z, rot);
       markBuilding(f.x, f.z, fw, fd, rot);
-      smokes.push([f.x, heightAt(f.x, f.z) + 3.8, f.z, { rate: 0.45, gray: 0.76 }]);
+      smokes.push([f.x, meshHeightAt(f.x, f.z) + 3.8, f.z, { rate: 0.45, gray: 0.76 }]);
       if (fr() < 0.7) {
         const gx = f.x + 9 + fr() * 4;
         add(postGranary(), gx, f.z + 6, rot + 1.4);
@@ -1616,6 +1892,7 @@ export function buildEra(era, ctx) {
 
   // ======================= 3 & 4 · 1860 / 1935 =============================
   if (era === 3 || era === 4) {
+    addRaw(barrowMounds(BUMPS, era === 3 ? 0.9 : 0.82));
     const modern = era === 4;
     add(logCabin({
       w: 6.5, d: 12, wallH: 2.5, roofH: 2.9,
@@ -1624,7 +1901,7 @@ export function buildEra(era, ctx) {
       windowStyle: modern ? 'framed' : 'dark', porch: modern,
     }), S.x, S.z - 15, Math.PI / 2);
     markBuilding(S.x, S.z - 15, 6.5, 12, Math.PI / 2);
-    smokes.push([S.x, heightAt(S.x, S.z - 15) + 6.6, S.z - 13.5, { rate: 0.55, gray: 0.86 }]);
+    smokes.push([S.x, meshHeightAt(S.x, S.z - 15) + 6.6, S.z - 13.5, { rate: 0.55, gray: 0.86 }]);
     add(logCabin({ w: 5, d: 8, wallH: 2.2, roofH: 2.3, roof: 'shingleGable', doorEnd: true }), S.x + 21, S.z + 2, -Math.PI / 2);
     markBuilding(S.x + 21, S.z + 2, 5, 8, -Math.PI / 2);
     add(logCabin({ w: 5.5, d: 13, wallH: 1.9, roofH: 2.4, roof: 'thatchGableOld', old: true }), S.x - 21, S.z + 5, 0.03);
@@ -1634,7 +1911,7 @@ export function buildEra(era, ctx) {
     const px = riverXAt(S.z + 85) + 16, pz = S.z + 85;
     add(logCabin({ w: 3.4, d: 4.2, wallH: 1.7, roofH: 1.9, roof: 'thatchGableOld', old: true, doorEnd: true }), px, pz, -0.4);
     markBuilding(px, pz, 3.4, 4.2, -0.4);
-    smokes.push([px, heightAt(px, pz) + 3.6, pz, { rate: 1.25, gray: 0.66 }]);
+    smokes.push([px, meshHeightAt(px, pz) + 3.6, pz, { rate: 1.25, gray: 0.66 }]);
     refreshFootprints();
     if (propOK(era, S.x + 7, S.z - 7, 1.0)) add(wellSweep(), S.x + 7, S.z - 7, 0.7);
     addStageFence('riku', [
@@ -1656,7 +1933,7 @@ export function buildEra(era, ctx) {
     add(storkNestPole(), S.x + 30, S.z + 22);
 
     // the manor: old classicist house in 1860; brick new manor from 1888 on
-    const mh = add(modern ? manorNew({ flag: true }) : manorHouse({ flag: false }), Mn.x, Mn.z, 0.35);
+    const mh = add(modern ? manorNew({ flag: false }) : manorHouse({ flag: false }), Mn.x, Mn.z, 0.35);
     markBuilding(Mn.x, Mn.z, modern ? 26 : 30, modern ? 14 : 13, 0.35);
     if (mh.userData.tick) ticks.push(mh.userData.tick);
     if (modern) {
@@ -1664,12 +1941,12 @@ export function buildEra(era, ctx) {
       markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
     }
     add(manorOutbuilding(22), Mn.x - 52, Mn.z - 14, 0.35 + Math.PI / 2);
-    markBuilding(Mn.x - 46, Mn.z - 26, 22, 8, 0.35 + Math.PI / 2);
+    markBuilding(Mn.x - 52, Mn.z - 14, 22, 8, 0.35 + Math.PI / 2);
     add(manorOutbuilding(16), Mn.x + 58, Mn.z - 12, 1.56);
-    markBuilding(Mn.x + 44, Mn.z - 22, 16, 8, 0.2);
+    markBuilding(Mn.x + 58, Mn.z - 12, 16, 8, 1.56);
     add(brewery(), P.x + 58, P.z + 48, Math.PI * 0.72);
     markBuilding(P.x + 58, P.z + 48, 16, 7.5, Math.PI * 0.72);
-    smokes.push([Mn.x - 8, heightAt(Mn.x, Mn.z) + 9.6, Mn.z, { rate: 0.4, gray: 0.88 }]);
+    smokes.push([Mn.x - 8, meshHeightAt(Mn.x, Mn.z) + 9.6, Mn.z, { rate: 0.4, gray: 0.88 }]);
     const mill = add(watermill(ctx.water.pondLevel), P.x + 30, P.z + 16, Math.PI * 0.75);
     markBuilding(P.x + 30, P.z + 16, 8, 7, Math.PI * 0.75);
     if (mill.userData.tick) ticks.push(mill.userData.tick);
@@ -1684,10 +1961,10 @@ export function buildEra(era, ctx) {
     // Brežģa krogs on the old road south — where the manor's ale was drunk
     add(krogs(), K.x - 16, K.z + 2, 0.28);
     markBuilding(K.x - 16, K.z + 2, 18, 8.5, 0.28);
-    smokes.push([K.x - 19, heightAt(K.x - 16, K.z + 2) + 5.2, K.z + 2, { rate: 0.4, gray: 0.85 }]);
+    smokes.push([K.x - 19, meshHeightAt(K.x - 16, K.z + 2) + 5.2, K.z + 2, { rate: 0.4, gray: 0.85 }]);
     // Jāņi fire pyre on Brežģa kalns — the parish's festival hill
     add(pyre(), B.x, B.z, 0.4);
-    fires.push([B.x, heightAt(B.x, B.z) + 0.9, B.z, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
+    fires.push([B.x, meshHeightAt(B.x, B.z) + 0.9, B.z, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
 
     if (modern) {
       add(poemStone(), LOC.STONE.x, LOC.STONE.z, -0.5);
@@ -1695,6 +1972,28 @@ export function buildEra(era, ctx) {
     }
     bgSettlement(g, modern ? 4 : 3, smokes, stageFootprints);
     roadRibbons(g, modern ? 4 : 3);
+    const route = mainRoadRoute(era);
+    const parked = mainRoadPoses(route, era, 1)[0];
+    if (parked) {
+      // drawn up on the verge, clear of the carriageway, horse at the grass —
+      // whichever shoulder is free of walls, water and ditch
+      const spot = [1, -1]
+        .map((side) => laneOffset(parked, side, ROAD_HALF_W[0] + 2.1))
+        .find(([vx, vz]) => !buildingAt(era, vx, vz, 3.5)
+          && !vegExcluded(vx, vz, heightAt(vx, vz), era, 2));
+      if (spot) {
+        const cartObj = add(horseDrawnCart(), spot[0], spot[1], parked.rot + 0.14);
+        cartObj.rotation.z = parked.pitch;
+      }
+    }
+    if (modern) {
+      // 1935: motor traffic on the Cēsis–Madona road was occasional — one car
+      const tick = drivingTraffic(g, route, [{
+        name: 'interwar-motorcar', build: motorcar1930s,
+        s: route.total * 0.42, dir: 1, speed: 9,
+      }]);
+      if (tick) ticks.push(tick);
+    }
 
     spawns.push(['cattleFarm', modern ? 6 : 5, { x: S.x - 115, z: S.z + 35, r: 60 }]);
     spawns.push(['sheepWhite', modern ? 4 : 6, { x: S.x - 55, z: S.z - 35, r: 35 }]);
@@ -1712,10 +2011,11 @@ export function buildEra(era, ctx) {
 
   // ======================= 5 · 2025 ========================================
   if (era === 5) {
+    addRaw(barrowMounds(BUMPS, 0.72));
     // the farmstead site today: renovated house, the old klēts, a car
     add(modernHouse(), S.x, S.z - 14, Math.PI / 2);
     markBuilding(S.x, S.z - 14, 9.5, 7, Math.PI / 2);
-    smokes.push([S.x, heightAt(S.x, S.z - 14) + 5.6, S.z - 14, { rate: 0.3, gray: 0.9 }]);
+    smokes.push([S.x, meshHeightAt(S.x, S.z - 14) + 5.6, S.z - 14, { rate: 0.3, gray: 0.9 }]);
     add(logCabin({ w: 5, d: 8, wallH: 2.2, roofH: 2.3, roof: 'shingleGable', doorEnd: true, old: true }), S.x + 21, S.z + 2, -Math.PI / 2);
     markBuilding(S.x + 21, S.z + 2, 5, 8, -Math.PI / 2);
     add(car(), S.x + 10, S.z - 4, 0.4);
@@ -1729,9 +2029,9 @@ export function buildEra(era, ctx) {
     add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
     markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
     add(manorOutbuilding(22), Mn.x - 52, Mn.z - 14, 0.35 + Math.PI / 2);
-    markBuilding(Mn.x - 46, Mn.z - 26, 22, 8, 0.35 + Math.PI / 2);
+    markBuilding(Mn.x - 52, Mn.z - 14, 22, 8, 0.35 + Math.PI / 2);
     add(manorOutbuilding(16), Mn.x + 58, Mn.z - 12, 1.56);
-    markBuilding(Mn.x + 44, Mn.z - 22, 16, 8, 0.2);
+    markBuilding(Mn.x + 58, Mn.z - 12, 16, 8, 1.56);
     add(churchSilhouette(), LOC.CHURCH.x, LOC.CHURCH.z, 0.8);
     markBuilding(LOC.CHURCH.x, LOC.CHURCH.z, 38, 24, 0.8);
     const nb = add(bridge(false), BRIDGE2.x, BRIDGE2.z, Math.PI / 2);
@@ -1752,10 +2052,23 @@ export function buildEra(era, ctx) {
     add(fireRing(), B.x + 10, B.z - 8, 0.25);
     add(outhouse(), B.x + 38, B.z - 36, 0.55);
     markBuilding(B.x + 38, B.z - 36, 1.4, 1.4, 0.55);
+    const roadside = buildRoadside();
+    for (const stop of roadside.children) {
+      stageFootprints.push(stageFootprint(stop.position.x,stop.position.z,3.6,2.3,stop.rotation.y));
+    }
     bgSettlement(g, 5, smokes, stageFootprints);
     roadRibbons(g, 5);
+    g.add(roadside);
+    const carColors = [0x45576b, 0x6c7068, 0x7a4438, 0x30383c];
+    const route5 = mainRoadRoute(5);
+    const trafficTick = drivingTraffic(g, route5, mainRoadPoses(route5, 5, 4).map((p, i) => ({
+      name: 'mapped-road-car',
+      build: () => car(carColors[i % carColors.length]),
+      s: p.s, dir: i % 2 ? -1 : 1, speed: 15 + (i % 3) * 2.5,
+    })));
+    if (trafficTick) ticks.push(trafficTick);
     add(pyre(), B.x + 22, B.z + 10, 0.4);
-    fires.push([B.x + 22, heightAt(B.x + 22, B.z + 10) + 0.9, B.z + 10, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
+    fires.push([B.x + 22, meshHeightAt(B.x + 22, B.z + 10) + 0.9, B.z + 10, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
 
     utilityPoles(g, true);
 
@@ -1787,7 +2100,7 @@ export function applySpawns(mgr, spawns) {
         rec.group.scale.setScalar(0.58);
       } else if (kind === 'storkNest') {
         const rec = mgr.spawn('stork', { ...home, r: 0.1 }, { static: true });
-        rec.group.position.y = heightAt(home.x, home.z) + 5.75;
+        rec.group.position.y = meshHeightAt(home.x, home.z) + 5.75;
       } else {
         mgr.spawn(kind, home, opts);
       }

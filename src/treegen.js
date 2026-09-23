@@ -879,6 +879,32 @@ LV.alder = { // melnalksnis — Alnus glutinosa: dark, narrow, riverside
   brokenTop: 0, stubChance: 0.04, tubeMaxLevel: 2, tubeStride: 3, lodK: 0.58,
 };
 
+LV.willow = { // vītols — Salix alba/fragilis: the Latvian riverbank tree.
+  // Short bole, heavy low limbs leaning out over the water, long narrow
+  // leaves on drooping shoots. Broad rather than tall: a willow that reads
+  // like a birch has failed. (Vidzeme streamside flora, taurene-local-history
+  // §1 "Forest Composition"; willows accompany the alder carr everywhere the
+  // bank is too wet to mow.)
+  id: 'willow', kind: 'broadleaf', height: [7, 13], trunkRadiusK: 0.030,
+  crown: 'ellipsoid', asym: 0.46,
+  levels: [
+    { density: 0, whorl: 0, childStart: 0, childEnd: 0, angleBase: 0, angleTip: 0, lenRatio: 0, lenJitter: 0, radRatio: 0, segs: 7, wander: 0.16, gravitropism: 0.02, droop: 0, tipCurl: 0, taper: 1.15 },
+    { density: 2.3, whorl: 0, childStart: 0.14, childEnd: 0.92, angleBase: 1.32, angleTip: 0.72, lenRatio: 0.56, lenJitter: 0.38, radRatio: 0.46, segs: 5, wander: 0.2, gravitropism: 0.02, droop: 0.5, tipCurl: -0.1, taper: 0.9 },
+    { density: 2.4, whorl: 0, childStart: 0.2, childEnd: 1.0, angleBase: 0.95, angleTip: 0.62, lenRatio: 0.46, lenJitter: 0.4, radRatio: 0.5, segs: 3, wander: 0.24, gravitropism: -0.09, droop: 0.72, tipCurl: -0.16, taper: 0.86, planar: 0.35 },
+  ],
+  foliage: {
+    kind: 'leafCluster', anchorLevel: 2, spacing: 0.3, tStart: 0.06,
+    scale: [0.3, 0.46], tilt: 1.15, normalBend: 0.6, planarLeaves: true,
+    card: { mode: 'cross', sizeK: 3.1 },
+    // long and narrow — a willow leaf is a blade, not a plate
+    leaf: { len: 1.5, width: 0.2, shapePow: 0.85, fold: 0.14, curl: 0.3, needleCount: 0, brush: 0 },
+  },
+  flare: { amp: 0.62, height: 1.1, lobes: 6 },
+  bark: 'willow', barkRepeats: 3,
+  foliageColor: { r: 0.20, g: 0.33, b: 0.11, hueVar: 0.2 },   // grey-green, paler than alder
+  brokenTop: 0, stubChance: 0.06, tubeMaxLevel: 2, tubeStride: 3, lodK: 0.56,
+};
+
 LV.linden = { // liepa — Tilia cordata: dense tall heart-leaf dome
   id: 'linden', kind: 'broadleaf', height: [14, 22], trunkRadiusK: 0.022,
   crown: 'ellipsoid', asym: 0.24,

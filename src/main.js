@@ -4,7 +4,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { initTextures } from './textures.js';
-import { buildTerrain, paintEra, heightAt } from './terrain.js';
+import { buildTerrain, paintEra, meshHeightAt } from './terrain.js';
 import { buildWater } from './water.js';
 import { buildSky } from './sky.js';
 import { buildVegetation, WIND } from './vegetation.js';
@@ -29,14 +29,14 @@ const I18N = {
     flow: 'Rit', dawn: 'Rīts', noon: 'Diena', evening: 'Vakars',
     lblMove: 'Kustība', lblTime: 'Diennakts', karte: 'Karte · M',
     sound: 'skaņa', chronicle: 'Hronika un avoti', story: 'Stāsts / story', close: 'Aizvērt ✕',
-    era0: 'Tundra', era1: 'Tauri', era2: 'Latgaļi', era3: 'Muiža', era4: 'Taurene', era5: 'Šodiena',
+    era0: 'Tundra', era1: 'Tauri', era2: 'Latgaļi', era3: 'Muiža', era4: 'Taurene', era5: '2025',
   },
   en: {
     fly: 'Fly', walk: 'Walk',
     flow: 'Flow', dawn: 'Dawn', noon: 'Noon', evening: 'Evening',
     lblMove: 'Move', lblTime: 'Time of day', karte: 'Map · M',
     sound: 'sound', chronicle: 'Chronicle & sources', story: 'Story', close: 'Close ✕',
-    era0: 'Tundra', era1: 'Aurochs', era2: 'Latgalians', era3: 'Manor', era4: 'Taurene', era5: 'Today',
+    era0: 'Tundra', era1: 'Aurochs', era2: 'Latgalians', era3: 'Manor', era4: 'Taurene', era5: '2025',
   },
 };
 // compact keycap chips per mode — the old prose hint line read as a manual
@@ -52,7 +52,8 @@ const KEYCHIPS = {
     walk: [['WASD', 'walk'], ['Shift', 'sprint'], ['Space', 'jump'], ['Space ×2', 'fly'], ['1–6', 'eras'], ['M', 'map']],
   },
 };
-let lang = localStorage.getItem('brezgi-lang') || 'lv';
+let lang = 'lv';
+try { lang = localStorage.getItem('brezgi-lang') === 'en' ? 'en' : 'lv'; } catch { /* storage may be unavailable for local files */ }
 
 let bootT0 = 0;
 const progress = (msg) => {
@@ -66,7 +67,7 @@ const progress = (msg) => {
 
 async function boot() {
   const canvas = $('scene');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   // 1.75 cap: with 4x MSAA in the composer, full hi-DPI supersampling is
   // wasted fill — this keeps text-sharpness without doubling the pixel bill
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
@@ -80,6 +81,7 @@ async function boot() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.info.autoReset = false;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 12000);
@@ -88,7 +90,7 @@ async function boot() {
   initTextures();
   const terrain = buildTerrain();
   scene.add(terrain);
-  const steadY = heightAt(S.x, S.z);
+  const steadY = meshHeightAt(S.x, S.z);
 
   await progress('Filling the Gauja and Dabaru lake…');
   const water = buildWater();
@@ -99,11 +101,13 @@ async function boot() {
 
   await progress('Growing the forests — branches, twig atlases, impostors…');
   const veg = buildVegetation(scene, renderer);
+  window.__veg = veg;                    // debug hook for data/floracount.mjs
   await progress('Sowing half a million blades of grass…');
   const grass = buildGrass(scene);
+  window.__grass = grass;                // debug hook for data/dbg.mjs grassstate
 
   // post chain: MSAA render target -> subtle bloom -> tone-mapped output
-  const rtSamples = renderer.capabilities.isWebGL2 ? 4 : 0;
+  const rtSamples = Math.min(4, renderer.capabilities.maxSamples);
   const composerRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
     type: THREE.HalfFloatType, samples: rtSamples,
   });
@@ -119,9 +123,11 @@ async function boot() {
   composer.addPass(new OutputPass());
 
   // sky reflections for the water, refreshed occasionally
-  const cubeRT = new THREE.WebGLCubeRenderTarget(128);
-  const cubeCam = new THREE.CubeCamera(1, 6000, cubeRT);
-  cubeCam.position.set(LOC.STEAD.x - 200, heightAt(LOC.STEAD.x - 200, LOC.STEAD.z) + 12, LOC.STEAD.z);
+  const cubeRT = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType });
+  const cubeCam = new THREE.CubeCamera(1, 12000, cubeRT);
+  cubeCam.layers.set(1);
+  cubeCam.children.forEach((c) => c.layers.set(1));
+  cubeCam.position.set(LOC.STEAD.x - 200, meshHeightAt(LOC.STEAD.x - 200, LOC.STEAD.z) + 12, LOC.STEAD.z);
   water.applyEnvMap(cubeRT.texture);
   let envAge = 1e9;
 
@@ -193,8 +199,16 @@ async function boot() {
     COLL.list.length = 0;
     group.updateMatrixWorld(true);
     const _m = new THREE.Matrix4(), _ib = new THREE.Box3();
+    // things you walk over or through (barrow mounds, moving traffic) opt out:
+    // an AABB frozen at build time is either a wall around a knee-high mound
+    // or a ghost box left where a vehicle used to be
+    const opensOut = (o) => {
+      for (let p = o; p && p !== group; p = p.parent) if (p.userData.noCollide) return true;
+      return false;
+    };
     group.traverse((o) => {
       if (!o.isMesh) return;
+      if (opensOut(o)) return;
       if (o.isInstancedMesh) {
         // per-instance AABBs (palisade posts, background walls, fences were
         // walk-through because instanced meshes were skipped wholesale)
@@ -290,6 +304,7 @@ async function boot() {
   let minimap = null;                    // assigned once the presets exist
 
   function activateEra(era) {
+    if (!Number.isInteger(era) || !ERAS[era]) return;
     if (era === currentEra) return;
     let built = eraCache.get(era);
     if (!built) {
@@ -310,6 +325,8 @@ async function boot() {
     for (const [x, y, z, o] of built.fires) effects.addFire(x, y, z, o);
     water.pond.visible = era === 3 || era === 4;
     water.setEra(era);
+    renderer.shadowMap.needsUpdate = true;
+    envAge = 1e9;
     rig.era = era;                       // wading rules follow the century
     if (minimap) minimap.onEra();
     effects.setAurora(era === 0);
@@ -317,10 +334,14 @@ async function boot() {
     ambience.setScene(era, sky.state.sunLow, built.fires.length > 0);
     rebuildColliders(built.group, era);
     // HUD
-    document.querySelectorAll('.era-btn').forEach((b, i) => b.classList.toggle('active', i === era));
+    document.querySelectorAll('.era-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === era);
+      b.setAttribute('aria-pressed', String(i === era));
+    });
     $('era-title').textContent = ERAS[era].title;
     $('era-body').textContent = ERAS[era].body.replace(/\s+/g, ' ');
     $('era-facts').innerHTML = ERAS[era].facts.map((f) => `<span>${f}</span>`).join('');
+    $('era-evidence').textContent = ERAS[era].evidence;
   }
 
   // era switch with fade + year spin
@@ -344,7 +365,7 @@ async function boot() {
         const u = Math.min(1, (performance.now() - t0) / 1100);
         const e = u < 0.5 ? 2 * u * u : -1 + (4 - 2 * u) * u;
         const y = Math.round(fromYear + (toYear - fromYear) * e);
-        yearEl.textContent = y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${y}`;
+        yearEl.textContent = y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${Math.max(1, y)}`;
         if (u < 1) requestAnimationFrame(spin);
         else setTimeout(() => { yearEl.style.opacity = 0; labelEl.style.opacity = 0; }, 600);
       };
@@ -357,7 +378,7 @@ async function boot() {
   }
 
   // ------- camera presets -------
-  const yAt = (x, z, h) => heightAt(x, z) + h;
+  const yAt = (x, z, h) => meshHeightAt(x, z) + h;
   const riverW = LOC.STEAD.x - 210; // west-leg river x near the stead
   const riverPtNear = (z) => {
     let best = RIVER_PTS[0], bd = Infinity;
@@ -404,7 +425,7 @@ async function boot() {
   // map click: swoop to any point, approaching from the south-east like the
   // presets so the light reads well on arrival
   function flyToPoint(x, z, alt = 250) {
-    const gy = heightAt(x, z);
+    const gy = meshHeightAt(x, z);
     tweenTo([x + alt * 0.55, gy + alt, z + alt * 0.7], [x, gy + 4, z]);
   }
   function jumpTo(pos, tgt) {
@@ -442,7 +463,9 @@ async function boot() {
   document.querySelectorAll('.era-btn').forEach((b, i) => b.addEventListener('click', () => switchEra(i)));
   // arrows belong to walking now — time travel lives on 1-6 and [ ] , .
   addEventListener('keydown', (e) => {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.target?.isContentEditable
+      || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target?.tagName)
+      || document.querySelector('#about.open, #mapwrap.open')) return;
     if (e.key >= '1' && e.key <= '6') switchEra(+e.key - 1);
     if (e.key === ']' || e.key === '.') switchEra(Math.min(ERAS.length - 1, currentEra + 1));
     if (e.key === '[' || e.key === ',') switchEra(Math.max(0, currentEra - 1));
@@ -451,7 +474,8 @@ async function boot() {
   let soundOn = false;
   function setLang(l) {
     lang = l;
-    localStorage.setItem('brezgi-lang', l);
+    document.documentElement.lang = l;
+    try { localStorage.setItem('brezgi-lang', l); } catch { /* optional preference */ }
     const L = I18N[l];
     document.querySelectorAll('[data-i18n]').forEach((el) => {
       const key = el.dataset.i18n;
@@ -469,8 +493,16 @@ async function boot() {
     $('sound-btn').textContent = (soundOn ? '🔊 ' : '🔇 ') + I18N[lang].sound;
     ambience.setScene(currentEra, sky.state.sunLow, current?.fires.length > 0);
   });
-  $('about-btn').addEventListener('click', () => $('about').classList.add('open'));
-  $('about-close').addEventListener('click', () => $('about').classList.remove('open'));
+  const closeAbout = () => { $('about').classList.remove('open'); $('about-btn').focus(); };
+  $('about-btn').addEventListener('click', () => {
+    rig.keys.clear(); rig.vel.set(0, 0, 0); rig.sprint = false;
+    if (document.pointerLockElement) document.exitPointerLock();
+    $('about').classList.add('open'); $('about-close').focus();
+  });
+  $('about-close').addEventListener('click', closeAbout);
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && $('about').classList.contains('open')) closeAbout();
+  });
   $('panel-toggle').addEventListener('click', () => $('panel').classList.toggle('closed'));
   const timeBtns = document.querySelectorAll('[data-time]');
   timeBtns.forEach((b) => b.addEventListener('click', () => {
@@ -495,6 +527,7 @@ async function boot() {
   await progress('Herding the aurochs…');
   setLang(lang);
   activateEra(2);                       // begin in the Latgalian age
+  if (matchMedia('(max-width: 760px)').matches) $('panel').classList.add('closed');
   console.log(`[boot] total ${((performance.now() - bootT0) / 1000).toFixed(2)}s`);
   $('loader').classList.add('done');
   setTimeout(() => $('loader').remove(), 900);
@@ -517,8 +550,8 @@ async function boot() {
     { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP },
     { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096 },
     { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 3, shadowMap: 4096 },
-    { pr: 1.25, grass: 0.65, shadowEvery: 4, shadowMap: 2048 },
-    { pr: 1.0, grass: 0.45, shadowEvery: 5, shadowMap: 2048 },
+    { pr: Math.min(devicePixelRatio, 1.25), grass: 0.65, shadowEvery: 4, shadowMap: 2048 },
+    { pr: Math.min(devicePixelRatio, 1), grass: 0.45, shadowEvery: 5, shadowMap: 2048 },
   ];
   function applyGov(s) {
     renderer.setPixelRatio(s.pr);
@@ -545,8 +578,7 @@ async function boot() {
       gov.highSamples = 0;
       gov.upgradeCooldown = 30;
       applyGov(GOV_STEPS[gov.level]);
-    } else if (fps >= 55 && gov.level > 0 && gov.upgradeCooldown === 0
-      && GOV_STEPS[gov.level - 1].shadowMap > GOV_STEPS[gov.level].shadowMap) {
+    } else if (fps >= 55 && gov.level > 0 && gov.upgradeCooldown === 0) {
       // Four comfortable samples (12s) plus a 30s post-change cooldown keep
       // the optional map-size rung from oscillating around a single sample.
       if (++gov.highSamples >= 4) {
@@ -563,10 +595,29 @@ async function boot() {
   window.__renderer = renderer;
   window.__shadow = sky.shadowInfo;
 
+  // three's WebGLAnimation requests the NEXT frame after this callback
+  // returns, so a single uncaught throw in here stops the world for good —
+  // the canvas holds its last frame while the HUD carries on answering keys.
+  // One bad tick must never cost the whole session: log the first failure,
+  // keep the picture moving.
+  const frameErrors = [];
+  window.__frameErrors = frameErrors;
   renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
+    try {
+      frame();
+    } catch (err) {
+      if (!frameErrors.length) console.error('[frame]', err);
+      if (frameErrors.length < 20) frameErrors.push(String(err && err.message ? err.message : err));
+      try { composer.render(); } catch { /* the renderer itself is gone */ }
+    }
+  });
+
+  function frame() {
+    renderer.info.reset();
+    const elapsed = clock.getDelta();
+    const dt = Math.min(elapsed, 0.05);
     const t = clock.elapsedTime;
-    govern(dt);
+    if (!document.hidden && elapsed < 10) govern(elapsed);
     if (camTween) {
       camTween.t += dt / 2.2;
       const u = Math.min(1, camTween.t);
@@ -586,8 +637,10 @@ async function boot() {
         steadY + cinema.h,
         S.z + Math.sin(cinema.angle) * cinema.r);
       camera.lookAt(S.x, steadY + 4, S.z);
-    } else {
+    } else if (!document.querySelector('#about.open, #mapwrap.open')) {
       rig.update(dt);
+    } else {
+      rig.keys.clear(); rig.vel.set(0, 0, 0); rig.sprint = false;
     }
 
     // player shadow: your body is real to the sun while you stand on earth
@@ -606,7 +659,7 @@ async function boot() {
     }
 
     const focus = camera.position;
-    const terrainY = heightAt(focus.x, focus.z);
+    const terrainY = meshHeightAt(focus.x, focus.z);
     // Clamp bad/underwater terrain samples and teleports before they reach
     // the altitude curves; a failed sample conservatively keeps ground LOD.
     const agl = Number.isFinite(focus.y) && Number.isFinite(terrainY)
@@ -629,7 +682,12 @@ async function boot() {
     envAge += dt;
     if (envAge > 5) {
       envAge = 0;
-      cubeCam.update(renderer, scene);
+      cubeCam.position.copy(focus);
+      // Capture the sky without consuming a pending main-view shadow update.
+      const shadowEnabled = renderer.shadowMap.enabled;
+      renderer.shadowMap.enabled = false;
+      try { cubeCam.update(renderer, scene); }
+      finally { renderer.shadowMap.enabled = shadowEnabled; }
     }
     animals.tick(t, dt, camera.position);
     minimap.tick(dt);
@@ -642,7 +700,7 @@ async function boot() {
       if (text !== clockText || clockEl !== clockTextEl) { clockEl.textContent = text; clockText = text; clockTextEl = clockEl; }
     }
     composer.render();
-  });
+  }
 }
 
 boot().catch((err) => {

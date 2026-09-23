@@ -3,195 +3,32 @@
 // (small Iron Age cattle and horses, primitive dark sheep, and the
 // aurochs — bulls black with a pale eel-stripe, cows red-brown).
 import * as THREE from 'three';
-import { heightAt } from './terrain.js';
+import { heightAt, meshHeightAt } from './terrain.js';
 import { makeNoise, clamp, lerp } from './util.js';
+import { quadruped, organicTube, ellipsoid } from './fauna-models.js';
 
 const rng = makeNoise(909).rng;
 const M = (c) => new THREE.MeshLambertMaterial({ color: c });
 
-function quadruped({
-  shoulder = 1.2, length = 1.9, width = 0.55, legR = 0.07,
-  color = 0x6b4a33, belly = null, headColor = null, neckLen = 0.5, headSize = 0.32,
-  horns = null, ears = true, tail = 0.5, maneColor = null,
-  tusks = false, tailR = 0.02, tasselColor = 0x2a2018,
-  horse = false, legColor = null, tailColor = null, dorsalStripeColor = null,
-}) {
-  const g = new THREE.Group();
-  const bodyH = shoulder * 0.52;
-  const legH = shoulder - bodyH / 2;
-  const bodyMat = M(color);
-  // rounded barrel: ellipsoid trunk + chest and rump volumes
-  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 9), bodyMat);
-  body.scale.set(width * 0.56, bodyH * 0.62, length * 0.53);
-  body.position.y = legH + bodyH / 2;
-  g.add(body);
-  const chest = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), bodyMat);
-  chest.scale.set(width * 0.5, bodyH * 0.56, bodyH * 0.6);
-  chest.position.set(0, legH + bodyH * 0.52, length * 0.3);
-  g.add(chest);
-  const rump = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), bodyMat);
-  rump.scale.set(width * 0.47, bodyH * 0.54, bodyH * 0.56);
-  rump.position.set(0, legH + bodyH * 0.54, -length * 0.3);
-  g.add(rump);
-  if (dorsalStripeColor) {
-    // hug the spine — at 1.14·bodyH the stripe hovered over the back
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(width * 0.13, bodyH * 0.1, length * 0.82), M(dorsalStripeColor));
-    stripe.position.set(0, legH + bodyH * 1.0, -length * 0.02);
-    g.add(stripe);
+function birdEyes(parent,x,y,z,r=.006){
+  const mat=M(0x171814);
+  for(const s of [-1,1])ellipsoid(parent,mat,[s*x,y,z],[r,r,r*.72]);
+}
+function wingGeometry(span,chord,side,pointed=false){
+  const shape=new THREE.Shape();shape.moveTo(0,0);
+  shape.quadraticCurveTo(side*span*.38,chord*.62,side*span*(pointed?1:.82),chord*.2);
+  shape.lineTo(side*span,pointed?-chord*.5:-chord*.12);
+  for(let i=0;i<6;i++){
+    const u=.94-i*.10;shape.lineTo(side*span*u,-chord*(.3+Math.sin(i*.7)*.12));
+    shape.lineTo(side*span*(u-.035),-chord*.58);
   }
-  if (belly) {
-    const b = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), M(belly));
-    b.scale.set(width * 0.5, bodyH * 0.42, length * 0.46);
-    b.position.y = legH + bodyH * 0.28;
-    g.add(b);
-  }
-  const legs = [];
-  for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-    const legLen = legH + bodyH * 0.3;
-    let leg;
-    if (legColor) {
-      const lowerMat = M(legColor);
-      const upperH = legLen * 0.43;
-      const lowerH = legLen - upperH;
-      leg = new THREE.Group();
-      const upper = new THREE.Mesh(new THREE.CylinderGeometry(legR, legR * 0.88, upperH, 6), bodyMat);
-      upper.geometry.translate(0, -upperH / 2, 0);
-      const lower = new THREE.Mesh(new THREE.CylinderGeometry(legR * 0.88, legR * 0.72, lowerH, 6), lowerMat);
-      lower.geometry.translate(0, -lowerH / 2, 0);
-      lower.position.y = -upperH;
-      leg.add(upper, lower);
-    } else {
-      leg = new THREE.Mesh(new THREE.CylinderGeometry(legR, legR * 0.75, legLen, 6), bodyMat);
-      leg.geometry.translate(0, -legLen / 2, 0);
-    }
-    // legs sit UNDER the barrel, not at its corners — corner legs are the
-    // single biggest "creepy toy" tell
-    leg.position.set(sx * width * 0.3, legLen, sz * length * 0.33);
-    g.add(leg);
-    legs.push(leg);
-  }
-  // neck + head pivot
-  const neck = new THREE.Group();
-  neck.position.set(0, legH + bodyH * 0.6, length / 2 - 0.12);
-  const neckL = neckLen + headSize * 0.8;
-  // short thick neck rising ~40° and blending into the chest
-  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.5, headSize * 0.78, neckL, 8), bodyMat);
-  neckMesh.position.set(0, neckL * 0.3, neckL * 0.32);
-  neckMesh.rotation.x = Math.PI / 2 - 0.72;
-  neck.add(neckMesh);
-  const headMat = M(headColor || color);
-  const headTop = neckL * 0.62, headZ = neckL * 0.58;
-  if (horse) {
-    const skullLen = headSize * 0.9;
-    const muzzleLen = skullLen * 0.55;
-    const muzzleDrop = 0.35;
-    const skull = new THREE.Mesh(new THREE.BoxGeometry(headSize * 0.72, headSize * 0.58, skullLen), headMat);
-    skull.position.set(0, headTop, headZ);
-    skull.rotation.x = -0.08;
-    neck.add(skull);
-    const brow = new THREE.Mesh(new THREE.BoxGeometry(headSize * 0.86, headSize * 0.2, skullLen * 0.45), headMat);
-    brow.position.set(0, headTop + headSize * 0.18, headZ + skullLen * 0.08);
-    brow.rotation.x = -0.08;
-    neck.add(brow);
-    // horse nose: shorter, narrower, and tipped down so it stops reading as a pipe
-    const muzzle = new THREE.Mesh(new THREE.BoxGeometry(headSize * 0.4, headSize * 0.32, muzzleLen), headMat);
-    muzzle.rotation.x = muzzleDrop;
-    muzzle.position.set(
-      0,
-      headTop - headSize * 0.08 - Math.sin(muzzleDrop) * muzzleLen * 0.5,
-      headZ + skullLen * 0.42 + Math.cos(muzzleDrop) * muzzleLen * 0.5);
-    neck.add(muzzle);
-    if (ears) {
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Mesh(new THREE.ConeGeometry(headSize * 0.09, headSize * 0.34, 4), headMat);
-        ear.position.set(s * headSize * 0.24, headTop + headSize * 0.44, headZ - skullLen * 0.18);
-        ear.rotation.set(-0.12, 0, s * -0.32);
-        neck.add(ear);
-      }
-    }
-  } else {
-    const head = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), headMat);
-    head.scale.set(headSize * 0.42, headSize * 0.5, headSize * 0.55);
-    head.position.set(0, headTop, headZ);
-    neck.add(head);
-    // muzzle drops slightly from the brow — a level muzzle reads reptilian
-    const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(headSize * 0.24, headSize * 0.33, headSize * 0.62, 8), headMat);
-    muzzle.rotation.x = Math.PI / 2 + 0.4;
-    muzzle.position.set(0, headTop - headSize * 0.18, headZ + headSize * 0.48);
-    neck.add(muzzle);
-  }
-  if (ears && !horse) {
-    for (const s of [-1, 1]) {
-      // ears stick out SIDEWAYS from the poll, slightly drooped
-      const ear = new THREE.Mesh(new THREE.ConeGeometry(headSize * 0.14, headSize * 0.4, 5), bodyMat);
-      ear.position.set(s * headSize * 0.5, headTop + headSize * 0.32, headZ - headSize * 0.08);
-      ear.rotation.z = s * -1.25;
-      neck.add(ear);
-    }
-  }
-  if (horns) {
-    for (const s of [-1, 1]) {
-      // aurochs sweep: out-and-up base, tips hooking forward-inward
-      const h1 = new THREE.Mesh(new THREE.CylinderGeometry(horns.r * 0.8, horns.r * 1.4, horns.len * 0.6, 6), M(0xd8cfb8));
-      h1.position.set(s * headSize * 0.42, headTop + headSize * 0.42, headZ);
-      h1.rotation.z = s * -horns.spread;
-      neck.add(h1);
-      const h2 = new THREE.Mesh(new THREE.CylinderGeometry(horns.r * 0.3, horns.r * 0.75, horns.len * 0.52, 6), M(0xe6dcc4));
-      h2.position.set(
-        s * (headSize * 0.42 + Math.sin(horns.spread) * horns.len * 0.5),
-        headTop + headSize * 0.42 + Math.cos(horns.spread) * horns.len * 0.42,
-        headZ + horns.fwd * horns.len * 0.5);
-      h2.rotation.set(-horns.fwd * 1.6, 0, s * -horns.spread * 0.25);
-      neck.add(h2);
-      if (horns.palmate) {
-        // moose palm: a flattened shovel at the beam's end — the plain
-        // cylinders read as long cow horns on an elk
-        const palm = new THREE.Mesh(new THREE.BoxGeometry(horns.len * 0.55, horns.len * 0.4, horns.r * 2.6), M(0xd8cfb8));
-        palm.position.set(
-          s * (headSize * 0.42 + Math.sin(horns.spread) * horns.len * 0.82),
-          headTop + headSize * 0.42 + Math.cos(horns.spread) * horns.len * 0.66,
-          headZ + horns.fwd * horns.len * 0.7);
-        palm.rotation.set(-horns.fwd * 1.2, s * 0.25, s * -horns.spread * 0.55);
-        neck.add(palm);
-      }
-    }
-  }
-  if (maneColor) {
-    const mane = new THREE.Mesh(new THREE.BoxGeometry(width * 0.14, headSize * 0.55, neckL * 0.9), M(maneColor));
-    mane.position.set(0, neckL * 0.42 + headSize * 0.3, neckL * 0.3);
-    mane.rotation.x = -0.72;
-    neck.add(mane);
-  }
-  if (tusks) {
-    for (const s of [-1, 1]) {
-      const tk = new THREE.Mesh(new THREE.ConeGeometry(headSize * 0.06, headSize * 0.28, 5), M(0xe8e0cc));
-      tk.position.set(s * headSize * 0.24, headTop - headSize * 0.22, headZ + headSize * 0.52);
-      tk.rotation.set(-0.5, 0, s * 0.7);
-      neck.add(tk);
-    }
-  }
-  g.add(neck);
-  if (tail > 0) {
-    // thin livestock tails HANG; only bushy brushes (fox, wolf) are carried
-    const hang = tailR < 0.03 && !horse;
-    const t = new THREE.Mesh(new THREE.CylinderGeometry(tailR, tailR * 2, tail, 5), tailColor ? M(tailColor) : bodyMat);
-    // hanging tails pivot from the dock, not through it — centred rods
-    // poked half their length up past the rump like a pump handle
-    t.position.set(0, legH + bodyH * 0.62 - (hang ? tail * 0.4 : 0), -length / 2 - 0.02);
-    t.rotation.x = hang ? 0.13 : 0.42;
-    g.add(t);
-    const tassel = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.055, tailR * 1.6), 6, 5), M(tasselColor));
-    if (hang) tassel.position.set(0, legH + bodyH * 0.62 - tail * 0.78, -length / 2 - 0.02 - tail * 0.14);
-    else tassel.position.set(0, legH + bodyH * 0.62 - tail * 0.46, -length / 2 - 0.02 - tail * 0.2);
-    g.add(tassel);
-  }
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
-  return { group: g, legs, neck, shoulder };
+  shape.lineTo(0,-chord*.42);shape.closePath();
+  const geo=new THREE.ShapeGeometry(shape,12);geo.rotateX(-Math.PI/2);return geo;
 }
 
-function fowl({ size = 0.22, color = 0xd8d3c4, comb = false, neckLen = 0 }) {
+function fowl({ size = 0.22, color = 0xd8d3c4, comb = false, neckLen = 0, grouse = false }) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 7), M(color));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(size, 16, 10), M(color));
   body.scale.set(0.85, 0.9, 1.25);
   body.position.y = size * 1.25;
   body.rotation.x = -0.22;               // breast down, tail up
@@ -204,9 +41,10 @@ function fowl({ size = 0.22, color = 0xd8d3c4, comb = false, neckLen = 0 }) {
   g.add(tail);
   const neck = new THREE.Group();
   neck.position.set(0, size * 1.6, size * 0.9);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(size * 0.42, 6, 5), M(color));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(size * 0.42, 16, 10), M(color));
   head.position.set(0, size * 0.7 + neckLen, size * 0.28);
   neck.add(head);
+  birdEyes(neck,size*.36,size*.77+neckLen,size*.46,size*.033);
   {
     // EVERY fowl gets a neck — the old neckLen>0 gate left chicken, rooster,
     // ptarmigan and grouse heads floating beside the body
@@ -220,16 +58,18 @@ function fowl({ size = 0.22, color = 0xd8d3c4, comb = false, neckLen = 0 }) {
   beak.rotation.x = Math.PI / 2;
   beak.position.set(0, size * 0.68 + neckLen, size * 0.75);
   neck.add(beak);
-  if (comb) {
-    const cm = new THREE.Mesh(new THREE.BoxGeometry(size * 0.1, size * 0.3, size * 0.45), M(0xc03028));
-    cm.position.set(0, size * 1.1 + neckLen, size * 0.25);
-    neck.add(cm);
+  if (comb || grouse) {
+    const red=M(0xb93027);
+    if(grouse)for(const s of [-1,1])ellipsoid(neck,red,[s*size*.34,size*.9+neckLen,size*.43],[size*.09,size*.045,size*.12]);
+    else for(let i=0;i<4;i++)ellipsoid(neck,red,[0,size*1.08+neckLen,size*(.05+i*.13)],[size*.065,size*(.11+(i%2)*.05),size*.10]);
   }
   g.add(neck);
   for (const s of [-1, 1]) {
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, size * 1.1, 4), M(0xc09030));
     leg.position.set(s * size * 0.3, size * 0.55, 0);
     g.add(leg);
+    for(let toe=-1;toe<=1;toe++)organicTube(g,M(0xa77e32),[[s*size*.3,.018,0],[s*size*.3+toe*size*.14,.012,size*.30]],[.008,.002]);
+    ellipsoid(g,M(color),[s*size*.65,size*1.2,-size*.12],[size*.20,size*.48,size*.80]);
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return { group: g, neck, legs: [] };
@@ -237,29 +77,29 @@ function fowl({ size = 0.22, color = 0xd8d3c4, comb = false, neckLen = 0 }) {
 
 function stork() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), M(0xf0ece2));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 10), M(0xf0ece2));
   body.scale.set(0.8, 0.85, 1.4);
   body.position.y = 0.78;
   g.add(body);
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.07, 0.55), M(0x2a2a2c));
-  wing.position.set(0, 0.86, -0.18);
-  g.add(wing);
+  for(const s of [-1,1])ellipsoid(g,M(0x282a29),[s*.18,.81,-.11],[.075,.17,.30]);
   const neck = new THREE.Group();
   neck.position.set(0, 0.95, 0.3);
   const nm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.55, 5), M(0xf0ece2));
   nm.position.set(0, 0.24, 0.06);
   nm.rotation.x = 0.25;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 6, 5), M(0xf0ece2));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 10), M(0xf0ece2));
   head.position.set(0, 0.5, 0.16);
   const beak = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.42, 4), M(0xc23a28));
   beak.rotation.x = Math.PI / 2;
   beak.position.set(0, 0.5, 0.45);
   neck.add(nm, head, beak);
+  birdEyes(neck,.090,.515,.208,.01);
   g.add(neck);
   for (const s of [-1, 1]) {
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.62, 4), M(0xc23a28));
     leg.position.set(s * 0.09, 0.31, 0);
     g.add(leg);
+    for(let toe=-1;toe<=1;toe++)organicTube(g,M(0xae3626),[[s*.09,.018,0],[s*.09+toe*.045,.008,.13]],[.009,.002]);
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return { group: g, neck, legs: [] };
@@ -271,22 +111,22 @@ function stork() {
 function wagtail() {
   const g = new THREE.Group();
   const grey = M(0x9aa0a4), white = M(0xf0efe8), black = M(0x1c1d20);
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), grey);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 10), grey);
   body.scale.set(0.8, 0.78, 1.25);
   body.position.y = 0.085;
   g.add(body);
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.048, 7, 6), white);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.048, 16, 10), white);
   belly.scale.set(0.72, 0.6, 1.1);
   belly.position.y = 0.062;
   g.add(belly);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.034, 7, 6), white);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.034, 16, 10), white);
   head.position.set(0, 0.135, 0.062);
   g.add(head);
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.0345, 7, 6), black);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.0345, 16, 10), black);
   cap.scale.set(0.94, 0.62, 0.8);
   cap.position.set(0, 0.152, 0.052);
   g.add(cap);
-  const bib = new THREE.Mesh(new THREE.SphereGeometry(0.026, 6, 5), black);
+  const bib = new THREE.Mesh(new THREE.SphereGeometry(0.026, 16, 10), black);
   bib.scale.set(0.8, 0.7, 0.5);
   bib.position.set(0, 0.108, 0.088);
   g.add(bib);
@@ -322,15 +162,15 @@ function wagtail() {
 // enough to read at arm's length in the flowers, cheap enough for a dozen.
 function bumblebee() {
   const g = new THREE.Group();
-  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.02, 6, 5), M(0x18140f));
+  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 10), M(0x18140f));
   thorax.position.set(0, 0, 0.012);
-  const band = new THREE.Mesh(new THREE.SphereGeometry(0.019, 6, 5), M(0xd8a020));
+  const band = new THREE.Mesh(new THREE.SphereGeometry(0.019, 16, 10), M(0xd8a020));
   band.scale.set(1, 0.85, 0.55);
   band.position.set(0, 0.002, -0.004);
-  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.017, 6, 5), M(0x18140f));
+  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.017, 16, 10), M(0x18140f));
   rump.scale.set(0.95, 0.9, 1.1);
   rump.position.set(0, 0, -0.02);
-  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.009, 5, 4), M(0xe8e2d4));
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.009, 16, 10), M(0xe8e2d4));
   tip.position.set(0, 0, -0.034);
   g.add(thorax, band, rump, tip);
   const wings = [];
@@ -349,53 +189,58 @@ function bumblebee() {
 // --- small ground game --------------------------------------------------------
 function hare(color = 0x8a7a64, belly = 0xcfc6b4) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 7), M(color));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 10), M(color));
   body.scale.set(0.75, 0.8, 1.15);
   body.position.y = 0.17;
-  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 7), M(color));
+  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 10), M(color));
   rump.position.set(0, 0.2, -0.1);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.085, 7, 6), M(color));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.085, 16, 10), M(color));
   head.position.set(0, 0.28, 0.17);
-  const bl = new THREE.Mesh(new THREE.SphereGeometry(0.1, 7, 6), M(belly));
+  const bl = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 10), M(belly));
   bl.scale.set(0.7, 0.55, 1.0);
   bl.position.y = 0.12;
-  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.035, 5, 4), M(0xf2ede2));
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.035, 16, 10), M(0xf2ede2));
   tail.position.set(0, 0.21, -0.23);
   g.add(body, rump, head, bl, tail);
   for (const s of [-1, 1]) {
-    const ear = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.022, 0.2, 5), M(color));
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), M(color));
+    ear.scale.set(.024,.12,.016);
     ear.position.set(s * 0.038, 0.42, 0.14);
     ear.rotation.set(-0.15, 0, s * -0.18);
     g.add(ear);
+    ellipsoid(g,M(0x29231d),[s*.065,.295,.211],[.012,.014,.011]);
+    ellipsoid(g,M(color),[s*.085,.022,.06],[.037,.022,.095]);
+    ellipsoid(g,M(color),[s*.105,.033,-.12],[.047,.032,.090]);
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return { group: g, legs: [], neck: null };
 }
 
 function squirrel() {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.075, 7, 6), M(0xa14e28));
-  body.scale.set(0.8, 1.0, 1.2);
-  body.position.y = 0.085;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.048, 6, 5), M(0xa14e28));
-  head.position.set(0, 0.15, 0.08);
-  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.03, 6, 8, Math.PI * 1.25), M(0x8a3f20));
-  tail.position.set(0, 0.12, -0.1);
-  tail.rotation.set(0, Math.PI / 2, 0.3);
-  const bl = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), M(0xe8dcc8));
-  bl.position.set(0, 0.07, 0.03);
-  g.add(body, head, tail, bl);
-  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  return { group: g, legs: [], neck: null };
+  const g=new THREE.Group(),coat=M(0x99502b),dark=M(0x221b16);
+  ellipsoid(g,coat,[0,.095,0],[.060,.093,.10]);
+  ellipsoid(g,coat,[0,.163,.081],[.043,.049,.052]);
+  ellipsoid(g,M(0xc8bba1),[0,.080,.050],[.040,.060,.048]);
+  organicTube(g,coat,[[0,.07,-.07],[0,.12,-.17],[0,.25,-.19],[0,.31,-.13],[0,.28,-.075]],[.025,.047,.055,.042,.003]);
+  for(const s of [-1,1]){
+    ellipsoid(g,coat,[s*.028,.215,.071],[.016,.031,.012]);
+    ellipsoid(g,dark,[s*.036,.175,.111],[.005,.006,.005]);
+    organicTube(g,coat,[[s*.043,.095,.019],[s*.035,.062,.068],[s*.022,.060,.099]],[.014,.011,.004]);
+    ellipsoid(g,coat,[s*.050,.014,-.005],[.025,.013,.045]);
+  }
+  ellipsoid(g,dark,[0,.16,.134],[.011,.008,.007]);
+  g.traverse(o=>{if(o.isMesh)o.castShadow=true;});return {group:g,legs:[],neck:null};
 }
 
 // --- water creatures ----------------------------------------------------------
-function fish({ len = 0.5, color = 0x37424a, belly = 0x93a29a } = {}) {
+function fish({ len = 0.5, color = 0x37424a, belly = 0x93a29a, pike = false } = {}) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 9, 7), M(color));
-  body.scale.set(len * 0.13, len * 0.2, len * 0.5);
-  const bl = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), M(belly));
-  bl.scale.set(len * 0.11, len * 0.14, len * 0.44);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), M(color));
+  body.scale.set(len * (pike?.08:.13), len * (pike?.11:.2), len * 0.5);
+  birdEyes(g,len*(pike?.061:.087),len*.03,len*.37,len*.019);
+  if(pike)ellipsoid(g,M(color),[0,0,len*.42],[len*.075,len*.055,len*.16]);
+  const bl = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), M(belly));
+  bl.scale.set(len * (pike?.065:.11), len * (pike?.07:.14), len * 0.44);
   bl.position.y = -len * 0.05;
   const tailF = new THREE.Mesh(new THREE.ConeGeometry(len * 0.16, len * 0.24, 4), M(color));
   tailF.scale.x = 0.22;
@@ -403,7 +248,7 @@ function fish({ len = 0.5, color = 0x37424a, belly = 0x93a29a } = {}) {
   tailF.position.set(0, 0, -len * 0.58);
   const dorsal = new THREE.Mesh(new THREE.ConeGeometry(len * 0.1, len * 0.16, 4), M(color));
   dorsal.scale.x = 0.2;
-  dorsal.position.set(0, len * 0.2, -len * 0.05);
+  dorsal.position.set(0, len * (pike?.10:.2), -len * (pike?.31:.05));
   g.add(body, bl, tailF, dorsal);
   return { group: g, legs: [], neck: null, wiggle: true };
 }
@@ -411,20 +256,24 @@ function fish({ len = 0.5, color = 0x37424a, belly = 0x93a29a } = {}) {
 function duck(male = true) {
   const g = new THREE.Group();
   const bodyC = male ? 0x8d867a : 0x8a7457;
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 9, 7), M(bodyC));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 10), M(bodyC));
   body.scale.set(0.75, 0.62, 1.25);
   body.position.y = 0.02;
-  const breast = new THREE.Mesh(new THREE.SphereGeometry(0.1, 7, 6), M(male ? 0x5a3a2c : 0x7a6448));
+  const breast = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 10), M(male ? 0x5a3a2c : 0x7a6448));
   breast.position.set(0, 0.03, 0.12);
   const neck = new THREE.Group();
   neck.position.set(0, 0.1, 0.14);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.062, 7, 6), M(male ? 0x1e5e30 : 0x8a7457));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.062, 16, 10), M(male ? 0x1e5e30 : 0x8a7457));
   head.position.set(0, 0.12, 0.05);
+  organicTube(neck, M(male ? 0x1e5e30 : bodyC), [[0,-0.06,-0.02],[0,0.05,0.025],[0,0.12,0.05]], [0.054,0.043,0.038]);
   const bill = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.09, 4), M(0xc9a028));
   bill.scale.y = 0.55;
   bill.rotation.x = Math.PI / 2;
   bill.position.set(0, 0.11, 0.12);
   neck.add(head, bill);
+  bill.geometry.dispose();bill.geometry=new THREE.SphereGeometry(1,16,10);bill.scale.set(.025,.012,.049);bill.rotation.set(0,0,0);
+  birdEyes(neck,.052,.139,.072,.006);
+  if(male)organicTube(neck,M(0xe8e6dc),[[0,.015,.009],[0,.028,.015]],[.049,.046]);
   const tail = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 4), M(bodyC));
   tail.scale.y = 0.4;
   tail.rotation.x = -Math.PI / 2 - 0.5;
@@ -436,11 +285,11 @@ function duck(male = true) {
 
 function swan(beakC = 0xd8c030) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), M(0xf4f2ea));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 10), M(0xf4f2ea));
   body.scale.set(0.72, 0.6, 1.25);
   body.position.y = 0.05;
   for (const s of [-1, 1]) {
-    const wing = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), M(0xfaf8f2));
+    const wing = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 10), M(0xfaf8f2));
     wing.scale.set(0.4, 0.5, 1.0);
     wing.position.set(s * 0.14, 0.14, -0.05);
     g.add(wing);
@@ -449,76 +298,79 @@ function swan(beakC = 0xd8c030) {
   neck.position.set(0, 0.16, 0.3);
   // the S: base leans back, mid rises, top arches forward and the head
   // tips down — a straight column read as a periscope, not a swan
-  const n1 = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.052, 0.26, 6), M(0xf4f2ea));
-  n1.position.set(0, 0.1, 0.045);
-  n1.rotation.x = -0.5;
-  const n2 = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.038, 0.24, 6), M(0xf4f2ea));
-  n2.position.set(0, 0.3, 0.1);
-  n2.rotation.x = 0.12;
-  const n3 = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.16, 6), M(0xf4f2ea));
-  n3.position.set(0, 0.44, 0.075);
-  n3.rotation.x = 0.55;
-  neck.add(n3);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), M(0xf4f2ea));
+  organicTube(neck,M(0xf4f2ea),[[0,-.05,-.09],[0,.13,-.01],[0,.30,-.015],[0,.43,-.015],[0,.50,.03]], [.060,.045,.033,.030,.031]);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 10), M(0xf4f2ea));
   head.scale.set(0.85, 0.8, 1.15);
   head.position.set(0, 0.5, 0.03);
   const beak = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.08, 4), M(beakC));
   beak.rotation.x = Math.PI / 2 + 0.25;      // swans carry the bill tipped down
   beak.position.set(0, 0.485, 0.1);
-  neck.add(n1, n2, head, beak);
+  neck.add(head, beak);
+  birdEyes(neck,.040,.509,.050,.0045);
   const tail = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.16, 5), M(0xf4f2ea));
   tail.scale.y = 0.5;
   tail.rotation.x = -Math.PI / 2 - 0.55;
   tail.position.set(0, 0.12, -0.36);
-  g.add(neck, tail);
+  g.add(body, neck, tail);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return { group: g, legs: [], neck };
 }
 
 function frog() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.055, 7, 6), M(0x5a7a2e));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 10), M(0x5a7a2e));
   body.scale.set(1, 0.75, 1.2);
   body.position.y = 0.04;
   g.add(body);
   for (const s of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.016, 5, 4), M(0x314a1c));
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.016, 16, 10), M(0x314a1c));
     eye.position.set(s * 0.03, 0.085, 0.035);
     g.add(eye);
+    ellipsoid(g,M(0x161a0d),[s*.033,.088,.047],[.008,.008,.006]);
+    organicTube(g,M(0x526e2e),[[s*.038,.035,-.025],[s*.078,.030,-.060],[s*.050,.014,.010],[s*.085,.006,.030]],[.020,.018,.008,.003]);
+    organicTube(g,M(0x526e2e),[[s*.032,.037,.029],[s*.052,.013,.046],[s*.074,.005,.065]],[.011,.007,.002]);
   }
   return { group: g, legs: [], neck: null };
 }
 
 function beaver() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.24, 9, 7), M(0x4a3322));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 10), M(0x4a3322));
   body.scale.set(0.75, 0.55, 1.15);
   body.position.y = 0.02;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 7, 6), M(0x543a26));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 10), M(0x543a26));
   head.position.set(0, 0.1, 0.26);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.025, 0.26), M(0x3a3234));
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(1,16,10), M(0x3a3234));tail.scale.set(.08,.013,.16);
   tail.position.set(0, 0.0, -0.36);
   g.add(body, head, tail);
+  birdEyes(g,.091,.136,.299,.012);
+  for(const s of [-1,1]){
+    ellipsoid(g,M(0x493223),[s*.088,.176,.236],[.027,.030,.020]);
+    ellipsoid(g,M(0x3b2c23),[s*.15,-.065,-.06],[.04,.023,.08]);
+  }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return { group: g, legs: [], neck: null };
 }
 
 // --- the air -------------------------------------------------------------------
 function butterfly(color) {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
-  const wings = [];
-  for (const s of [-1, 1]) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(0.085, 0.065), mat);
-    w.geometry.translate(s * 0.045, 0, 0);
-    w.rotation.y = 0;
-    g.add(w);
-    wings.push(w);
+  const g=new THREE.Group(),wings=[],mat=new THREE.MeshLambertMaterial({color,side:THREE.DoubleSide});
+  for(const s of [-1,1]){
+    const shape=new THREE.Shape();shape.moveTo(0,.020);
+    shape.bezierCurveTo(s*.025,.064,s*.073,.080,s*.073,.038);
+    shape.bezierCurveTo(s*.085,.008,s*.052,-.003,s*.041,-.006);
+    shape.bezierCurveTo(s*.073,-.033,s*.029,-.063,s*.014,-.028);
+    shape.lineTo(0,-.020);shape.closePath();
+    const geo=new THREE.ShapeGeometry(shape,14);geo.rotateX(-Math.PI/2);
+    const w=new THREE.Mesh(geo,mat);w.userData.side=s;g.add(w);wings.push(w);
+    for(const [x,z,r] of [[.052,-.035,.009],[.047,-.015,.004],[.029,.029,.006]]){
+      const spot=new THREE.Mesh(new THREE.CircleGeometry(r,12),new THREE.MeshLambertMaterial({color:0x343027,side:THREE.DoubleSide}));
+      spot.rotation.x=-Math.PI/2;spot.position.set(s*x,.0005,z);w.add(spot);
+    }
   }
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.008, 0.06, 4), M(0x241c14));
-  body.rotation.x = Math.PI / 2;
-  g.add(body);
-  return { group: g, legs: [], neck: null, wings, flapAxis: 'z' };
+  ellipsoid(g,M(0x29241c),[0,0,0],[.006,.005,.035]);
+  for(const s of [-1,1])organicTube(g,M(0x29241c),[[s*.003,0,.027],[s*.01,.005,.045],[s*.015,.009,.047]],[.001,.0008,.0005]);
+  return {group:g,legs:[],neck:null,wings,flapAxis:'z'};
 }
 
 function dragonfly() {
@@ -529,8 +381,8 @@ function dragonfly() {
   const wMat = new THREE.MeshLambertMaterial({ color: 0xdce8ec, transparent: true, opacity: 0.45, side: THREE.DoubleSide });
   const wings = [];
   for (const [s, dz] of [[-1, 0.03], [1, 0.03], [-1, -0.03], [1, -0.03]]) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.03), wMat);
-    w.geometry.translate(s * 0.078, 0, 0);
+    const shape=new THREE.Shape();shape.moveTo(0,0);shape.bezierCurveTo(s*.05,.025,s*.15,.027,s*.155,.008);shape.bezierCurveTo(s*.14,-.01,s*.035,-.013,0,0);
+    const w = new THREE.Mesh(new THREE.ShapeGeometry(shape,12), wMat);
     w.position.set(0, 0.008, dz);
     w.rotation.x = -Math.PI / 2;
     g.add(w);
@@ -541,18 +393,20 @@ function dragonfly() {
 
 function swallow() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.05, 7, 6), M(0x1c2430));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 10), M(0x1c2430));
   body.scale.set(0.75, 0.7, 1.5);
-  const bl = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 5), M(0xe8e2d4));
+  const bl = new THREE.Mesh(new THREE.SphereGeometry(0.035, 16, 10), M(0xe8e2d4));
   bl.position.set(0, -0.02, 0.02);
   g.add(body, bl);
   const wings = [];
   const wMat = M(0x1c2430);
   for (const s of [-1, 1]) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.05), wMat);
+    const w = new THREE.Mesh(wingGeometry(.19,.05,s,true), wMat);
     w.material.side = THREE.DoubleSide;
-    w.geometry.translate(s * 0.088, 0, -0.01);
-    w.rotation.x = -Math.PI / 2;
+    // lay the wing flat in the GEOMETRY, not in the mesh Euler: with
+    // rotation.x baked in the mesh, three's XYZ order applies the flap about
+    // z FIRST, so the beat swept the wings fore-and-aft instead of up-down
+    w.userData.side = s;
     g.add(w);
     wings.push(w);
   }
@@ -567,12 +421,12 @@ function swallow() {
 
 function craneBird() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 7), M(0xb5b3ac));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 10), M(0xb5b3ac));
   body.scale.set(0.55, 0.5, 1.2);
   const neckM = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.55, 5), M(0xb5b3ac));
   neckM.rotation.x = Math.PI / 2;
   neckM.position.set(0, 0.02, 0.55);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 5), M(0x8a8880));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 10), M(0x8a8880));
   head.position.set(0, 0.02, 0.85);
   const legsM = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.5, 4), M(0x3a3430));
   legsM.rotation.x = Math.PI / 2;
@@ -580,13 +434,15 @@ function craneBird() {
   g.add(body, neckM, head, legsM);
   const wings = [];
   for (const s of [-1, 1]) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.3), M(0xa8a69e));
+    const w = new THREE.Mesh(wingGeometry(.88,.30,s), M(0xa8a69e));
     w.material.side = THREE.DoubleSide;
-    w.geometry.translate(s * 0.44, 0, 0);
-    w.rotation.x = -Math.PI / 2;
-    const tip = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.26), M(0x2e2c28));
-    tip.position.set(s * 0.74, 0.001, 0);
-    tip.rotation.x = -Math.PI / 2;
+    w.userData.side = s;
+    // the dark primaries pivot at the SHOULDER with their wing — pivoting on
+    // their own centre tore the tip off the wing on every beat
+    const tip = new THREE.Mesh(wingGeometry(.28,.26,s), M(0x2e2c28));
+    tip.material.side = THREE.DoubleSide;
+    tip.geometry.translate(s * 0.60, 0.001, -.015);
+    tip.userData.side = s;
     g.add(w, tip);
     wings.push(w);
     wings.push(tip);
@@ -597,15 +453,16 @@ function craneBird() {
 
 function buzzard() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.14, 7, 6), M(0x4a3826));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 10), M(0x4a3826));
   body.scale.set(0.7, 0.55, 1.3);
   g.add(body);
   const wings = [];
   for (const s of [-1, 1]) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.19), M(0x54402c));
+    const w = new THREE.Mesh(wingGeometry(.52,.19,s), M(0x54402c));
     w.material.side = THREE.DoubleSide;
-    w.geometry.translate(s * 0.26, 0, 0);
-    w.rotation.set(-Math.PI / 2, 0, s * 0.12);   // slight soaring dihedral
+    w.userData.side = s;
+    w.userData.dihedral = s * 0.12;              // slight soaring dihedral —
+    w.rotation.z = w.userData.dihedral;          // flap() preserves it now
     g.add(w);
     wings.push(w);
   }
@@ -640,11 +497,13 @@ export const SPECIES = {
     belly: 0x8a5a38, neckLen: 0.45, headSize: 0.34, horns: { len: 0.26, r: 0.026, spread: 0.75, fwd: 0.08 },
   }),
   sheepDark: () => quadruped({
+    family: 'sheep',
     shoulder: 0.6, length: 0.95, width: 0.42, legR: 0.035,
     color: [0x4d4238, 0x6e6055, 0x8c8175][(rng() * 3) | 0],
     headColor: 0x3a2f26, neckLen: 0.16, headSize: 0.17, tail: 0.15,
   }),
   sheepWhite: () => quadruped({
+    family: 'sheep',
     shoulder: 0.68, length: 1.05, width: 0.48, legR: 0.035, color: 0xd6cfbe,
     headColor: 0x4a4038, neckLen: 0.18, headSize: 0.18, tail: 0.2,
   }),
@@ -665,15 +524,18 @@ export const SPECIES = {
     tasselColor: 0x181513, dorsalStripeColor: 0x24201e,
   }),
   pig: () => quadruped({
+    family: 'pig',
     shoulder: 0.62, length: 1.2, width: 0.44, legR: 0.04, color: 0x3d3229,
     neckLen: 0.1, headSize: 0.24, ears: true, tail: 0.12,
   }),
   elk: () => quadruped({
+    family: 'elk',
     shoulder: 1.9, length: 2.7, width: 0.7, legR: 0.08, color: 0x4d4136,
     belly: 0x5c5044, neckLen: 0.5, headSize: 0.44, tail: 0.1,
     horns: { len: 0.7, r: 0.045, spread: 1.15, fwd: -0.1, palmate: true },
   }),
   reindeer: () => quadruped({
+    family: 'deer',
     shoulder: 1.1, length: 1.8, width: 0.5, legR: 0.05,
     color: [0x8a8378, 0x9a938a, 0x7a7268][(rng() * 3) | 0],
     belly: 0xb5afa4, headColor: 0x6e675e, neckLen: 0.42, headSize: 0.28, tail: 0.12,
@@ -685,30 +547,36 @@ export const SPECIES = {
   stork: () => stork(),
   // wild ungulates & ground game
   roeDeer: () => quadruped({
+    family: 'deer',
     shoulder: 0.76, length: 1.1, width: 0.33, legR: 0.028, color: 0xa5713f,
     belly: 0xc9a06a, neckLen: 0.36, headSize: 0.2, tail: 0.05, tailR: 0.012,
   }),
   roeBuck: () => quadruped({
+    family: 'deer',
     shoulder: 0.8, length: 1.15, width: 0.35, legR: 0.03, color: 0x9a6838,
     belly: 0xc9a06a, neckLen: 0.38, headSize: 0.21, tail: 0.05, tailR: 0.012,
     horns: { len: 0.16, r: 0.012, spread: 0.35, fwd: 0.05 },
   }),
   redDeer: () => quadruped({
+    family: 'deer',
     shoulder: 1.35, length: 2.05, width: 0.55, legR: 0.055, color: 0x8a5a34,
     belly: 0xa07048, neckLen: 0.55, headSize: 0.32, tail: 0.12, tailR: 0.015,
     horns: { len: 0.72, r: 0.03, spread: 0.7, fwd: -0.35 },
   }),
   boar: () => quadruped({
+    family: 'pig',
     shoulder: 0.85, length: 1.45, width: 0.5, legR: 0.05, color: 0x3a2e24,
     maneColor: 0x241c14, neckLen: 0.14, headSize: 0.34, tail: 0.18, tailR: 0.012,
     tusks: true,
   }),
   fox: () => quadruped({
+    family: 'canine',
     shoulder: 0.38, length: 0.62, width: 0.2, legR: 0.018, color: 0xb4562a,
     belly: 0xe8dcc8, neckLen: 0.2, headSize: 0.15, tail: 0.42, tailR: 0.05,
     tasselColor: 0xf2ede2,
   }),
   arcticFox: () => quadruped({
+    family: 'canine',
     shoulder: 0.32, length: 0.55, width: 0.19, legR: 0.017, color: 0xeceae4,
     neckLen: 0.16, headSize: 0.13, tail: 0.34, tailR: 0.048, tasselColor: 0xffffff,
   }),
@@ -718,17 +586,18 @@ export const SPECIES = {
   ptarmigan: () => fowl({ size: 0.14, color: 0xf2f2ee }),
   // water
   fishPerch: () => fish({ len: 0.34, color: 0x4a5a3c }),
-  fishPike: () => fish({ len: 0.72, color: 0x39503c, belly: 0xa8b49a }),
+  fishPike: () => fish({ len: 0.72, color: 0x39503c, belly: 0xa8b49a, pike:true }),
   duckM: () => duck(true),
   duckF: () => duck(false),
   swanWhooper: () => swan(0xd8c030),   // Cygnus cygnus — the native breeder
   swanMute: () => swan(0xd07828),      // Cygnus olor — 20th-century colonist
   wolf: () => quadruped({
+    family: 'canine',
     shoulder: 0.78, length: 1.25, width: 0.34, legR: 0.036, color: 0x6e675c,
     belly: 0x9a927f, neckLen: 0.32, headSize: 0.24, tail: 0.42, tailR: 0.035,
     tasselColor: 0x4a443a,
   }),
-  blackGrouse: () => fowl({ size: 0.24, color: 0x23242c, comb: true }),
+  blackGrouse: () => fowl({ size: 0.24, color: 0x23242c, grouse: true }),
   frog: () => frog(),
   beaver: () => beaver(),
   // air
@@ -830,14 +699,14 @@ export class AnimalManager {
     }
     const medium = opts.medium || 'land';
     const y = medium === 'water' ? (opts.level ?? heightAt(x, z))
-      : medium === 'air' ? heightAt(x, z) + (opts.alt ? (opts.alt[0] + opts.alt[1]) / 2 : 8)
-      : heightAt(x, z);
+      : medium === 'air' ? meshHeightAt(x, z) + (opts.alt ? (opts.alt[0] + opts.alt[1]) / 2 : 8)
+      : meshHeightAt(x, z);
     a.group.position.set(x, y, z);
     a.group.rotation.y = rng() * Math.PI * 2;
     a.group.name = kind;
     const rec = {
       ...a, kind, home, medium,
-      homeY: opts.fly === 'soar' ? heightAt(home.x, home.z) : null,
+      homeY: opts.fly === 'soar' ? meshHeightAt(home.x, home.z) : null,
       speed: opts.speed ?? (kind.startsWith('chicken') || kind === 'rooster' ? 0.8 : kind === 'goose' ? 0.7 : 0.55),
       state: 'graze', timer: 1 + rng() * 5, tx: x, tz: z, heading: a.group.rotation.y,
       grazeBias: opts.grazeBias ?? (kind === 'pig' ? 0.85 : 0.68),
@@ -909,9 +778,12 @@ export class AnimalManager {
     if (!a.wings) return;
     const v = rest + Math.sin(t * speed + a.wingP) * amp;
     a.wings.forEach((w, i) => {
-      const s = i % 2 === 0 ? 1 : -1;
+      // the wing's own side, not its index: the crane pushes [wing, tip] per
+      // side, so index parity flapped the two wings the SAME way and each
+      // black tip against its own wing
+      const s = w.userData.side !== undefined ? w.userData.side : (i % 2 === 0 ? 1 : -1);
       if (a.flapAxis === 'y') w.rotation.y = s * v * 0.4;
-      else w.rotation.z = (i < 2 ? s : s) * v + (w.userData.dihedral || 0);
+      else w.rotation.z = s * v + (w.userData.dihedral || 0);
     });
   }
 
@@ -983,7 +855,7 @@ export class AnimalManager {
     if (camPos) {
       const cx = g.position.x - camPos.x, cz = g.position.z - camPos.z;
       const d2 = cx * cx + cz * cz;
-      const cameraLow = camPos.y - heightAt(camPos.x, camPos.z) < 4.5;
+      const cameraLow = camPos.y - meshHeightAt(camPos.x, camPos.z) < 4.5;
       if (cameraLow && d2 < 12 * 12) {
         const d = Math.sqrt(d2) || 1;
         const ax = d2 > 0.001 ? cx / d : Math.sin(a.phase);
@@ -1004,13 +876,13 @@ export class AnimalManager {
       const k = Math.min(1, a.hopT);
       g.position.x += Math.sin(a.heading) * a.hopLen * dt / hopDur;
       g.position.z += Math.cos(a.heading) * a.hopLen * dt / hopDur;
-      g.position.y = heightAt(g.position.x, g.position.z) + a.hopH * 4 * k * (1 - k);
+      g.position.y = meshHeightAt(g.position.x, g.position.z) + a.hopH * 4 * k * (1 - k);
       const turn = angleDelta(a.visualHeading, a.heading);
       a.visualHeading += clamp(turn, -a.turnRate * dt, a.turnRate * dt);
       g.rotation.y = a.visualHeading;
       if (a.hopT >= 1) {
         a.hopT = -1;
-        g.position.y = heightAt(g.position.x, g.position.z);
+        g.position.y = meshHeightAt(g.position.x, g.position.z);
         const dx = a.tx - g.position.x, dz = a.tz - g.position.z;
         if (Math.hypot(dx, dz) < a.hopLen || (!a.fleeing && rng() < 0.12)) { a.state = 'idle'; a.timer = a.restT[0] + rng() * a.restT[1]; }
         else a.timer = a.chainT;
@@ -1048,7 +920,7 @@ export class AnimalManager {
       if (sp > max) { a.vx *= max / sp; a.vz *= max / sp; }
       g.position.x += a.vx * dt;
       g.position.z += a.vz * dt;
-      const ground = heightAt(g.position.x, g.position.z);
+      const ground = meshHeightAt(g.position.x, g.position.z);
       // bees work the flower layer, ankle-height; butterflies ride higher
       const wantY = a.low
         ? ground + 0.18 + (Math.sin(t * 0.9 + a.phase) + 1) * 0.3
@@ -1072,7 +944,7 @@ export class AnimalManager {
       const sp = 9 + Math.sin(t * 0.5 + a.phase) * 2;
       g.position.x += Math.sin(a.heading) * sp * dt;
       g.position.z += Math.cos(a.heading) * sp * dt;
-      const ground = heightAt(g.position.x, g.position.z);
+      const ground = meshHeightAt(g.position.x, g.position.z);
       const wantY = ground + a.alt[0] + (Math.sin(t * 0.42 + a.phase) + 1) * 0.5 * (a.alt[1] - a.alt[0]);
       g.position.y += clamp(wantY - g.position.y, -6 * dt, 6 * dt);
       g.rotation.y = a.heading;
@@ -1131,7 +1003,7 @@ export class AnimalManager {
           if (ground) {
             const ang = rng() * Math.PI * 2, r = 2 + rng() * 5;
             const gx = g.position.x + Math.cos(ang) * r, gz = g.position.z + Math.sin(ang) * r;
-            a.pt = [gx, heightAt(gx, gz) + 0.03, gz, 'ground'];
+            a.pt = [gx, meshHeightAt(gx, gz) + 0.03, gz, 'ground'];
           } else {
             a.pt = a.perches[(rng() * a.perches.length) | 0];
           }
@@ -1144,7 +1016,7 @@ export class AnimalManager {
         if (running) {
           g.position.x += Math.sin(g.rotation.y) * 0.7 * dt;
           g.position.z += Math.cos(g.rotation.y) * 0.7 * dt;
-          g.position.y = heightAt(g.position.x, g.position.z) + 0.03;
+          g.position.y = meshHeightAt(g.position.x, g.position.z) + 0.03;
         } else if (Math.sin(t * 2.3 + a.phase) > 0.9) {
           g.rotation.y += (rng() - 0.5) * 2;
         }
@@ -1182,7 +1054,7 @@ export class AnimalManager {
       }
       if (a.static) {
         // nest stork: occasional preen
-        a.neck.rotation.x = Math.sin(t * 0.3 + a.phase) > 0.92 ? 0.8 : Math.sin(t * 0.5 + a.phase) * 0.06;
+        if (a.neck) a.neck.rotation.x = Math.sin(t * 0.3 + a.phase) > 0.92 ? 0.8 : Math.sin(t * 0.5 + a.phase) * 0.06;
         continue;
       }
       if (a.medium === 'air') { this.tickAir(a, t, dt); continue; }
@@ -1193,7 +1065,7 @@ export class AnimalManager {
       if (deer && camPos) {
         const cx = g.position.x - camPos.x, cz = g.position.z - camPos.z;
         const d2 = cx * cx + cz * cz;
-        const cameraLow = camPos.y - heightAt(camPos.x, camPos.z) < 4.5;
+        const cameraLow = camPos.y - meshHeightAt(camPos.x, camPos.z) < 4.5;
         if (cameraLow && d2 < 12 * 12) {
           const d = Math.sqrt(d2) || 1;
           const ax = d2 > 0.001 ? cx / d : Math.sin(a.phase);
@@ -1293,20 +1165,26 @@ export class AnimalManager {
           a.gaitP += dt * (2.5 + stride * 5.5);
           const swing = Math.sin(a.gaitP);
           for (let i = 0; i < a.legs.length; i++) {
-            a.legs[i].rotation.x = swing * 0.45 * stride * (i % 2 === 0 ? 1 : -1) * (i < 2 ? 1 : -0.9);
+            const phase = a.gaitP + [0, Math.PI, Math.PI*.55, Math.PI*1.55][i % 4];
+            a.legs[i].rotation.x = Math.sin(phase) * 0.32 * stride;
+            const lower = a.legs[i].userData.lowerLeg;
+            if (lower) lower.rotation.x = Math.max(0,Math.cos(phase)) * .48 * stride * (a.legs[i].userData.hind ? -1 : 1);
           }
           if (a.neck) a.neck.rotation.x = swing * 0.04 * stride;
-          g.position.y = heightAt(g.position.x, g.position.z);
+          g.position.y = meshHeightAt(g.position.x, g.position.z);
           g.position.y += a.legs.length ? Math.abs(swing) * 0.015 * (a.shoulder || 0.3) * stride
             : Math.abs(swing) * 0.03 * stride;
         }
       } else {
         a.moveSpeed = Math.max(0, a.moveSpeed - 1.35 * dt);
         g.rotation.x = lerp(g.rotation.x, 0, clamp(dt * 7, 0, 1));
-        for (let i = 0; i < a.legs.length; i++) a.legs[i].rotation.x *= 0.85;
+        for (const leg of a.legs) {
+          leg.rotation.x *= 0.85;
+          if (leg.userData.lowerLeg) leg.userData.lowerLeg.rotation.x *= .85;
+        }
         if (a.state === 'graze' && a.neck) {
           // head down, with little nibble movements (peck for fowl)
-          const target = a.shoulder ? 0.95 : 1.1;
+          const target = a.grazeAngle ?? (a.shoulder ? 0.95 : 1.1);
           a.neck.rotation.x = lerp(a.neck.rotation.x, target + Math.sin(t * (a.shoulder ? 2.4 : 9) + a.phase) * 0.12, 0.05);
         } else if (a.neck) {
           a.neck.rotation.x = lerp(a.neck.rotation.x, Math.sin(t * 0.6 + a.phase) * 0.1, 0.06);

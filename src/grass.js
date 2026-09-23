@@ -7,11 +7,11 @@
 // camera the same world positions yield the same blades, so walking never
 // reshuffles the sward — new growth only fades in at the feathered rim.
 import * as THREE from 'three';
-import { heightAt } from './terrain.js';
+import { heightAt, meshHeightAt } from './terrain.js';
 import { forestDensity, distToRiver, distToRoad, distToRoadEx, ROAD_HALF_W, fieldAt, PADS, ERA2_FARMS } from './landuse.js';
-import { vegExcluded, lakeShoreWavyAt, lakeAt } from './riverzone.js';
+import { vegExcluded, lakeShoreWavyAt, lakeAt, streamAt } from './riverzone.js';
 import { buildingAt, trampleAt } from './footprints.js';
-import { mulberry32, smoothstep as smoothstepJ } from './util.js';
+import { mulberry32, makeNoise, smoothstep as smoothstepJ } from './util.js';
 import { WIND } from './vegetation.js';
 
 // world-cell hash → deterministic rng stream per cell
@@ -34,24 +34,39 @@ function cellSeed(ix, iz, salt) {
 const BANDS = [
   // fade geometry: the dense trio must be GONE by ~75m — while the nadir
   // footprint still fits inside the mid ring, so the whole view thins as one
-  // field, never as a disc. The mid floor 0.05 is calibrated to the far
-  // band's areal density (5.5/9² ≈ 0.068/m²) so at height the ring boundary
-  // dissolves into the uniform tuft field instead of reading as a circle.
+  // field, never as a disc. The mid band's altFloor is calibrated against the
+  // far band's areal density so that at height the ring boundary dissolves
+  // into the uniform tuft field instead of reading as a circle.
   { key: 'turf', r0: 0, r1: 26, cell: 1.3, perCell: 22, thresh: 9, wide: 1.2, carpet: true, hiOff: true, cellRules: true, altLo: 22, altHi: 48 },
   { key: 'carpet', r0: 22, r1: 62, cell: 1.6, perCell: 14, thresh: 18, wide: 1.1, carpet: true, hiOff: true, cellRules: true, altLo: 28, altHi: 62 },
   { key: 'near', r0: 0, r1: 55, cell: 1.6, perCell: 11, thresh: 15, wide: 1.15, hiOff: true, cellRules: true, altLo: 34, altHi: 78 },
-  { key: 'mid', r0: 45, r1: 130, cell: 2.6, perCell: 9, thresh: 38, wide: 1.85, cellRules: true, roadPerBlade: true, altLo: 78, altHi: 170, altFloor: 0.05 },
-  { key: 'far', r0: 115, r1: 900, cell: 9, perCell: 5.5, thresh: 260, wide: 3.4, cellRules: true, roadPerBlade: true },
+  // The 60-130 m ground was the thinnest part of the whole view: the dense
+  // trio has faded out by ~62 m and only this band carried it, at 1.3 tufts/m²
+  // against the carpet's 5.5. Read as painted felt from any standing camera.
+  // Only perCell moved — the radii and the altLo/altHi feathering are what
+  // stop the rings reading as a disc under a flying camera, and the density
+  // is a stable rng PREFIX per cell, so raising it keeps every existing blade.
+  // altFloor stays calibrated to the far band's areal density so the ring
+  // boundary still dissolves from the air: 6.5/9² = 0.080/m², and
+  // 12.5 × 0.043 / 2.6² = 0.080/m². Move either perCell and this moves too.
+  { key: 'mid', r0: 45, r1: 130, cell: 2.6, perCell: 12.5, thresh: 38, wide: 1.85, tallK: 0.9, cellRules: true, roadPerBlade: true, altLo: 78, altHi: 170, altFloor: 0.043 },
+  // the far tuft is a WIDE crossed slab so that a sparse scatter still covers
+  // ground; at full clump height those slabs stood up like thistles across
+  // the middle distance, so keep the coverage and crop the height
+  { key: 'far', r0: 115, r1: 900, cell: 9, perCell: 6.5, thresh: 260, wide: 2.4, tallK: 0.42, cellRules: true, roadPerBlade: true },
 ];
 
 function bladeGeometry(segs) {
   const pos = [], nrm = [], col = [], idx = [];
-  const W = 0.023, H = 1;
+  const W = 0.012, H = 1;
   for (let i = 0; i <= segs; i++) {
     const t = i / segs;
     const w = W * (1 - t * 0.8);
     const bendZ = t * t * 0.16; // gentle forward arc
-    const c0 = [0.115 + t * 0.21, 0.185 + t * 0.27, 0.06 + t * 0.1];
+    // Vertex colours are linear and then multiplied by Lambert + instance
+    // tint. The previous albedo was so low that even upward-lit blades read
+    // nearly black beside the terrain at noon.
+    const c0 = [0.065 + t * 0.12, 0.12 + t * 0.20, 0.025 + t * 0.06];
     for (const s of [-1, 1]) {
       pos.push(s * w, t * H, bendZ);
       // rounded cross-section: edge normals tilt outward (LAAS ±38°)
@@ -65,7 +80,7 @@ function bladeGeometry(segs) {
   }
   pos.push(0, H + 0.045, 0.19);
   nrm.push(0, 0.35, -0.9);
-  col.push(0.36, 0.5, 0.18);
+  col.push(0.21, 0.35, 0.085);
   idx.push(segs * 2, segs * 2 + 1, pos.length / 3 - 1);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -79,7 +94,7 @@ function bladeGeometry(segs) {
 function bladeClump(blades, segs, widthK = 1, spread = 0.22) {
   let s = 1234567 + blades * 77 + segs * 13;
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-  const pos = [], nrm = [], col = [], idx = [];
+  const pos = [], nrm = [], col = [], idx = [], roots = [];
   const base = bladeGeometry(segs);
   const p = base.attributes.position, nA = base.attributes.normal, cA = base.attributes.color;
   const ix = base.index;
@@ -94,6 +109,7 @@ function bladeClump(blades, segs, widthK = 1, spread = 0.22) {
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i) * 1.25 * widthK, y = p.getY(i) * hk, z = p.getZ(i);
       pos.push(x * c + z * sn + ox + lean * y * c, y, z * c - x * sn + oz + lean * y * sn);
+      roots.push(ox,oz);
       nrm.push(nA.getX(i) * c + nA.getZ(i) * sn, nA.getY(i), nA.getZ(i) * c - nA.getX(i) * sn);
       col.push(cA.getX(i) * vJ, cA.getY(i) * vJ, cA.getZ(i) * vJ);
     }
@@ -104,21 +120,22 @@ function bladeClump(blades, segs, widthK = 1, spread = 0.22) {
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.setIndex(idx);
+  g.setAttribute('aRoot', new THREE.Float32BufferAttribute(roots,2));
   return g;
 }
 
 // three crossed wide blades — far-band tuft
-function tuftGeometry(W = 0.06) {
+function tuftGeometry(W = 0.025) {
   const pos = [], nrm = [], col = [], idx = [];
   for (let k = 0; k < 3; k++) {
     const a = k * 1.92 + 0.4;
     const c = Math.cos(a), s = Math.sin(a);
     const base = pos.length / 3;
-    for (const [u, v] of [[-W, 0], [W, 0], [W * 0.55, 1], [-W * 0.55, 1]]) {
+    for (const [u, v] of [[-W, 0], [W, 0], [W * 0.3, 0.68], [0, 1]]) {
       pos.push(u * c, v, u * s);
       const sgn = u < 0 ? -1 : 1;
       nrm.push(-s * 0.76 + sgn * 0.62 * c, 0.25, c * 0.76 + sgn * 0.62 * s);
-      col.push((0.17 + v * 0.25) * 1.15, (0.25 + v * 0.3) * 1.15, (0.1 + v * 0.12) * 1.15);
+      col.push(0.09 + v * 0.12, 0.16 + v * 0.20, 0.035 + v * 0.065);
     }
     idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
   }
@@ -127,8 +144,17 @@ function tuftGeometry(W = 0.06) {
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.setIndex(idx);
+  g.setAttribute('aRoot',new THREE.Float32BufferAttribute(new Float32Array(pos.length/3*2),2));
   return g;
 }
+
+const FACE_DIRECTION_NEEDLE = 'float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;';
+const DOUBLE_SIDED_NORMAL_CHUNK = (() => {
+  const chunk = THREE.ShaderChunk.normal_fragment_begin;
+  const patched = chunk.replace(FACE_DIRECTION_NEEDLE, 'float faceDirection = 1.0;');
+  if (patched === chunk) throw new Error('grass.js: normal_fragment_begin no longer defines faceDirection');
+  return patched;
+})();
 
 function grassMaterial() {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -136,7 +162,7 @@ function grassMaterial() {
     sh.uniforms.uWindT = WIND.time;
     sh.uniforms.uWindD = WIND.dir;
     sh.uniforms.uWindS = WIND.strength;
-    sh.vertexShader = 'uniform float uWindT; uniform vec2 uWindD; uniform float uWindS;\n' +
+    sh.vertexShader = 'uniform float uWindT; uniform vec2 uWindD; uniform float uWindS; attribute vec2 aRoot;\n' +
       sh.vertexShader
         .replace('#include <beginnormal_vertex>', `
         #include <beginnormal_vertex>
@@ -160,9 +186,23 @@ function grassMaterial() {
           transformed.x += uWindD.x * bend - uWindD.y * flut;
           transformed.z += uWindD.y * bend + uWindD.x * flut;
           transformed.y -= bend * bend * (0.5 / max(tN, 0.05));
+          // Short turf used metre-high blade curves scaled only vertically:
+          // its tips bent almost horizontally, like scattered straw shards.
+          float aspect = min(1.0, length(instanceMatrix[1].xyz) / max(0.01,length(instanceMatrix[0].xyz)));
+          transformed.xz = aRoot + (transformed.xz-aRoot)*aspect;
         }
         #endif
         `);
+    // Blades are optically thin. Three's generic DoubleSide path flips the
+    // backface normal downward, making half the meadow render as black shards
+    // at noon. Light both sides with the same grass-facing normal instead.
+    //
+    // This must splice the RESOLVED chunk: onBeforeCompile runs before three
+    // expands `#include <...>`, so replacing a line that lives inside
+    // normal_fragment_begin matched nothing and the fix never once ran. The
+    // assert makes a three upgrade fail loudly instead of silently.
+    sh.fragmentShader = sh.fragmentShader.replace(
+      '#include <normal_fragment_begin>', DOUBLE_SIDED_NORMAL_CHUNK);
   };
   return m;
 }
@@ -174,12 +214,11 @@ function flowerGeometry(kind) {
   const H = kind === 0 ? 1 : 0.55;
   const quad = (cxx, cy, cz, r, cr, cg, cb) => {
     const b = pos.length / 3;
-    pos.push(cxx - r, cy, cz - r, cxx + r, cy, cz - r, cxx + r, cy, cz + r, cxx - r, cy, cz + r);
-    for (let k = 0; k < 4; k++) { nrm.push(0, 1, 0); col.push(cr, cg, cb); }
-    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    pos.push(cxx,cy,cz);nrm.push(0,1,0);col.push(cr,cg,cb);
+    for(let k=0;k<8;k++){const a=k*Math.PI/4;pos.push(cxx+Math.cos(a)*r,cy,cz+Math.sin(a)*r);nrm.push(0,1,0);col.push(cr,cg,cb);idx.push(b,b+1+k,b+1+(k+1)%8);}
   };
   const b0 = pos.length / 3;
-  pos.push(-0.012, 0, 0, 0.012, 0, 0, 0.008, H, 0.05, -0.008, H, 0.05);
+  pos.push(-0.003, 0, 0, 0.003, 0, 0, 0.002, H, 0.05, -0.002, H, 0.05);
   for (let k = 0; k < 4; k++) { nrm.push(0, 0, 1); col.push(0.2, 0.34, 0.12); }
   idx.push(b0, b0 + 1, b0 + 2, b0, b0 + 2, b0 + 3);
   // a tilted petal: quad rising outward from (cx,cy,cz) at azimuth a
@@ -190,13 +229,15 @@ function flowerGeometry(kind) {
     const ox = ca * len * Math.cos(tilt), oz = sa * len * Math.cos(tilt);
     const oy = len * Math.sin(tilt);
     pos.push(
-      cx - ux, cy, cz - uz, cx + ux, cy, cz + uz,
-      cx + ox + ux * 0.4, cy + oy, cz + oz + uz * 0.4,
-      cx + ox - ux * 0.4, cy + oy, cz + oz - uz * 0.4);
+      cx - ux*.25, cy, cz - uz*.25, cx + ux*.25, cy, cz + uz*.25,
+      cx + ox*.65 + ux, cy + oy*.65, cz + oz*.65 + uz,
+      cx + ox, cy + oy, cz + oz,
+      cx + ox*.65 - ux, cy + oy*.65, cz + oz*.65 - uz);
     const nx = -ca * Math.sin(tilt), ny = Math.cos(tilt), nz = -sa * Math.sin(tilt);
-    for (let k = 0; k < 4; k++) { nrm.push(nx, ny, nz); col.push(cr, cg, cb); }
-    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    for (let k = 0; k < 5; k++) { nrm.push(nx, ny, nz); col.push(cr, cg, cb); }
+    idx.push(b,b+1,b+2,b,b+2,b+3,b,b+3,b+4);
   };
+  for(let i=0;i<3;i++)petal(0,H*(.22+i*.19),.05*(.22+i*.19),i*2.4,.09,.022,.28,.075,.18,.038);
   if (kind === 0) {
     // meadowsweet: frothy cream dome — petals all over a hemisphere
     for (let i = 0; i < 8; i++) {
@@ -228,7 +269,9 @@ function flowerGeometry(kind) {
 }
 
 export function buildGrass(scene) {
-  const geos = [bladeClump(10, 2, 1.55, 0.5), bladeClump(6, 2, 1.3, 0.35), bladeClump(8, 3), bladeClump(4, 2), tuftGeometry()];
+  // Dense carpet blades must stay narrow: the old 1.55x/1.3x width multipliers
+  // produced ~5 cm straps that crossed into a field of dark triangular shards.
+  const geos = [bladeClump(10, 2, 0.72, 0.34), bladeClump(6, 2, 0.82, 0.28), bladeClump(8, 3, 0.92), bladeClump(4, 2), tuftGeometry()];
   const mat = grassMaterial();
   const bands = BANDS.map((b, i) => {
     const cells = Math.PI * b.r1 * b.r1 / (b.cell * b.cell);
@@ -236,17 +279,20 @@ export function buildGrass(scene) {
     const mesh = new THREE.InstancedMesh(geos[i], mat, cap);
     mesh.frustumCulled = false;
     mesh.castShadow = false;
-    mesh.receiveShadow = false;
+    mesh.receiveShadow = i < 4;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.instanceMatrix.onUpload(() => mesh.instanceMatrix.clearUpdateRanges());
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
     mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     mesh.instanceColor.onUpload(() => mesh.instanceColor.clearUpdateRanges());
+    mesh.name = `grass-${b.key}`;          // so data/dbg.mjs can hide one band
     scene.add(mesh);
     return { ...b, mesh, cap, idx: i, lastX: 1e9, lastZ: 1e9, lastEra: -1, on: true, budget: 1, altK: 1 };
   });
-  const flowerMeshes = [flowerGeometry(0), flowerGeometry(1), flowerGeometry(2)].map((g) => {
-    const mesh = new THREE.InstancedMesh(g, mat, 1400);
+  const flowerMeshes = [flowerGeometry(0), flowerGeometry(1), flowerGeometry(2)].map((g, fi) => {
+    const mesh = new THREE.InstancedMesh(g, mat, 4000);
+    mesh.receiveShadow = true;
+    mesh.name = `grass-flower-${fi}`;
     mesh.frustumCulled = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(mesh);
@@ -258,10 +304,11 @@ export function buildGrass(scene) {
 
   // flowers on the same stable world grid (cell 6m, deterministic kinds).
   // k thins them with camera altitude alongside the near band.
+  const meadowNoise=makeNoise(591);
   function regenFlowers(cx, cz, era, k = 1) {
     const counts = [0, 0, 0];
     if (era >= 1 && k > 0.02) {
-      const perCell = (era === 5 ? 0.28 : era >= 3 ? 0.56 : 1.12) * k;
+      const perCell = (era === 5 ? 2.4 : era >= 3 ? 3.5 : 3.0) * k;
       const R = 125, CELL = 6;
       const ix0 = Math.floor((cx - R) / CELL), ix1 = Math.ceil((cx + R) / CELL);
       const iz0 = Math.floor((cz - R) / CELL), iz1 = Math.ceil((cz + R) / CELL);
@@ -275,7 +322,9 @@ export function buildGrass(scene) {
           const x = (ix + rng()) * CELL, z = (iz + rng()) * CELL;
           const rot = rng() * 6.3, sc = 0.7 + rng() * 0.7, pick = rng(), gate = rng();
           const d = Math.hypot(x - cx, z - cz);
-          if (d > R || d < 3) continue;
+          if (d > R) continue;
+          // Flower-rich patches and quieter sward, stable in world space.
+          if(gate > smoothstepJ(.28,.65,meadowNoise.noise2(x*.028,z*.028)))continue;
           if (gate < smoothstepJ(R * 0.75, R, d)) continue;   // feathered rim
           const y = heightAt(x, z);
           if (forestDensity(era, x, z, y) > 0.3) continue;
@@ -285,11 +334,11 @@ export function buildGrass(scene) {
             const road = distToRoadEx(era, x, z);
             if (road.d < ROAD_HALF_W[road.c] + 0.3) continue;
           }
-          const dRiv = distToRiver(x, z);
+          const dRiv = Math.min(distToRiver(x, z),lakeShoreWavyAt(x,z),streamAt(x,z)?.d??Infinity);
           if (vegExcluded(x, z, y, era, 3.5)) continue;
           const kind = dRiv < 45 ? (pick < 0.7 ? 0 : 2) : (pick < 0.55 ? 1 : 2);
-          if (counts[kind] >= 1400) continue;
-          dummy.position.set(x, y - 0.02, z);
+          if (counts[kind] >= 4000) continue;
+          dummy.position.set(x, meshHeightAt(x, z) - 0.02, z);
           dummy.rotation.set(0, rot, 0);
           dummy.scale.set(sc, sc, sc);
           dummy.updateMatrix();
@@ -422,11 +471,11 @@ export function buildGrass(scene) {
       if (!carpet && fd > 0.35 && cJ1 < 0.6) continue;
       // yards: tall clumps die, the short carpet merely thins
       if (trodden && cJ2 < (carpet ? 0.6 : 0.93)) continue;
-      dummy.position.set(x, y - 0.02, z);
+      dummy.position.set(x, meshHeightAt(x, z) - 0.02, z);
       dummy.rotation.set(0, rot, 0);
-      const tall = carpet
+      const tall = (carpet
         ? 0.13 + hJ * 0.14
-        : fa ? 1.0 + hJ * 0.25 : (trodden ? 0.2 : 0.42) + hJ * 0.5;
+        : fa ? 1.0 + hJ * 0.25 : (trodden ? 0.2 : 0.42) + hJ * 0.5) * (band.tallK || 1);
       const w = (0.8 + wJ * 0.5) * wide;
       dummy.scale.set(w, tall * (era === 0 ? 0.5 : 1), w);
       dummy.updateMatrix();
@@ -443,8 +492,8 @@ export function buildGrass(scene) {
         col.setRGB(0.84 + cJ3 * 0.26 - wetK * 0.3, 0.95 + cJ2 * 0.28, 0.76 + cJ1 * 0.22);
       }
       if (carpet) col.multiplyScalar(0.92);                  // carpet sits darker
-      if (band.key === 'far') col.multiplyScalar(1.24);      // sun-bleached at range
-      if (era === 5) col.multiplyScalar(0.72);               // satellite drape is dark
+      if (band.key === 'far') col.multiplyScalar(1.08);
+      if (era === 5) col.multiplyScalar(0.82);               // the drape is darker, but not by this much
       mesh.setColorAt(i, col);
       i++;
     }
@@ -572,7 +621,7 @@ export function buildGrass(scene) {
     // its altLo..altHi window instead of a binary 140m shed. main.js passes
     // camera.position as both focus and camPos, so judge by height above
     // the ground under the camera.
-    const camAlt = camPos ? camPos.y - heightAt(camPos.x, camPos.z) : 0;
+    const camAlt = camPos ? camPos.y - meshHeightAt(camPos.x, camPos.z) : 0;
     for (const band of bands) {
       if (band.altLo === undefined) continue;
       let k = 1 - smoothstepJ(band.altLo, band.altHi, camAlt);
@@ -632,5 +681,7 @@ export function buildGrass(scene) {
       band.lastEra = -1; // force regen
     }
   }
-  return { update, setBudget, meshes: bands.map((b) => b.mesh) };
+  // `bands` is exposed for data/dbg.mjs grassstate: a camera-follow ring that
+  // silently fails to re-centre is invisible in a screenshot but obvious here.
+  return { update, setBudget, meshes: bands.map((b) => b.mesh), bands, debugQueue: () => queue.length };
 }

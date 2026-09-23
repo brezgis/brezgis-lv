@@ -26,7 +26,7 @@ const els = osm.elements || [];
 // ---- roads: class 0 = regional highway, 1 = V-road, 2 = local, 3 = track --
 const CLS = {
   trunk: 0, primary: 0, secondary: 1, tertiary: 1,
-  unclassified: 2, residential: 2, living_street: 2, track: 3,
+  unclassified: 2, residential: 2, living_street: 2, service: 2, track: 3,
 };
 function simplify(pts, tol) {
   // radial-distance simplification is plenty for paint-width roads
@@ -54,8 +54,9 @@ for (const e of els) {
   if (run.length) runs.push(run);
   for (const r of runs) {
     if (r.length < 2) continue;
-    const s = simplify(r, cls <= 1 ? 12 : 18).map(([x, z]) => [Math.round(x), Math.round(z)]);
-    if (s.length >= 2) roads.push({ c: cls, ref: e.tags.ref || null, pts: s });
+    const s = simplify(r, cls <= 1 ? 5 : 3).map(([x, z]) => [Math.round(x*10)/10, Math.round(z*10)/10]);
+    if (s.length >= 2) roads.push({ c: cls, ref: e.tags.ref || null, surface:e.tags.surface || null,
+      id:e.id, highway:e.tags.highway, minEra:e.tags.highway==='service'?5:3, pts: s });
   }
 }
 
@@ -85,9 +86,13 @@ for (const e of els) {
   const w = maxU - minU, d = maxV - minV;
   if (w * d < 18) continue;                       // sheds below ~18m² skipped
   buildings.push([
-    Math.round(cx), Math.round(cz),
-    Math.round(Math.min(w, 40) * 10) / 10, Math.round(Math.min(d, 40) * 10) / 10,
+    Math.round(cx+((minU+maxU)/2)*Math.cos(ang)-((minV+maxV)/2)*Math.sin(ang)),
+    Math.round(cz+((minU+maxU)/2)*Math.sin(ang)+((minV+maxV)/2)*Math.cos(ang)),
+    Math.round(w * 10) / 10, Math.round(d * 10) / 10,
     Math.round(ang * 100) / 100,
+    {id:e.id,kind:e.tags.building,levels:Number.parseFloat(e.tags['building:levels'])||null,
+      material:e.tags['building:material']||null,color:e.tags['building:colour']||null,
+      roof:e.tags['roof:shape']||null,roofColor:e.tags['roof:colour']||null,name:e.tags.name||e.tags['addr:housename']||null},
   ]);
 }
 

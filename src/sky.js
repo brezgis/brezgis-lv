@@ -228,6 +228,7 @@ export function buildSky(scene, renderer) {
     m.scale.set(s * aspect * 0.5, s * 0.42, 1);
     m.position.set((crng() - 0.5) * 9000, 750 + crng() * 700, (crng() - 0.5) * 9000);
     m.userData.speed = 4 + crng() * 6;
+    m.userData.baseOp = mat.uniforms.uOp.value;
     m.renderOrder = 2;
     clouds.add(m);
   }
@@ -444,15 +445,26 @@ export function buildSky(scene, renderer) {
       if (m.position.x - focus.x > 4700) m.position.x -= 9400;
       if (m.position.x - focus.x < -4700) m.position.x += 9400;
       m.lookAt(focus.x, m.position.y, focus.z);
+      // A billboard only reads as a cloud from below. Climb to its own deck —
+      // the 780 m "bird" view does — and it flattens into a pale smear lying
+      // across the parish, so dissolve each cloud as the camera reaches it.
+      const near = 1 - smoothstep(m.position.y - 380, m.position.y - 90, focus.y);
       if (m.userData.cirrus) {
+        m.material.opacity = 0.5 * near;
         m.material.color.setRGB(
           (0.62 + tr[0] * 0.38) * nite, (0.62 + tr[1] * 0.38) * nite, (0.66 + tr[2] * 0.34) * nite);
       } else {
+        m.material.uniforms.uOp.value = m.userData.baseOp * near;
         qInv.copy(m.quaternion).invert();
         sunLocal.copy(sd).applyQuaternion(qInv);
         m.material.uniforms.uSunL.value.copy(sunLocal);
       }
     }
+  }
+  // The reflection camera needs only the sky, clouds and distant horizon.
+  // Keep layer 0 for the main view, and reserve layer 1 for sky capture.
+  for (const object of [sky, clouds, stars, sunGlow, horizon]) {
+    object.traverse((o) => o.layers.enable(1));
   }
   return { update, state, sun, hemi, shadowInfo };
 }

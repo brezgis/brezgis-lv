@@ -314,6 +314,21 @@ water from the hydrology up:
   (zivju dzenis) perch over the water and dive, and now and then a fish rises.
   All of them are gated by era like the rest of the fauna, and all follow the
   local water level.
+- **Margins.** Yellow and white water-lily beds (dzeltenā lēpe, baltā
+  ūdensroze) grow in the lake shallows 0.4–2 m deep, and on the mill reach
+  when it exists. The reedbeds are rebuilt as leafy *Phragmites* clumps with
+  their purplish midsummer plumes, and the cattail spikes are still green at
+  Jāņi. The Younger Dryas tundra lakes have sedge fens only, since reed,
+  cattail and flag came in with the Holocene.
+- **Fields are fields.** The 1860 and 1935 fields were soft ovals painted into
+  the 17 m ground colours. They are now sharp-edged parcels draped on the
+  ground. In 1860 they are the open-field strips of the three-course rotation
+  (winter rye, spring barley or oats, and ploughed black fallow, the *papuve*
+  turned around Jāņi). In 1935 they are a reform farm's two or three parcels.
+  Grass balks run between the strips, and roads, water and neighbouring fields
+  cut the strips instead of being painted over. The crops stand at their
+  midsummer heights (rye in ear ~1.3 m, potato and clover short), and each
+  shows its own rows, ridges or furrows up close.
 
 ## Sources
 

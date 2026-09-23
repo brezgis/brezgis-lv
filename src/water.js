@@ -649,7 +649,8 @@ export function buildWater() {
   // only on open water deep enough to hold fish, within sight of the camera.
   const RISES = 10;
   const riseGeo = new THREE.RingGeometry(0.86, 1, 40).rotateX(-Math.PI / 2);
-  const riseMat = new THREE.MeshBasicMaterial({ color: 0xdfe8ec, transparent: true, opacity: 0.3, depthWrite: false });
+  // lit, not basic: an unlit ring glows white on the night river
+  const riseMat = new THREE.MeshLambertMaterial({ color: 0xdfe8ec, transparent: true, opacity: 0.3, depthWrite: false });
   const rises = [];
   for (let i = 0; i < RISES; i++) {
     const m = new THREE.Mesh(riseGeo, riseMat.clone());

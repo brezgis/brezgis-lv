@@ -185,6 +185,7 @@ You depict: "one-and-a-half-storey plastered manor house with 4-column portico +
 - However, the NEW manor (post-1888) was a two-tone brick neo-Renaissance building. If your scene is set in the 1930s, the new manor exists and is the dominant building.
 - **Linden alley and park**: PLAUSIBLE. Parks with linden/oak alleys are standard for Baltic German manors [26].
 - **Watermill with pond on the Gauja**: NOT DIRECTLY CONFIRMED for Nekena, but very plausible. The manor sits on the Gauja, and watermills were standard estate enterprises. Many Gauja-side manors had mills [30]. The brewery's riverbank cellars confirm sophisticated use of the river.
+  - *Update 2026-09-23:* the 1930s Latvian Army 1:75k sheet (`research/maps/topo75_1930s.png`) shows the Gauja broadened into a pond ~40–50 m wide for ~600 m above the road crossing by Nēķena muiža. The **pond is map-attested for the 1930s**; the mill building itself remains unconfirmed. The sim's 0.8 m weir at that crossing floods about that extent.
 - **Red tile hip roof**: For the 18th-century old manor, wooden shingle or possibly tile is plausible. Red clay tile (dakstinju jumts) became common on manor buildings from the late 18th century. PLAUSIBLE.
 - **Two outbuildings**: The complex had twenty — you might want more than two visible in the scene for authenticity.
 

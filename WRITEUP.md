@@ -237,9 +237,9 @@ What that bought, and what it cost:
 - **You can see the bottom.** Shallow water is now clear and warm-toned, deep
   water dark; but the terrain paints its riverbed on a 17.2 m mesh, and the
   Gauja is 19 m wide, so most cells crossing the channel have no vertex inside
-  it and the "bed" was largely interpolated meadow. The channel now carries its
-  own bed mesh — silt in the pools, washed gravel over the crossings, pale
-  cobble on the point bars.
+  it and the "bed" was largely interpolated meadow. The channel then carried its
+  own bed mesh (superseded in the fourth edition by 2 m ground along every
+  shore).
 - **The banks have trees on them.** The tree grid only plants where the forest
   masks say "forest", and along most of the Gauja both the 1935 Army sheet and
   the satellite say "meadow" — so the river ran through mown grass from source
@@ -263,6 +263,57 @@ filled on the downhill one — so on any cross-slope the uphill edge sank into
 the hill and the road visibly dipped in and out of the landscape.
 `data/roadcheck.mjs` now guards this, along with the shrubs that were standing
 in the middle of it.
+
+## Fourth edition: one water
+
+The third edition's river still had a flaw you could see from anywhere a lake
+met it. The Gauja's mapped course runs *through* Brenkūzis, Dabaru ezers and
+Taurenes ezers, and each of those three joins drew two water surfaces: the
+lake at its elevation-model level and the river ribbon 0.1–0.8 m lower,
+showing through as a second river inside the lake. The banks were a separate
+draped strip that clipped in and out of the ground. This edition rebuilds
+water from the hydrology up:
+
+- **Water runs downhill, and a lake the river crosses is the river there.**
+  Lake surfaces are the best-measured thing in a DEM, so they are the
+  anchors. Between them each reach keeps the shape of its sampled fall, half
+  blended to an even grade (the 27 m grid had packed whole metres of drop into
+  single 100 m steps). Tributary mouths meet their receivers flush. The Gauja
+  now falls 193.7 → 175.2 m across the parish, flat through each lake;
+  `data/hydroprobe.mjs` checks every sample and 640-odd cross-sections.
+- **One bank law.** `src/shore.js` gives every river, brook and lake the same
+  cross-section: a bed that shelves off the waterline (steep to a scour pool on
+  the outside of a bend, a long gravel bar on the inside), a bank that climbs
+  out of it (a cut face on outer bends, low turf elsewhere), a floodplain bench
+  and then a valley side up to the real terrain. Meander necks consult both
+  nearby reaches, so the law stays continuous where the nearest channel
+  switches arms.
+- **Banks are ground, not decals.** The terrain grid is 17 m and a bank is a
+  1–3 m feature, so no collar or skirt could make one. The ground is now
+  rebuilt at 2 m wherever water meets land (476 k vertices along 17 km of
+  river, the brooks and five lake shores), feathered into the 17 m grid, which
+  steps aside through a mask.
+- **One water surface.** Every channel and lake is a single mesh, clipped
+  along the waterline on the same 2 m lattice. The river flows straight into a
+  lake as the same sheet. Its optical depth comes from the rendered bed, so
+  shallows are clear and fade out at the waterline and deep water turns the
+  tea-brown of a humic Vidzeme river. The ripples are a flow map that follows
+  the current round every bend. A planar mirror renders the banks, trees and
+  sky at the level of the nearest water, falling back to a sky cube elsewhere.
+- **The mill weir** (1860, 1935) now spans the channel at the road crossing
+  by the manor. The 1930s Army sheet shows the Gauja broadened into a pond
+  there, about 40–50 m wide and ~600 m long. A 0.8 m head floods just that
+  over the real ground, about 2.7 ha fading out upstream. The mill itself is
+  not documented. An undershot wheel beside the weir is fed by a plank flume.
+- **Life in the water.** Roach (rauda) shoals and perch in the river, pike in
+  the slow reaches, grayling (alata) on the upper riffles, and brown trout
+  (strauta forele) in the Pīsla and the Dzērbe; bream (plaudis) over the lake
+  basin. On the water: mallards, goosanders (lielā gaura, the Gauja's own
+  sawbill) and goldeneyes (gaigala) on the lake. Grey herons (pelēkais gārnis)
+  stalk the shallows, an otter (ūdrs) works the middle river, kingfishers
+  (zivju dzenis) perch over the water and dive, and now and then a fish rises.
+  All of them are gated by era like the rest of the fauna, and all follow the
+  local water level.
 
 ## Sources
 

@@ -1,7 +1,7 @@
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 120000,
-  args: ['--use-gl=angle', '--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'],
 });
 try {
   const page = await browser.newPage();

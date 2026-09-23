@@ -3,7 +3,7 @@
 import puppeteer from 'puppeteer-core';
 const [,, era = '4', X = '-384', Z = '38'] = process.argv;
 const browser = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 180000,
-  args: ['--use-gl=angle', '--enable-gpu', '--no-sandbox', '--disable-dev-shm-usage'] });
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--no-sandbox', '--disable-dev-shm-usage'] });
 try {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 300)));

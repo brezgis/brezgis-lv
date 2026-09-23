@@ -11,7 +11,7 @@ import puppeteer from 'puppeteer-core';
 
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 180000,
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=900,520', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--window-size=900,520', '--no-sandbox', '--disable-dev-shm-usage'],
 });
 let failures = 0;
 try {
@@ -27,6 +27,9 @@ try {
     const n = Math.round(Math.sqrt(p.count));
     const x0 = p.getX(0), z0 = p.getZ(0);
     const sx = p.getX(1) - x0, sz = p.getZ(n) - z0;
+    // the engine's own rendered height (the 2 m shore mesh replaces the
+    // 17 m grid along every shore); the grid sampler is the fallback
+    if (window.__meshHeightAt) { window.__ground = window.__meshHeightAt; return; }
     window.__ground = (x, z) => {
       const fx = Math.max(0, Math.min(n - 1.001, (x - x0) / sx));
       const fz = Math.max(0, Math.min(n - 1.001, (z - z0) / sz));
@@ -47,19 +50,22 @@ try {
       // Bridge decks legitimately fly, so anything above ground is fine; we
       // only measure the sunk side.
       const roadPts = [];
-      let buried = 0, worst = 0, total = 0;
+      let buried = 0, worst = 0, total = 0, worstAt = null;
       window.__scene.traverse((o) => {
         if (!o.isMesh || !/^road-ribbon-/.test(o.name)) return;
-        const p = o.geometry.attributes.position;
+        const p = o.geometry.attributes.position, role = o.geometry.userData.carriage;
         for (let i = 0; i < p.count; i++) {
           const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
           roadPts.push(x, z);
+          // verge/skirt vertices tuck into the slope beside a cutting by
+          // design; only the carriageway itself must stay above the ground
+          if (role && !role[i]) continue;
           total++;
           // The outermost verge vertex is deliberately tucked 8 cm under the
           // turf so no seam shows along the edge; anything deeper than that
           // is the carriageway genuinely sinking into the ground.
           const under = window.__ground(x, z) - y;
-          if (under > 0.12) { buried++; worst = Math.max(worst, under); }
+          if (under > 0.12) { buried++; if (under > worst) { worst = under; worstAt = [Math.round(x), Math.round(z), o.name]; } }
         }
       });
 
@@ -102,13 +108,13 @@ try {
           }
         });
       }
-      return { total, buried, worst: +worst.toFixed(2), trees, offenders: offenders.slice(0, 14), nOff: offenders.length };
+      return { total, buried, worst: +worst.toFixed(2), worstAt, trees, offenders: offenders.slice(0, 14), nOff: offenders.length };
     });
 
     const pct = res.total ? (100 * res.buried / res.total).toFixed(1) : '0.0';
     const ok1 = res.buried === 0;
     const ok2 = res.nOff === 0;
-    console.log(`era ${era}: ${ok1 ? 'PASS' : 'FAIL'} carriageway under ground ${res.buried}/${res.total} verts (${pct}%), worst ${res.worst} m`);
+    console.log(`era ${era}: ${ok1 ? 'PASS' : 'FAIL'} carriageway under ground ${res.buried}/${res.total} verts (${pct}%), worst ${res.worst} m at ${JSON.stringify(res.worstAt)}`);
     console.log(`era ${era}: ${ok2 ? 'PASS' : 'FAIL'} trees in the road ${res.nOff} of ${res.trees} trunks`);
     for (const o of res.offenders) console.log('        ', o.join('  '));
     if (!ok1) failures++;

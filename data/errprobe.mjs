@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer-core';
 
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 180000,
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=960,540', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--window-size=960,540', '--no-sandbox', '--disable-dev-shm-usage'],
 });
 try {
   const page = await browser.newPage();

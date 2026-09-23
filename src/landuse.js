@@ -174,14 +174,15 @@ export const LOC = {
   BREZGA: { x: BREZGA.x, z: BREZGA.z },      // Brežģa kalns summit (255 m) — the family hill
   KROGS: { x: 2320, z: 5270 },               // Brežģa krogs / Brezgis settlement, on the old road
 };
-// The manor's watermill (eras 3-4; plausible, not documented for Nēķene —
-// research/manor-and-interwar.md) weirs the Gauja itself. A low weir runs
-// straight across the channel at the river point nearest the old pond
-// anchor; its 0.6 m head — what a lowland river of this size allows an
-// undershot wheel — backs the river up into a still mill reach (the pond:
-// water.js floods it over the real terrain) that fades out ~0.5 km
-// upstream. The mill stands in the far bank just below the weir, its house
-// dug into the bank so the flume-fed wheel meets the tailrace.
+// The manor's mill weir (eras 3-4). The 1930s Latvian Army 1:75k sheet
+// (research/maps/topo75_1930s.png) shows the Gauja broadened into a ~40-50 m
+// wide pond for ~600 m above the road crossing by Nēķena muiža; the weir sits
+// at that crossing (the river point nearest the old pond anchor). Its 0.8 m
+// head — modest, as a lowland river of this size allows an undershot wheel —
+// floods ~2.7 ha of real ground to that extent (water.js floods it). The mill
+// itself is not documented for Nēķene (research/manor-and-interwar.md); it
+// stands in the far bank just below the weir, dug in so the flume-fed wheel
+// meets the tailrace.
 {
   const q = riverAt(pondPt[0], pondPt[1]);
   const dam = { x: q.x, z: q.z, dx: q.dx, dz: q.dz, hw: q.hw, level: q.level };
@@ -191,7 +192,7 @@ export const LOC = {
   if ((LOC.MANOR.x - q.x) * nx + (LOC.MANOR.z - q.z) * nz > 0) { nx = -nx; nz = -nz; }
   dam.nx = nx; dam.nz = nz;                          // toward the mill bank
   LOC.DAM = dam;
-  LOC.POND_LEVEL = q.level + 0.6;
+  LOC.POND_LEVEL = q.level + 0.8;
   const mx = q.x + nx * (q.hw + 4.6) + q.dx * 7, mz = q.z + nz * (q.hw + 4.6) + q.dz * 7;
   // the house's local −x (wheel side) faces the channel; its floor is a
   // half-storey below the terrace the bank is cut back to (shore.js)

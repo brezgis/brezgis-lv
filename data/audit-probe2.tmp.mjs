@@ -4,7 +4,7 @@ const OUT = '/tmp/village-scratch/audit';
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome',
   headless: 'new',
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=1600,1000', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--window-size=1600,1000', '--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage();
 await page.setViewport({ width: 1600, height: 1000 });

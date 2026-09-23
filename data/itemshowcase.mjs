@@ -37,7 +37,7 @@ window.show=(kinds)=>{
   scene.traverse(o=>{if(o.isMesh){o.geometry.dispose();if(!Array.isArray(o.material))o.material.dispose();}});
  });
 };`, resolveDir: process.cwd(), loader: 'js' }, bundle:true, write:false, format:'iife' });
-const browser = await puppeteer.launch({executablePath:process.env.CHROME_PATH || '/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--enable-gpu','--use-gl=angle','--disable-dev-shm-usage']});
+const browser = await puppeteer.launch({executablePath:process.env.CHROME_PATH || '/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--enable-gpu','--use-angle=vulkan','--enable-features=Vulkan','--ignore-gpu-blocklist','--disable-dev-shm-usage']});
 const errors=[];
 console.log('Model sheets:',out);
 try {

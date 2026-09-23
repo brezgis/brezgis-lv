@@ -10,7 +10,7 @@ const output = mkdtempSync(join(tmpdir(), 'village-quality-'));
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
   headless: true, protocolTimeout: 180000,
-  args: ['--use-gl=angle', '--enable-gpu', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--no-sandbox', '--disable-dev-shm-usage'],
 });
 const errors = [], results = [];
 const assert = (ok, description) => {

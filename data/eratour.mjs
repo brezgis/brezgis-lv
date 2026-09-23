@@ -5,7 +5,7 @@ import puppeteer from 'puppeteer-core';
 const OUT = '/tmp/claude-1002/-home-anna-projects-village/1ddddc0a-f950-4449-8896-2b4ef65cfbe7/scratchpad';
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 180000,
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=1120,630', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--window-size=1120,630', '--no-sandbox', '--disable-dev-shm-usage'],
 });
 try {
   const page = await browser.newPage();

@@ -354,13 +354,15 @@ function drivingTraffic(group, route, vehicles) {
 function roadRibbons(group, era) {
   if (era < 3) return;
   const mkMat = (color, offset) => roadMaterial(color, offset);
+  // roles: 1 per carriageway vertex, 0 per verge/skirt vertex (the skirt
+  // tucks into the slope beside a cutting — data/roadcheck.mjs needs to know)
   const surf = {
-    asphalt: { mat: mkMat(0x393c40, -2), positions: [], indices: [] },
-    gravel: { mat: mkMat(0x9d947f, -1), positions: [], indices: [] },
-    darkGravel: { mat: mkMat(0x8d8570, -1), positions: [], indices: [] },
+    asphalt: { mat: mkMat(0x393c40, -2), positions: [], indices: [], roles: [] },
+    gravel: { mat: mkMat(0x9d947f, -1), positions: [], indices: [], roles: [] },
+    darkGravel: { mat: mkMat(0x8d8570, -1), positions: [], indices: [], roles: [] },
     dirt: {
       mat: roadMaterial(0xffffff,-1,true),
-      positions: [], colors: [], indices: [],
+      positions: [], colors: [], indices: [], roles: [],
     },
   };
   const patchSurf = {
@@ -447,13 +449,20 @@ function roadRibbons(group, era) {
       run.y0 = Math.max(meshHeightAt(x0, z0) + 0.14, minY);
       run.y1 = Math.max(meshHeightAt(x1, z1) + 0.14, minY);
       run.len = Math.max(0.001, dists[run.to] - dists[run.from]);
+      // a run can span a meander neck (two crossings merged): the straight
+      // deck must still clear the land between them
+      run.floor = [];
+      for (let i = run.from; i <= run.to; i++) {
+        const [tdx, tdz] = tangentAt(pts, i);
+        run.floor.push(roadBenchY(pts[i][0], pts[i][1], tdx, tdz, 4.2) - ROAD_CROWN + 0.14);
+      }
     }
     return merged;
   };
   const bridgeAt = (runs, i) => runs.find((run) => i >= run.from && i <= run.to) || null;
   const bridgeYAt = (run, dists, i) => {
     const t = (dists[i] - dists[run.from]) / run.len;
-    return run.y0 + (run.y1 - run.y0) * t;
+    return Math.max(run.y0 + (run.y1 - run.y0) * t, run.floor[i - run.from] ?? -Infinity);
   };
   // Centreline paint rides the CROWN, so it must use the same graded bench
   // the asphalt does or the dashes sink through their own road.
@@ -589,6 +598,7 @@ function roadRibbons(group, era) {
         const [dx, dz] = tangentAt(pts, i);
         const run = bridgeAt(runs, i);
         pushDirtRow(positions, colors, x, z, dx, dz, half * endK(i), run ? bridgeYAt(run, dists, i) : null);
+        surf.dirt.roles.push(0, 1, 1, 1, 1, 1, 0);
         if (i > 0) addIndices(indices, base, i, 7);
       }
       continue;
@@ -602,6 +612,7 @@ function roadRibbons(group, era) {
           const [dx, dz] = tangentAt(pts, i);
           const run = bridgeAt(runs, i);
           pushShoulderRow(positions, x, z, dx, dz, half * endK(i), run ? bridgeYAt(run, dists, i) : null);
+          surf.gravel.roles.push(0, 1, 1, 1, 1, 0);
           if (i > 0) addIndices(indices, base, i, 6, [0, 1, 3, 4]);
         }
       }
@@ -614,6 +625,7 @@ function roadRibbons(group, era) {
           const run = bridgeAt(runs, i);
           pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c,
             run ? bridgeYAt(run, dists, i) : null, half * endK(i) + 1.2);
+          surf.asphalt.roles.push(0, 1, 1, 1, 0);
           if (i > 0) {
             addIndices(indices, base, i, 5, [1, 2]);
             if(r.c===0){
@@ -656,6 +668,7 @@ function roadRibbons(group, era) {
       const [dx, dz] = tangentAt(pts, i);
       const run = bridgeAt(runs, i);
       pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c, run ? bridgeYAt(run, dists, i) : null);
+      s.roles.push(0, 1, 1, 1, 0);
       if (i > 0) addIndices(indices, base, i, 5);
     }
   }
@@ -730,6 +743,7 @@ function roadRibbons(group, era) {
     geo.setIndex(indices);
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
+    if (surf[key].roles.length * 3 === positions.length) geo.userData.carriage = Uint8Array.from(surf[key].roles);
     mesh.name = `road-ribbon-${key}`;
     mesh.receiveShadow = true;
     group.add(mesh);

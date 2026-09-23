@@ -7,7 +7,7 @@ const OUT = '/tmp/claude-1002/-home-anna-projects-village/1ddddc0a-f950-4449-889
 
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 180000,
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=1280,720', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--window-size=1280,720', '--no-sandbox', '--disable-dev-shm-usage'],
 });
 try {
   const page = await browser.newPage();

@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer-core';
 import { resolve } from 'path';
 const art = process.argv[2] || new URL('../artifact/brezgi-taurene.html', import.meta.url).pathname;
 const browser = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 180000,
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=1200,800', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu-vsync', '--disable-frame-rate-limit'] });
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--window-size=1200,800', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu-vsync', '--disable-frame-rate-limit'] });
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1200, height: 800 });

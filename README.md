@@ -19,8 +19,11 @@ Vidzeme, Latvia — the same spot of earth shown at six moments in time:
 
 - **Terrain**: real elevation model, 8.8 × 8.8 km covering Taurene and Brezģis
   (57.15944 N, 25.66472 E), from AWS Open Data terrain tiles → `data/fetch-terrain.mjs`
-- **Water**: the actual mapped course of the Gauja, the outline of Taurenes
-  ezers, and the Dzērbe stream, from OpenStreetMap → `data/bake-geodata.mjs`
+- **Water**: the actual mapped course of the Gauja, its brooks (Pīsla, Dzērbe)
+  and five lakes, from OpenStreetMap → `data/bake-geodata.mjs`; levels
+  harmonised so the river runs downhill and through its lakes as one sheet,
+  banks built on 2 m ground along every shore (`src/shore.js`,
+  `data/hydroprobe.mjs`)
 - Buildings, vegetation, animals and sound are generated procedurally. Modern
   satellite imagery and geographic data are embedded in the offline artifact;
   the finished scene does not fetch assets while you explore.
@@ -50,7 +53,7 @@ central farm is staged near Taurene; it is not a surveyed ancestral house at
 Brezģis. Each era explains its evidence. See [the accuracy review](research/accuracy-review.md).
 
 ```bash
-npm test             # rebuild, render all eras, check geometry and desktop/touch input
+npm test             # hydrology invariants, rebuild, render all eras, geometry and desktop/touch input
 npm run test:world   # chronology, ground contact, traffic, day/night exposure
 npm run test:walk    # walking and flight regressions
 npm run test:items   # every animal preset and building/prop model, labelled sheets

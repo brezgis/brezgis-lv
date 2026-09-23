@@ -1,5 +1,11 @@
 # Object and environment audit — September 2026
 
+> **Water superseded (23 Sept 2026).** The river/lake rows below describe the
+> Codex pass's coverage-grid ribbons, draped bank collars and separate lake
+> meshes. Those were replaced by a harmonised hydrology, a shared shore law
+> with 2 m shore ground, one water surface with planar reflections and a real
+> mill backwater — see WRITEUP.md, "Fourth edition: one water".
+
 This is a procedural reconstruction, not a survey-grade digital twin. All six
 eras remain available. The changes preserve the embedded/offline delivery.
 

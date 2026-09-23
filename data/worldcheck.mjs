@@ -5,7 +5,7 @@ import { PNG } from 'pngjs';
 
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 120000,
-  args: ['--use-gl=angle', '--enable-gpu', '--window-size=960,540', '--no-sandbox', '--disable-dev-shm-usage'],
+  args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--window-size=960,540', '--no-sandbox', '--disable-dev-shm-usage'],
 });
 let failures = 0;
 const fail = (message) => { failures++; console.log('FAIL', message); };
@@ -27,6 +27,9 @@ try {
     const n = Math.round(Math.sqrt(p.count));
     const x0 = p.getX(0), z0 = p.getZ(0);
     const sx = p.getX(1) - x0, sz = p.getZ(n) - z0;
+    // the engine's own rendered height (the 2 m shore mesh replaces the
+    // 17 m grid along every shore); the grid sampler is the fallback
+    if (window.__meshHeightAt) { window.__meshGround = window.__meshHeightAt; return; }
     window.__meshGround = (x, z) => {
       const fx = Math.max(0, Math.min(n - 1.001, (x - x0) / sx));
       const fz = Math.max(0, Math.min(n - 1.001, (z - z0) / sz));

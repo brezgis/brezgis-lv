@@ -65,7 +65,9 @@ export function quadruped({
     const lower = new THREE.Group();lower.position.set(0,-upperLen,bend);leg.add(lower);
     ellipsoid(leg,bodyMat,[0,-upperLen,bend],[legR*.87,legR*.95,legR*.87]);
     organicTube(lower,legColor ? material(legColor) : bodyMat,[[0,0,0],[0,-lowerLen*.74,-bend*.72],[0,-lowerLen+.055*shoulder,-bend]], [legR*.82,legR*.62,legR*.75]);
-    ellipsoid(lower,hoofMat,[0,-lowerLen+.04*shoulder,-bend+.025*shoulder],[legR*1.2,.04*shoulder,legR*1.65]);
+    // a hoof just proud of the pastern — the old 1.2×/1.65× discs read as
+    // platform shoes at grazing distance
+    ellipsoid(lower,hoofMat,[0,-lowerLen+.034*shoulder,-bend+.012*shoulder],[legR*.9,.034*shoulder,legR*1.12]);
     leg.userData.lowerLeg = lower;leg.userData.hind = sz < 0;legs.push(leg);
   }
   const neck = new THREE.Group();neck.position.set(0,bodyY,length*.35);g.add(neck);

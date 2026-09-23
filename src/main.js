@@ -105,6 +105,7 @@ async function boot() {
   window.__veg = veg;                    // debug hook for data/floracount.mjs
   window.__water = (x, z) => waterLevelAt(x, z, currentEra);   // debug hook: shot harnesses stay above water
   window.__waterSys = water;                                    // debug hook: shader uniforms, reflector
+  window.__meshHeightAt = meshHeightAt;                         // debug hook: the RENDERED ground (2 m shore mesh included)
   await progress('Sowing half a million blades of grass…');
   const grass = buildGrass(scene);
   window.__grass = grass;                // debug hook for data/dbg.mjs grassstate
@@ -553,17 +554,19 @@ async function boot() {
   const GOV_STEPS = [
     // A high-FPS-only rung: 5120 is 1.56x the texel memory of the 4096
     // default, and is never selected when the GPU's texture limit is lower.
-    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP },
-    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096 },
-    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 3, shadowMap: 4096 },
-    { pr: Math.min(devicePixelRatio, 1.25), grass: 0.65, shadowEvery: 4, shadowMap: 2048 },
-    { pr: Math.min(devicePixelRatio, 1), grass: 0.45, shadowEvery: 5, shadowMap: 2048 },
+    // refl: the water mirror's resolution as a fraction of the frame
+    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP, refl: 0.5 },
+    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096, refl: 0.5 },
+    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 3, shadowMap: 4096, refl: 0.4 },
+    { pr: Math.min(devicePixelRatio, 1.25), grass: 0.65, shadowEvery: 4, shadowMap: 2048, refl: 0.33 },
+    { pr: Math.min(devicePixelRatio, 1), grass: 0.45, shadowEvery: 5, shadowMap: 2048, refl: 0.25 },
   ];
   function applyGov(s) {
     renderer.setPixelRatio(s.pr);
     composer.setPixelRatio(s.pr);
     composer.setSize(innerWidth, innerHeight);
     grass.setBudget(s.grass);
+    water.setReflectionScale(s.refl);
     gov.shadowEvery = s.shadowEvery;
     if (sky.sun.shadow.mapSize.x !== s.shadowMap) {
       sky.sun.shadow.mapSize.set(s.shadowMap, s.shadowMap);
@@ -682,7 +685,7 @@ async function boot() {
     veg.tick(sky.state.sunColor, sky.state.ambient);
     veg.promoteTransitions(dt);
     veg.promote(camera.position.x, camera.position.z);
-    water.tick(t);
+    water.tick(t, camera.position, dt);
     WIND.time.value = t;
     grass.update(focus, currentEra, camera.position);
     envAge += dt;

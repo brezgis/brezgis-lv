@@ -12,7 +12,7 @@ let browser;
 try {
   browser = await puppeteer.launch({
     executablePath: '/usr/bin/google-chrome', headless: 'new', pipe: true, protocolTimeout: 120000,
-    args: [...base, '--use-gl=angle', '--enable-gpu'],
+    args: [...base, '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu'],
   });
 } catch (e) {
   console.log('[dbg2] GPU launch failed, SwiftShader fallback:', String(e).slice(0, 120));

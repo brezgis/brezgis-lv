@@ -1,8 +1,8 @@
 // System-level checks of the shipped world, plus close water/road/forest views.
 import puppeteer from 'puppeteer-core';
 import { mkdtempSync, writeFileSync } from 'node:fs';
-const out=mkdtempSync('/tmp/village-environment-'),errors=[],results=[];
-const browser=await puppeteer.launch({executablePath:process.env.CHROME_PATH||'/usr/bin/google-chrome',headless:true,protocolTimeout:180000,args:['--no-sandbox','--use-gl=angle','--enable-gpu','--disable-dev-shm-usage']});
+const out=mkdtempSync((process.env.OUT_DIR||'/tmp')+'/village-environment-'),errors=[],results=[];
+const browser=await puppeteer.launch({executablePath:process.env.CHROME_PATH||'/usr/bin/google-chrome',headless:true,protocolTimeout:180000,args:['--no-sandbox','--use-angle=vulkan','--enable-features=Vulkan','--ignore-gpu-blocklist','--enable-gpu','--disable-dev-shm-usage']});
 const check=(ok,label,detail)=>{results.push({pass:!!ok,label,detail});console.log(`${ok?'PASS':'FAIL'} ${label}`,JSON.stringify(detail??''));};
 console.log('Environment review:',out);
 try{
@@ -14,7 +14,7 @@ try{
  const water=await page.evaluate(()=>{
    const out=[];window.__scene.updateMatrixWorld(true);
    window.__scene.getObjectByName('water').traverse(o=>{
-     if(!o.isMesh||!o.material.normalMap)return;
+     if(!o.isMesh||!o.material.userData.u)return;
      const g=o.geometry,p=g.attributes.position,d=g.attributes.aDepth,idx=g.index;let inverted=0,flat=0,min=Infinity,max=-Infinity;
      for(let i=0;i<(idx?.count??p.count);i+=3){
        const a=idx?idx.getX(i):i,b=idx?idx.getX(i+1):i+1,c=idx?idx.getX(i+2):i+2;
@@ -22,13 +22,13 @@ try{
        if(area<-.001)inverted++;if(Math.abs(area)<.000001)flat++;
      }
      for(let i=0;i<d.count;i++){min=Math.min(min,d.getX(i));max=Math.max(max,d.getX(i));}
-     out.push({name:o.name,vertices:p.count,inverted,flat,min,max,depthWrite:o.material.depthWrite,singlePass:o.material.forceSinglePass});
+     out.push({name:o.name,vertices:p.count,inverted,flat,min,max,depthWrite:o.material.depthWrite});
    });return out;
  });
- check(water.every(w=>!w.depthWrite&&w.singlePass),'transparent water does not occlude other water with depth writes',water);
+ check(water.length>=2&&water.every(w=>!w.depthWrite),'one water surface + mill pond; transparent water writes no depth',water);
  check(water.every(w=>w.inverted===0),'all water faces wind upward',water.filter(w=>w.inverted));
  check(water.every(w=>w.flat===0),'no collapsed shoreline faces remain after Float32 conversion');
- check(water.filter(w=>/ezers|Brenkūzis/.test(w.name)).every(w=>w.max-w.min>.5),'lake shading represents shelves and deeper basins');
+ check(water.find(w=>w.name==='water:surface')?.max>3,'optical depth reaches the deep lake basins');
  const modern=await page.evaluate(()=>({stops:window.__scene.getObjectByName('mapped-roadside')?.children.length,
    wallFinish:!!window.__scene.getObjectByName('bg-walls-era-5')?.geometry.attributes.aFinish,
    farVertices:[...window.__scene.getObjectByName('vegetation').children].filter(o=>o.name.startsWith('far:')).map(o=>o.geometry.attributes.position.count)}));

@@ -41,6 +41,12 @@ Open `artifact/brezgi-taurene.html` straight from disk (everything is inlined
 into that one file), or run `node serve.mjs` and visit
 `http://localhost:4119`.
 
+A welcome card gives the context while the landscape builds; **Step in** (or
+Enter) opens the world. The whole interface, including every era story, is in
+Latvian and English (the long Chronicle is English). Each era's story opens
+with a short lead ("Read more" for the rest). Superscript numbers show their
+source on hover, and **Look here** buttons glide to the era's best sights.
+
 **Controls**: click the landscape to capture the mouse, then move it to look.
 **WASD or arrow keys** start flying. Space rises, Shift descends, and the wheel
 adjusts flying speed. **V** or the Walk button switches to walking (Shift

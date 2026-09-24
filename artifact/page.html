@@ -30,9 +30,25 @@
     color: var(--ink); transition: opacity 0.8s ease; font-family: var(--serif);
   }
   #loader.done { opacity: 0; pointer-events: none; }
+  #loader { overflow-y: auto; padding: 32px 20px; box-sizing: border-box; justify-content: safe center; }
+  #loader .coa-big { width: 58px; height: 69px; background: var(--coa) center / contain no-repeat; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6)); }
   #loader .t { font-size: 42px; letter-spacing: 0.32em; margin-left: 0.32em; }
-  #loader .s { font-family: var(--sans); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--sage); }
+  #loader .s { font-family: var(--sans); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--sage); text-align: center; }
+  #intro-text { max-width: 58ch; margin-top: 6px; }
+  #intro-text p { font-size: 16px; line-height: 1.7; color: #d9d2bf; margin: 0 0 14px; text-wrap: pretty; }
+  #intro-text p:first-child::first-letter { font-size: 1.5em; color: var(--bronze-bright); }
+  #intro-how { max-width: 58ch; font: 12px/1.6 var(--sans); color: var(--sage); text-align: center; letter-spacing: 0.02em; }
+  #intro-foot { display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 64px; margin-top: 6px; }
   #loader-status { font-family: var(--sans); font-size: 13px; color: var(--ink-dim); font-style: italic; }
+  #intro-enter {
+    font: 15px/1 var(--serif); letter-spacing: 0.14em; color: #1a150c; cursor: pointer;
+    background: linear-gradient(#e8b95a, #c9963f); border: 1px solid #f0cf86; border-radius: 2px;
+    padding: 12px 28px; box-shadow: 0 4px 24px rgba(232, 185, 90, 0.25); animation: rise 0.6s ease;
+  }
+  #intro-enter:hover { filter: brightness(1.08); }
+  #intro-enter:focus-visible { outline: 2px solid #f0cf86; outline-offset: 3px; }
+  #intro-lang { position: absolute; top: 18px; right: 22px; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   #loader .band { display: flex; gap: 7px; }
   #loader .band i { width: 8px; height: 8px; background: var(--bronze); transform: rotate(45deg); opacity: 0.35; animation: bpulse 1.6s infinite; }
   #loader .band i:nth-child(2) { animation-delay: 0.2s; }
@@ -47,7 +63,9 @@
     font-family: var(--serif); pointer-events: none; text-shadow: 0 1px 8px rgba(0,0,0,0.55);
   }
   #masthead h1 { margin: 0; font-size: 26px; font-weight: 500; letter-spacing: 0.3em; }
-  #masthead p { margin: 3px 0 0; font-family: var(--sans); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); }
+  #masthead p { margin: 3px 0 0; font-family: var(--sans); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: #ece5d0; text-shadow: 0 1px 2px rgba(0,0,0,0.7); }
+  #masthead #about-btn { pointer-events: auto; margin-top: 9px; color: var(--ink); background: rgba(18, 15, 10, 0.62); }
+  #masthead #about-btn:hover { border-color: var(--bronze); color: var(--bronze-bright); }
   #masthead .coa {
     position: absolute; left: -2px; top: 2px; width: 30px; height: 36px;
     background: var(--coa) center / contain no-repeat;
@@ -64,7 +82,7 @@
   }
   .era-btn {
     position: relative; background: none; border: none; cursor: pointer;
-    width: 96px; padding: 0 0 2px; color: var(--ink-dim); font-family: var(--sans);
+    width: 108px; padding: 0 0 2px; color: var(--ink-dim); font-family: var(--sans);
   }
   .era-btn::before {
     content: ''; position: absolute; top: 5px; left: -50%; width: 100%; height: 1px; background: var(--line);
@@ -74,26 +92,58 @@
     display: block; width: 9px; height: 9px; margin: 0 auto 9px; transform: rotate(45deg);
     background: #4b4536; border: 1px solid var(--line); transition: all 0.25s; position: relative; z-index: 1;
   }
-  .era-btn .yr { display: block; font-size: 13px; letter-spacing: 0.06em; color: var(--ink); font-family: var(--serif); }
+  .era-btn .yr { display: block; font-size: 13px; letter-spacing: 0.04em; color: var(--ink); font-family: var(--serif); white-space: nowrap; }
   .era-btn .nm { display: block; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 2px; }
   .era-btn:hover .dot { background: #6b5c38; }
   .era-btn.active .dot { background: var(--bronze-bright); border-color: var(--bronze-bright); box-shadow: 0 0 12px rgba(232, 185, 90, 0.7); }
   .era-btn.active .yr { color: var(--bronze-bright); }
   .era-btn:focus-visible { outline: 1px solid var(--bronze); outline-offset: 3px; }
+  #era-caption {
+    position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); z-index: 10;
+    font: italic 15px/1.2 var(--serif); letter-spacing: 0.04em; color: var(--ink); white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8), 0 0 16px rgba(0,0,0,0.55); pointer-events: none; transition: opacity 0.4s;
+  }
 
   /* ---------- era panel ---------- */
   #panel {
     position: fixed; left: 22px; top: 50%; transform: translateY(-50%); z-index: 10;
     width: min(330px, calc(100vw - 44px)); color: var(--ink);
-    background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    background: rgba(20, 17, 11, 0.86); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--line); border-radius: 2px; padding: 20px 22px 16px;
-    transition: opacity 0.3s, transform 0.3s;
+    transition: opacity 0.3s, transform 0.3s; box-shadow: 0 6px 30px rgba(0,0,0,0.35);
   }
   #panel.closed { opacity: 0; pointer-events: none; transform: translateY(-50%) translateX(-16px); }
-  #panel h2 { margin: 0 0 10px; font-family: var(--serif); font-weight: 500; font-size: 19px; line-height: 1.3; text-wrap: balance; }
+  #panel h2 { margin: 0 24px 10px 0; font-family: var(--serif); font-weight: 500; font-size: 21px; line-height: 1.3; text-wrap: balance; }
+  #panel .kick { font: 10px/1.4 var(--sans); letter-spacing: 0.2em; text-transform: uppercase; color: var(--bronze); margin-bottom: 6px; }
+  #panel #era-lead { color: var(--ink); font-size: 15px; }
+  #panel #era-more p { margin-top: 10px; }
+  #panel sup { font: 600 9px var(--sans); line-height: 0; }
+  #panel sup a { color: var(--bronze-bright); text-decoration: none; padding: 0 1px; cursor: help; }
+  #panel sup a:hover { text-decoration: underline; }
+  .linkbtn { background: none; border: none; padding: 8px 0 0; cursor: pointer; font: 11px var(--sans); letter-spacing: 0.12em; text-transform: uppercase; color: var(--bronze-bright); }
+  .linkbtn:hover { color: #f3d58f; }
+  #panel-close { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--ink-dim); font-size: 20px; line-height: 1; cursor: pointer; padding: 4px; }
+  #panel-close:hover { color: var(--ink); }
+  #era-moments { margin-top: 16px; }
+  #era-moments .lbl { font: 10px var(--sans); letter-spacing: 0.2em; text-transform: uppercase; color: var(--sage); margin-bottom: 7px; }
+  #era-moments .row { display: flex; flex-direction: column; gap: 5px; }
+  .moment {
+    display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer;
+    background: rgba(232, 185, 90, 0.06); border: 1px solid rgba(201, 150, 63, 0.35); border-radius: 2px;
+    padding: 7px 10px; color: var(--ink); font: 13px/1.3 var(--serif); transition: background 0.2s, border-color 0.2s;
+  }
+  .moment::before { content: ''; width: 7px; height: 7px; flex: none; transform: rotate(45deg); background: var(--bronze); }
+  .moment:hover { background: rgba(232, 185, 90, 0.16); border-color: var(--bronze-bright); }
+  .moment:focus-visible { outline: 1px solid var(--bronze-bright); outline-offset: 2px; }
+  #cite-tip {
+    position: fixed; z-index: 40; max-width: 300px; pointer-events: none; opacity: 0; transition: opacity 0.15s;
+    background: rgba(14, 12, 8, 0.96); border: 1px solid var(--bronze); border-radius: 2px;
+    padding: 8px 10px; font: 12px/1.45 var(--sans); color: var(--ink);
+  }
+  #cite-tip.on { opacity: 1; }
   #panel { max-height: calc(100dvh - 260px); overflow-y: auto; scrollbar-width: thin; }
-  #panel p { margin: 0; font-family: var(--serif); font-size: 13.5px; line-height: 1.62; color: var(--ink-dim); }
-  #panel #era-evidence { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font: 11px/1.5 var(--sans); color: #c4caba; }
+  #panel p { margin: 0; font-family: var(--serif); font-size: 14px; line-height: 1.62; color: #d3ccb8; }
+  #panel #era-evidence { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font: 11.5px/1.5 var(--sans); color: #c9cfbf; }
   #touch-controls { display: none; }
   @media (pointer: coarse) {
     #touch-controls { display: grid; grid-template-columns: repeat(3, 44px); gap: 5px; position: fixed; bottom: 130px; left: 16px; z-index: 9; }
@@ -104,7 +154,7 @@
   #era-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
   #era-facts span {
     font-family: var(--sans); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--sage); border: 1px solid rgba(138, 150, 120, 0.35); padding: 3px 8px; border-radius: 1px;
+    color: #b3bea0; border: 1px solid rgba(138, 150, 120, 0.4); padding: 3px 8px; border-radius: 1px;
   }
   #panel-toggle {
     position: fixed; left: 22px; bottom: 26px; z-index: 11;
@@ -124,11 +174,32 @@
   .ctl:hover { color: var(--ink); border-color: var(--ink-dim); }
   .ctl.active { color: var(--bronze-bright); border-color: var(--bronze); }
   .ctl:focus-visible { outline: 1px solid var(--bronze); outline-offset: 2px; }
-  #day-clock {
-    font-family: var(--sans); font-size: 11px; letter-spacing: 0.2em; color: var(--ink-dim);
-    padding: 4px 2px; font-variant-numeric: tabular-nums;
+  #ctl-bar { display: flex; gap: 6px; align-items: flex-start; }
+  .icon-btn {
+    height: 34px; min-width: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    color: var(--ink); background: rgba(18, 15, 10, 0.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 2px; padding: 0 9px; cursor: pointer;
+    font: 11px var(--sans); letter-spacing: 0.12em; transition: border-color 0.2s, color 0.2s;
   }
-  .ctl-label { font-family: var(--sans); font-size: 8.5px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(181, 173, 151, 0.6); margin-top: 4px; }
+  .icon-btn svg { width: 17px; height: 17px; flex: none; }
+  .icon-btn:hover { border-color: var(--ink-dim); }
+  .icon-btn.on { color: var(--bronze-bright); border-color: var(--bronze); }
+  .icon-btn:focus-visible { outline: 1px solid var(--bronze); outline-offset: 2px; }
+  #day-clock { font-variant-numeric: tabular-nums; letter-spacing: 0.1em; font-size: 12px; }
+  #dial { position: relative; }
+  .pop {
+    position: absolute; right: 0; top: 40px; display: flex; flex-direction: column; gap: 4px; min-width: 150px;
+    background: rgba(18, 15, 10, 0.92); border: 1px solid var(--line); border-radius: 2px; padding: 6px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  }
+  .pop[hidden] { display: none; }
+  .pop button { text-align: left; }
+  .pop .ctl { font-size: 11px; padding: 8px 10px; background: transparent; border-color: transparent; }
+  .pop .ctl:hover { border-color: var(--line); }
+  .pop .ctl.active { border-color: var(--bronze); }
+  #menu-btn { display: none; }
+  .icon-btn .lab { display: none; }
+  #about-btn-m { display: none; }
 
   /* ---------- era fade: a page of time, not a white flash ---------- */
   #fade {
@@ -204,10 +275,10 @@
   #keys .kc { display: flex; align-items: center; gap: 5px; }
   #keys kbd {
     font-family: var(--sans); font-size: 9.5px; letter-spacing: 0.08em;
-    color: var(--ink); background: var(--glass-soft); border: 1px solid var(--line);
+    color: var(--ink); background: rgba(18, 15, 10, 0.72); border: 1px solid var(--line);
     border-bottom-width: 2px; border-radius: 3px; padding: 2px 6px; white-space: nowrap;
   }
-  #keys .kl { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim); }
+  #keys .kl { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #ddd5bf; text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 10px rgba(0,0,0,0.6); }
 
   /* ---------- minimap widget + parish map ---------- */
   #mini {
@@ -221,7 +292,7 @@
   #mini .tag {
     position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 6px;
     font-family: var(--sans); font-size: 8.5px; letter-spacing: 0.2em; text-transform: uppercase;
-    color: var(--ink-dim); background: rgba(18,15,10,0.55); text-align: center;
+    color: var(--ink); background: rgba(18,15,10,0.72); text-align: center;
   }
   #mapwrap {
     position: fixed; inset: 0; z-index: 32; display: none;
@@ -241,8 +312,21 @@
     #masthead .mh { padding-left: 34px; }
     #masthead h1 { font-size: 16px; letter-spacing: 0.12em; }
     #masthead p { display: none; }
-    #controls { top: 18px; right: 12px; gap: 6px; }
+    #controls { top: 14px; right: 12px; gap: 6px; }
     .ctl { font-size: 9px; letter-spacing: 0.1em; padding: 6px 8px; }
+    #menu-btn { display: inline-flex; }
+    #ctl-bar { display: none; position: absolute; right: 0; top: 42px; flex-direction: column; align-items: stretch;
+      background: rgba(18, 15, 10, 0.92); border: 1px solid var(--line); padding: 6px; border-radius: 2px; }
+    #ctl-bar.open { display: flex; }
+    #ctl-bar .icon-btn { justify-content: flex-start; }
+    #ctl-bar .icon-btn .lab { display: inline; }
+    .pop { position: static; margin-top: 4px; }
+    #masthead #about-btn { display: none; }
+    #about-btn-m { display: inline-flex; }
+    #ctl-bar .icon-btn { height: 40px; white-space: nowrap; }
+    #dial, #dial-btn { width: 100%; }
+    #era-caption { bottom: 84px; font-size: 13px; }
+    #intro-text p { font-size: 15px; }
     #panel { top: auto; left: 22px; right: 22px; bottom: 108px; width: auto; box-sizing: border-box; transform: none; }
     #panel.closed { transform: translateX(-16px); }
     #panel-toggle { left: 12px; bottom: 82px; }
@@ -273,11 +357,18 @@
   <button class="ctl" data-move-key="ShiftLeft" aria-label="Descend or sprint">−</button>
 </div>
 
-<div id="loader">
-  <div class="t">BREZGI</div>
-  <div class="s">Taurenes pagasts · Vidzeme · Latvija</div>
-  <div class="band"><i></i><i></i><i></i><i></i><i></i></div>
-  <div id="loader-status">Waking the time machine…</div>
+<div id="loader" role="dialog" aria-labelledby="intro-title">
+  <button class="ctl" id="intro-lang" type="button">EN</button>
+  <div class="coa-big" aria-hidden="true"></div>
+  <div class="t" id="intro-title">BREZGI</div>
+  <div class="s" id="intro-kicker">Taurenes pagasts · Vidzeme · Latvija</div>
+  <div id="intro-text"></div>
+  <div id="intro-how"></div>
+  <div id="intro-foot">
+    <div class="band"><i></i><i></i><i></i><i></i><i></i></div>
+    <div id="loader-status">Waking the time machine…</div>
+    <button id="intro-enter" type="button" hidden>Ienākt ainavā</button>
+  </div>
 </div>
 
 <header id="masthead">
@@ -285,6 +376,7 @@
   <div class="mh">
     <h1>BREZGI</h1>
     <p>Taurenes pagasts · 57.159° N 25.665° E</p>
+    <button class="ctl" id="about-btn" type="button" data-i18n="chronicle">Hronika un avoti</button>
   </div>
 </header>
 
@@ -294,36 +386,44 @@
   <button class="era-btn" type="button"><span class="dot"></span><span class="yr">~AD 950</span><span class="nm" data-i18n="era2">Latgaļi</span></button>
   <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1860</span><span class="nm" data-i18n="era3">Muiža</span></button>
   <button class="era-btn" type="button"><span class="dot"></span><span class="yr">1935</span><span class="nm" data-i18n="era4">Taurene</span></button>
-  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">2025</span><span class="nm" data-i18n="era5">Šodiena</span></button>
+  <button class="era-btn" type="button"><span class="dot"></span><span class="yr">2025</span><span class="nm" data-i18n="era5">Mūsdienas</span></button>
 </nav>
+<div id="era-caption" aria-live="polite"></div>
 
-<aside id="panel">
+<aside id="panel" aria-label="Era story">
+  <button id="panel-close" type="button" aria-label="Aizvērt">×</button>
+  <div class="kick" id="era-kick"></div>
   <h2 id="era-title"></h2>
-  <p id="era-body" lang="en"></p>
+  <p id="era-lead"></p>
+  <div id="era-more" hidden><p id="era-body"></p></div>
+  <button class="linkbtn" id="more-btn" type="button">Lasīt vairāk ▾</button>
+  <div id="era-moments"><div class="lbl" data-i18n="lookHere">Apskatīt</div><div class="row"></div></div>
   <div id="era-facts"></div>
-  <p id="era-evidence" lang="en"></p>
+  <p id="era-evidence"></p>
 </aside>
-<button class="ctl" id="panel-toggle" type="button" data-i18n="story">Stāsts / story</button>
+<button class="ctl" id="panel-toggle" type="button" data-i18n="story">Stāsts</button>
+<div id="cite-tip" role="tooltip"></div>
 
 <div id="controls">
-  <div class="ctl-row">
-    <button class="ctl" id="lang-btn" type="button" title="Valoda / language">EN</button>
-    <button class="ctl" id="sound-btn" type="button">🔇 skaņa</button>
-    <button class="ctl" id="about-btn" type="button" data-i18n="chronicle">Hronika un avoti</button>
+  <button class="icon-btn" id="menu-btn" type="button" aria-label="Izvēlne" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none"/></svg></button>
+  <div id="ctl-bar">
+    <button class="icon-btn" id="lang-btn" type="button" title="Valoda / language">EN</button>
+    <button class="icon-btn" id="sound-btn" type="button"></button>
+    <button class="icon-btn" id="mode-btn" type="button"></button>
+    <button class="icon-btn" id="about-btn-m" type="button"><svg viewBox="0 0 24 24"><path d="M5 4h9l5 5v11H5z M14 4v5h5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/><path d="M8 13h8M8 16.5h6" stroke="currentColor" stroke-width="1.6"/></svg><span class="lab" data-i18n="chronicle">Hronika un avoti</span></button>
+    <div id="dial">
+      <button class="icon-btn" id="dial-btn" type="button" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6"><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></g></svg>
+        <span id="day-clock">--:--</span>
+      </button>
+      <div class="pop" id="time-pop" hidden>
+        <button class="ctl active" data-time="flow" type="button" data-i18n="flow">▶ Laiks rit</button>
+        <button class="ctl" data-time="dawn" type="button" data-i18n="dawn">Ausma</button>
+        <button class="ctl" data-time="noon" type="button" data-i18n="noon">Diena</button>
+        <button class="ctl" data-time="evening" type="button" data-i18n="evening">Vakars</button>
+      </div>
+    </div>
   </div>
-  <div class="ctl-label" data-i18n="lblMove">Kustība</div>
-  <div class="ctl-row">
-    <button class="ctl" data-mode="fly" type="button" data-i18n="fly">Lidot</button>
-    <button class="ctl" data-mode="walk" type="button" data-i18n="walk">Iet</button>
-  </div>
-  <div class="ctl-label" data-i18n="lblTime">Diennakts</div>
-  <div class="ctl-row">
-    <button class="ctl active" data-time="flow" type="button" data-i18n="flow">Rit</button>
-    <button class="ctl" data-time="dawn" type="button" data-i18n="dawn">Rīts</button>
-    <button class="ctl" data-time="noon" type="button" data-i18n="noon">Diena</button>
-    <button class="ctl" data-time="evening" type="button" data-i18n="evening">Vakars</button>
-  </div>
-  <div id="day-clock">--:--</div>
 </div>
 
 <div id="keys" aria-hidden="true"></div>

@@ -18,27 +18,33 @@ import { Rig } from './rig.js';
 import { buildMinimap } from './minimap.js';
 import { LOC } from './landuse.js';
 import { RIVER_PTS, LAKES } from './geodata.js';
-import { ERAS } from './content.js';
+import { ERAS, SOURCES, INTRO, eraText } from './content.js';
 
 const S = LOC.STEAD;
 const $ = (id) => document.getElementById(id);
 
-// ---------------- UI language (chrome only; the chronicle stays English) ----
+// ---------------- UI language: everything but the long Chronicle ------------
 const I18N = {
   lv: {
-    fly: 'Lidot', walk: 'Iet',
-    flow: 'Rit', dawn: 'Rīts', noon: 'Diena', evening: 'Vakars',
-    lblMove: 'Kustība', lblTime: 'Diennakts', karte: 'Karte · M',
-    sound: 'skaņa', chronicle: 'Hronika un avoti', story: 'Stāsts / story', close: 'Aizvērt ✕',
-    era0: 'Tundra', era1: 'Tauri', era2: 'Latgaļi', era3: 'Muiža', era4: 'Taurene', era5: '2025',
+    fly: 'Lidot', walk: 'Iet', toFly: 'Pārslēgt uz lidošanu', toWalk: 'Pārslēgt uz iešanu',
+    flow: '▶ Laiks rit', dawn: 'Ausma', noon: 'Diena', evening: 'Vakars', timeOfDay: 'Diennakts laiks',
+    karte: 'Karte · M', soundOn: 'Skaņa ieslēgta', soundOff: 'Skaņa izslēgta', lang: 'Valoda: latviešu',
+    chronicle: 'Hronika un avoti', story: 'Stāsts', close: 'Aizvērt ✕', menu: 'Izvēlne',
+    lookHere: 'Apskatīt', more: 'Lasīt vairāk ▾', less: 'Mazāk ▴', source: 'avots',
   },
   en: {
-    fly: 'Fly', walk: 'Walk',
-    flow: 'Flow', dawn: 'Dawn', noon: 'Noon', evening: 'Evening',
-    lblMove: 'Move', lblTime: 'Time of day', karte: 'Map · M',
-    sound: 'sound', chronicle: 'Chronicle & sources', story: 'Story', close: 'Close ✕',
-    era0: 'Tundra', era1: 'Aurochs', era2: 'Latgalians', era3: 'Manor', era4: 'Taurene', era5: '2025',
+    fly: 'Fly', walk: 'Walk', toFly: 'Switch to flying', toWalk: 'Switch to walking',
+    flow: '▶ Time flows', dawn: 'Dawn', noon: 'Noon', evening: 'Evening', timeOfDay: 'Time of day',
+    karte: 'Map · M', soundOn: 'Sound on', soundOff: 'Sound off', lang: 'Language: English',
+    chronicle: 'Chronicle & sources', story: 'Story', close: 'Close ✕', menu: 'Menu',
+    lookHere: 'Look here', more: 'Read more ▾', less: 'Less ▴', source: 'source',
   },
+};
+const ICONS = {
+  soundOn: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.6 6a8.6 8.6 0 0 1 0 12" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg>',
+  soundOff: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  fly: '<svg viewBox="0 0 24 24"><path d="M1.5 11.5c3.2-2.6 6.3-2.4 10.5 1.2 4.2-3.6 7.3-3.8 10.5-1.2-3.9-.6-6.9.6-10.5 4.3-3.6-3.7-6.6-4.9-10.5-4.3z" fill="currentColor"/></svg>',
+  walk: '<svg viewBox="0 0 24 24"><circle cx="13" cy="4.2" r="2.1" fill="currentColor"/><path d="M12.5 8.2l-2.6 5.1 2.9 2.6-1.4 5.8M12.5 8.2l2.3 4.4 3.3 1.3M9.9 13.3l-3.2 2.4M12.8 15.9l3.9 5.8" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 // compact keycap chips per mode — the old prose hint line read as a manual
 const KEYCHIPS = {
@@ -55,6 +61,26 @@ const KEYCHIPS = {
 };
 let lang = 'lv';
 try { lang = localStorage.getItem('brezgi-lang') === 'en' ? 'en' : 'lv'; } catch { /* storage may be unavailable for local files */ }
+
+// The welcome card: context to read while the landscape builds; once it is
+// built, "Step in" (or Enter) dismisses it. Automated browsers skip it.
+function renderIntro() {
+  const T = INTRO[lang];
+  const k = $('intro-kicker'), tx = $('intro-text'), how = $('intro-how'), en = $('intro-enter'), lb = $('intro-lang');
+  if (!tx) return;
+  k.textContent = T.kicker;
+  tx.innerHTML = T.paras.map((p) => `<p>${p}</p>`).join('');
+  how.textContent = T.how;
+  en.textContent = T.enter + ' →';
+  lb.textContent = lang === 'lv' ? 'EN' : 'LV';
+}
+renderIntro();
+$('intro-lang')?.addEventListener('click', () => {
+  lang = lang === 'lv' ? 'en' : 'lv';
+  try { localStorage.setItem('brezgi-lang', lang); } catch { /* optional */ }
+  renderIntro();
+  window.__applyLang?.(lang);
+});
 
 let bootT0 = 0;
 const progress = (msg) => {
@@ -173,14 +199,19 @@ async function boot() {
     clearTimeout(keysDimT);
     keysDimT = setTimeout(() => keysEl.classList.add('dim'), 9000);
   };
-  rig.onModeChange = (mode) => {
-    document.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
-    renderKeys();
+  // one toggle: shows how you are moving now, click to switch
+  const renderMode = () => {
+    const m = rig.mode === 'walk' ? 'walk' : 'fly';
+    const b = $('mode-btn');
+    b.innerHTML = ICONS[m] + `<span class="lab">${I18N[lang][m]}</span>`;
+    b.title = I18N[lang][m === 'walk' ? 'toFly' : 'toWalk'];
+    b.setAttribute('aria-label', b.title);
   };
-  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+  rig.onModeChange = () => { renderMode(); renderKeys(); };
+  $('mode-btn').addEventListener('click', () => {
     if (rig.mode === 'cinema') rig.setMode('fly');
-    rig.setMode(b.dataset.mode);
-  }));
+    rig.setMode(rig.mode === 'walk' ? 'fly' : 'walk');
+  });
 
   // the player's body: invisible to the camera, real to the sun. Minecraft
   // says you have a shadow when you stand on the ground — you do now.
@@ -345,11 +376,77 @@ async function boot() {
       b.classList.toggle('active', i === era);
       b.setAttribute('aria-pressed', String(i === era));
     });
-    $('era-title').textContent = ERAS[era].title;
-    $('era-body').textContent = ERAS[era].body.replace(/\s+/g, ' ');
-    $('era-facts').innerHTML = ERAS[era].facts.map((f) => `<span>${f}</span>`).join('');
-    $('era-evidence').textContent = ERAS[era].evidence;
+    renderEraText(era);
   }
+
+  // ------- the story panel -------
+  const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+  // runs of [n][m] become one superscript, "n, m", each number a link
+  const citeHTML = (t) => esc(t).replace(/\s?((?:\[\d+\])+)/g, (m, run) => {
+    const links = [...run.matchAll(/\d+/g)].map(([n]) => {
+      const src = SOURCES.find((q) => q.n === +n);
+      return src ? `<a href="${src.u}" target="_blank" rel="noopener" data-cite="${n}">${n}</a>` : '';
+    }).filter(Boolean);
+    return links.length ? `<sup>${links.join(',')}</sup>` : '';
+  });
+  let moreOpen = false;
+  function renderEraText(era) {
+    if (era < 0) return;
+    const T = eraText(era, lang), L = I18N[lang];
+    $('era-kick').textContent = T.caption;
+    $('era-title').textContent = T.title;
+    $('era-lead').innerHTML = citeHTML(T.lead);
+    $('era-body').innerHTML = citeHTML(T.more);
+    $('era-more').hidden = !moreOpen || !T.more;
+    $('more-btn').hidden = !T.more;
+    $('more-btn').textContent = moreOpen ? L.less : L.more;
+    $('era-facts').innerHTML = T.facts.map((f) => `<span>${esc(f)}</span>`).join('');
+    $('era-evidence').textContent = T.evidence;
+    const row = document.querySelector('#era-moments .row');
+    row.innerHTML = '';
+    for (const m of MOMENTS[era] || []) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'moment'; b.textContent = m[lang];
+      b.addEventListener('click', () => goMoment(m));
+      row.appendChild(b);
+    }
+    // timeline: localized years and names, the caption above it
+    document.querySelectorAll('.era-btn').forEach((btn, i) => {
+      const E = eraText(i, lang);
+      btn.querySelector('.yr').textContent = E.year;
+      btn.querySelector('.nm').textContent = E.name;
+      btn.setAttribute('aria-label', `${E.year} — ${E.name}`);
+    });
+    $('era-caption').textContent = T.caption;
+  }
+  $('more-btn').addEventListener('click', () => { moreOpen = !moreOpen; renderEraText(currentEra); });
+  // citation tooltips: the source, one hover away; click opens it
+  const tip = $('cite-tip');
+  $('panel').addEventListener('mouseover', (e) => {
+    const a = e.target.closest?.('a[data-cite]');
+    if (!a) return;
+    const src = SOURCES.find((q) => q.n === +a.dataset.cite);
+    tip.textContent = `[${src.n}] ${src.t}`;
+    const r = a.getBoundingClientRect();
+    tip.style.left = `${Math.min(innerWidth - 316, r.right + 8)}px`;
+    tip.style.top = `${Math.max(8, r.top - 8)}px`;
+    tip.classList.add('on');
+  });
+  $('panel').addEventListener('mouseout', (e) => { if (e.target.closest?.('a[data-cite]')) tip.classList.remove('on'); });
+  // the story folds itself away once you start moving, and comes back with
+  // each new era — read it, then walk
+  let panelShownAt = 0;
+  const showPanel = (on) => {
+    $('panel').classList.toggle('closed', !on);
+    if (on) panelShownAt = performance.now();
+  };
+  const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+  addEventListener('keydown', (e) => {
+    if (!MOVE_KEYS.has(e.code) || $('panel').classList.contains('closed')) return;
+    if (performance.now() - panelShownAt < 1500) return;
+    if (matchMedia('(max-width: 760px)').matches) return;
+    showPanel(false);
+  });
 
   // era switch with fade + year spin
   let switching = false;
@@ -364,15 +461,18 @@ async function boot() {
     const labelEl = $('era-label');
     setTimeout(() => {
       activateEra(era);
+      if (!matchMedia('(max-width: 760px)').matches) showPanel(true);
       const t0 = performance.now();
       yearEl.style.opacity = 1;
-      labelEl.textContent = I18N[lang]['era' + era];
+      labelEl.textContent = eraText(era, lang).name;
       labelEl.style.opacity = 1;
       const spin = () => {
         const u = Math.min(1, (performance.now() - t0) / 1100);
         const e = u < 0.5 ? 2 * u * u : -1 + (4 - 2 * u) * u;
         const y = Math.round(fromYear + (toYear - fromYear) * e);
-        yearEl.textContent = y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${Math.max(1, y)}`;
+        yearEl.textContent = lang === 'lv'
+          ? (y < 0 ? `${(-y).toLocaleString('lv')} p. m. ē.` : `${Math.max(1, y)}. g.`)
+          : (y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${Math.max(1, y)}`);
         if (u < 1) requestAnimationFrame(spin);
         else setTimeout(() => { yearEl.style.opacity = 0; labelEl.style.opacity = 0; }, 600);
       };
@@ -435,6 +535,32 @@ async function boot() {
     const gy = meshHeightAt(x, z);
     tweenTo([x + alt * 0.55, gy + alt, z + alt * 0.7], [x, gy + 4, z]);
   }
+  // "Look here": a few places per era worth gliding to. [x, z, alt] or a
+  // preset name; t sets the time of day on arrival.
+  const MOMENTS = [
+    [{ lv: 'Ziemeļbriežu bars', en: 'The reindeer band', at: [S.x - 60, S.z + 120, 30] },
+     { lv: 'Kūstošais ledus ezera ieplakā', en: 'Dead ice melting in a lake hollow', at: [1780, -280, 160] },
+     { lv: 'Ziemeļblāzma', en: 'The northern lights', at: [S.x, S.z + 200, 60], t: 0.0 }],
+    [{ lv: 'Mednieku nometne', en: 'The hunters’ camp', at: [LOC.CAMP.x, LOC.CAMP.z, 16] },
+     { lv: 'Tauru bars', en: 'The aurochs herd', at: [S.x - 20, S.z + 30, 30] },
+     { lv: 'Gauja', en: 'The Gauja', preset: 'upe' }],
+    [{ lv: 'Sēta', en: 'The farmstead', preset: 'pagalms' },
+     { lv: 'Līdums', en: 'A burn-cleared field', at: [-89, -15, 40] },
+     { lv: 'Lejstupu pilskalns', en: 'Lejstupu hillfort', at: [LOC.HILLFORT.x, LOC.HILLFORT.z, 70] }],
+    [{ lv: 'Nēķena muiža', en: 'Nēķene manor', preset: 'muiza' },
+     { lv: 'Dzirnavu dambis', en: 'The mill weir', at: [LOC.DAM.x, LOC.DAM.z, 28] },
+     { lv: 'Brežģa krogs', en: 'Brežģa tavern', at: [LOC.KROGS.x, LOC.KROGS.z, 60] }],
+    [{ lv: 'Sēta', en: 'The farmstead', preset: 'pagalms' },
+     { lv: 'Dzirnavu dīķis', en: 'The mill pond', at: [LOC.DAM.x - 60, LOC.DAM.z + 40, 90] },
+     { lv: 'Jāņu uguns uz Brežģa kalna', en: 'The Jāņi fire on Brežģa kalns', preset: 'brezga', t: 0.9 }],
+    [{ lv: 'Brežģa skatu tornis', en: 'The Brežģa tower', preset: 'brezga' },
+     { lv: 'Konik zirgi', en: 'The Konik horses', at: [101, -374, 30] },
+     { lv: 'Taurenes ezers', en: 'Lake Taurene', preset: 'ezers' }],
+  ];
+  function goMoment(m) {
+    if (m.preset) flyTo(m.preset); else flyToPoint(m.at[0], m.at[1], m.at[2]);
+    if (m.t !== undefined) setTime(null, m.t);
+  }
   function jumpTo(pos, tgt) {
     if (rig.mode !== 'fly') rig.setMode('fly');
     camTween = null;
@@ -488,18 +614,44 @@ async function boot() {
       const key = el.dataset.i18n;
       if (L[key]) el.textContent = L[key];
     });
-    $('sound-btn').textContent = (soundOn ? '🔊 ' : '🔇 ') + L.sound;
+    renderSound();
     $('lang-btn').textContent = l === 'lv' ? 'EN' : 'LV';
+    $('lang-btn').title = L.lang;
+    $('menu-btn').setAttribute('aria-label', L.menu);
+    $('dial-btn').title = L.timeOfDay;
     renderKeys();
+    renderMode();
+    renderEraText(currentEra);
+    renderIntro();
     if (minimap) minimap.onLang();
   }
+  window.__applyLang = setLang;
   $('lang-btn').addEventListener('click', () => setLang(lang === 'lv' ? 'en' : 'lv'));
-
+  const renderSound = () => {
+    const b = $('sound-btn'), lab = I18N[lang][soundOn ? 'soundOn' : 'soundOff'];
+    b.innerHTML = ICONS[soundOn ? 'soundOn' : 'soundOff'] + `<span class="lab">${lab}</span>`;
+    b.title = lab; b.setAttribute('aria-label', lab);
+    b.classList.toggle('on', soundOn);
+  };
   $('sound-btn').addEventListener('click', () => {
     soundOn = ambience.toggle();
-    $('sound-btn').textContent = (soundOn ? '🔊 ' : '🔇 ') + I18N[lang].sound;
+    renderSound();
     ambience.setScene(currentEra, sky.state.sunLow, current?.fires.length > 0);
   });
+  // phone: the controls fold into one menu button
+  $('menu-btn').addEventListener('click', () => {
+    const open = $('ctl-bar').classList.toggle('open');
+    $('menu-btn').setAttribute('aria-expanded', String(open));
+  });
+  // the sun dial: the clock, and the time-of-day choices one tap away
+  const timePop = $('time-pop');
+  $('dial-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    timePop.hidden = !timePop.hidden;
+    $('dial-btn').setAttribute('aria-expanded', String(!timePop.hidden));
+  });
+  addEventListener('click', (e) => { if (!timePop.hidden && !e.target.closest('#dial')) timePop.hidden = true; });
+  addEventListener('keydown', (e) => { if (e.code === 'Escape') { timePop.hidden = true; $('ctl-bar').classList.remove('open'); } });
   const closeAbout = () => { $('about').classList.remove('open'); $('about-btn').focus(); };
   $('about-btn').addEventListener('click', () => {
     rig.keys.clear(); rig.vel.set(0, 0, 0); rig.sprint = false;
@@ -507,18 +659,21 @@ async function boot() {
     $('about').classList.add('open'); $('about-close').focus();
   });
   $('about-close').addEventListener('click', closeAbout);
+  $('about-btn-m').addEventListener('click', () => { $('ctl-bar').classList.remove('open'); $('about-btn').click(); });
   addEventListener('keydown', (e) => {
     if (e.code === 'Escape' && $('about').classList.contains('open')) closeAbout();
   });
-  $('panel-toggle').addEventListener('click', () => $('panel').classList.toggle('closed'));
+  $('panel-toggle').addEventListener('click', () => showPanel($('panel').classList.contains('closed')));
+  $('panel-close').addEventListener('click', () => showPanel(false));
   const timeBtns = document.querySelectorAll('[data-time]');
-  timeBtns.forEach((b) => b.addEventListener('click', () => {
-    sky.state.paused = b.dataset.time !== 'flow';
-    if (b.dataset.time === 'noon') sky.state.t = 0.42;
-    if (b.dataset.time === 'evening') sky.state.t = 0.88;
-    if (b.dataset.time === 'dawn') sky.state.t = 0.03;
-    timeBtns.forEach((x) => x.classList.toggle('active', x === b));
-  }));
+  const TIMES = { noon: 0.42, evening: 0.88, dawn: 0.03 };
+  function setTime(key, t) {
+    if (key === 'flow') sky.state.paused = false;
+    else { sky.state.paused = true; sky.state.t = t ?? TIMES[key]; }
+    if (t !== undefined && key === 'flow') sky.state.t = t;
+    timeBtns.forEach((x) => x.classList.toggle('active', x.dataset.time === (key || '')));
+  }
+  timeBtns.forEach((b) => b.addEventListener('click', () => { setTime(b.dataset.time); timePop.hidden = true; }));
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -536,8 +691,24 @@ async function boot() {
   activateEra(2);                       // begin in the Latgalian age
   if (matchMedia('(max-width: 760px)').matches) $('panel').classList.add('closed');
   console.log(`[boot] total ${((performance.now() - bootT0) / 1000).toFixed(2)}s`);
-  $('loader').classList.add('done');
-  setTimeout(() => $('loader').remove(), 900);
+  let introOpen = true;
+  const enterWorld = () => {
+    if (!introOpen) return;
+    introOpen = false;
+    $('loader').classList.add('done');
+    setTimeout(() => $('loader')?.remove(), 900);
+    canvas.focus?.();
+  };
+  if (navigator.webdriver) enterWorld();
+  else {
+    $('loader-status').textContent = '';
+    document.querySelector('#loader .band').style.display = 'none';
+    const btn = $('intro-enter');
+    btn.hidden = false;
+    btn.addEventListener('click', enterWorld);
+    btn.focus();
+    addEventListener('keydown', (e) => { if (introOpen && (e.code === 'Enter' || e.code === 'Escape')) enterWorld(); });
+  }
 
   const clock = new THREE.Clock();
   const wind = new THREE.Vector2(0.6, 0.25);

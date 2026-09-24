@@ -213,20 +213,37 @@ export function buildMinimap({ camera, rig, getEra, getLang, flyToPoint, flyToVi
     // landmarks + labels
     bctx.font = '600 12px -apple-system, "Segoe UI", system-ui, sans-serif';
     bctx.textBaseline = 'middle';
-    for (const lm of LANDMARKS) {
-      const px = toPx(lm.x()) * k, py = toPy(lm.z()) * k;
+    // Labels are placed greedily: each tries right, left, then above/below
+    // and diagonal slots, and takes the first that overlaps no label or
+    // marker already down — the farmstead cluster used to stack names.
+    const marks = LANDMARKS.map((lm) => ({ lm, px: toPx(lm.x()) * k, py: toPy(lm.z()) * k }));
+    const taken = marks.map((m) => [m.px - 6, m.py - 6, m.px + 6, m.py + 6]);
+    const hit = (r) => r[0] < 4 || r[1] < 4 || r[2] > S2 - 4 || r[3] > S2 - 4
+      || taken.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1]);
+    for (const { lm, px, py } of marks) {
       const filled = !!lm.present[era];
       diamond(bctx, px, py, hoverLm === lm ? 6 : 4.6, filled, hoverLm === lm);
       const name = getLang() === 'lv' ? lm.lv : lm.en;
       const label = filled ? name : `(${name})`;
-      bctx.fillStyle = 'rgba(18,15,10,0.72)';
-      const tw = bctx.measureText(label).width;
-      // label side flips near the right edge; dy staggers the tight cluster
-      // around the farmstead so names never sit on each other
-      const ly = py + (lm.dy || 0) * (S2 / 820);
-      const lx = px + 9 + tw > S2 - 6 ? px - 9 - tw : px + 9;
-      bctx.fillRect(lx - 3, ly - 8, tw + 6, 16);
-      bctx.fillStyle = filled ? '#e8e2d2' : 'rgba(232,226,210,0.6)';
+      const tw = bctx.measureText(label).width, h = 16;
+      const slots = [
+        [px + 9, py], [px - 9 - tw, py], [px - tw / 2, py - 17], [px - tw / 2, py + 17],
+        [px + 9, py - 17], [px + 9, py + 17], [px - 9 - tw, py - 17], [px - 9 - tw, py + 17],
+        [px + 9, py - 34], [px + 9, py + 34], [px - 9 - tw, py - 34], [px - 9 - tw, py + 34],
+      ];
+      let pick = slots[0];
+      for (const sl of slots) {
+        if (!hit([sl[0] - 3, sl[1] - h / 2, sl[0] + tw + 3, sl[1] + h / 2])) { pick = sl; break; }
+      }
+      const [lx, ly] = pick;
+      taken.push([lx - 3, ly - h / 2, lx + tw + 3, ly + h / 2]);
+      if (Math.abs(ly - py) > 10) {                   // a leader line to a moved label
+        bctx.strokeStyle = 'rgba(232,226,210,0.45)'; bctx.lineWidth = 1;
+        bctx.beginPath(); bctx.moveTo(px, py); bctx.lineTo(Math.min(Math.max(px, lx), lx + tw), ly); bctx.stroke();
+      }
+      bctx.fillStyle = 'rgba(18,15,10,0.78)';
+      bctx.fillRect(lx - 3, ly - 8, tw + 6, h);
+      bctx.fillStyle = filled ? '#e8e2d2' : 'rgba(232,226,210,0.62)';
       bctx.fillText(label, lx, ly + 0.5);
     }
     // player

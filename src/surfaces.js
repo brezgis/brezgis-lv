@@ -50,10 +50,16 @@ export function buildingMaterial(roof = false) {
 export function fieldMaterial() {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   mat.onBeforeCompile = (sh) => {
-    sh.vertexShader = 'attribute vec3 aRow; varying vec3 vRow; varying vec3 vFieldP;\n' + sh.vertexShader.replace('#include <begin_vertex>',
-      '#include <begin_vertex>\nvRow = aRow; vFieldP = (modelMatrix * vec4(position, 1.0)).xyz;');
-    sh.fragmentShader = 'varying vec3 vRow; varying vec3 vFieldP;\n' + noise + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+    sh.vertexShader = 'attribute vec3 aRow; attribute vec2 aEdge; varying vec3 vRow; varying vec2 vEdge; varying vec3 vFieldP;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+      '#include <begin_vertex>\nvRow = aRow; vEdge = aEdge; vFieldP = (modelMatrix * vec4(position, 1.0)).xyz;');
+    sh.fragmentShader = 'varying vec3 vRow; varying vec2 vEdge; varying vec3 vFieldP;\n' + noise + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
       {
+        // frayed border: the meadow (terrain below) shows through a noisy
+        // band, so no parcel ever has a ruled edge
+        float nE = surfaceNoise(vFieldP.xz * 0.21) * 0.6 + surfaceNoise(vFieldP.xz * 0.83) * 0.4;
+        float cut = vEdge.y * (0.15 + nE);
+        if (vEdge.x < cut) discard;
+        float weedy = 1.0 - smoothstep(cut, cut + 1.6, vEdge.x);
         float st = vRow.z;
         float k = 1.0 - smoothstep(0.015, 0.12, fwidth(vRow.x));     // rows visible?
         float big = surfaceNoise(vFieldP.xz * 0.045) - 0.5;           // growth patches
@@ -73,11 +79,17 @@ export function fieldMaterial() {
           float dr = abs(fract(vRow.x / 0.16) - 0.5) * 2.0;
           diffuseColor.rgb *= 1.0 - 0.07 * k * smoothstep(0.6, 1.0, dr) + big * 0.14 + fine * 0.05;
         }
+        // sowing passes: broad stripes a few metres apart that still read
+        // from the air, where the drill rows have long gone sub-pixel
+        float pass = sin(vRow.x * 6.2832 / 2.7 + big * 2.0);
+        diffuseColor.rgb *= 1.0 + pass * 0.045 * (st > 2.5 ? 0.4 : 1.0);
         // headland: the strip round the ends where the team turned
         float head = 1.0 - smoothstep(2.5, 4.0, vRow.y);
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.93, 0.95, 0.9) + vec3(0.02, 0.015, 0.0), head * 0.6);
+        // the weedy margin shades into the sward
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13, 0.22, 0.07), weedy * 0.55);
       }`);
   };
-  mat.customProgramCacheKey = () => 'field-parcels-v1';
+  mat.customProgramCacheKey = () => 'field-parcels-v2';
   return mat;
 }

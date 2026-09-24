@@ -100,7 +100,7 @@ function buildSurface() {
     for (let x = l.minX - 8; x <= l.maxX + 8; x += BLOCK / 2)
       for (let z = l.minZ - 8; z <= l.maxZ + 8; z += BLOCK / 2) touch(x, z, 4);
   }
-  const pos = [], depth = [], flow = [], idx = [];
+  const pos = [], depth = [], flow = [], edge = [], idx = [];
   const vmap = new Map();
   const vkey = (x, z) => Math.round(x * 4) * 1e7 + Math.round(z * 4);
   const emitV = (x, z, s, minDepth = 0) => {
@@ -111,6 +111,7 @@ function buildSurface() {
     pos.push(x, s.level, z);
     depth.push(Math.max(minDepth, s.level - meshHeightAt(x, z)));
     flow.push(s.fx, s.fz);
+    edge.push(s.e ?? -50);
     vmap.set(k, i);
     return i;
   };
@@ -142,6 +143,7 @@ function buildSurface() {
     for (let j = 0; j < CV; j++) for (let i = 0; i < CV; i++) {
       const s = waterSample(x0 + i * SC, z0 + j * SC);
       if (s) {
+        s.e = -s.f;                        // signed distance to the waterline (smooth)
         s.f += OVERSHOOT;
         // a lattice point almost ON the cut line spawns needle slivers:
         // push it just outside (the sheet runs under the bank there anyway)
@@ -154,7 +156,8 @@ function buildSurface() {
     const pt = (i, j) => { const s = S[j * CV + i]; return { x: x0 + i * SC, z: z0 + j * SC, f: s ? s.f : -9, s }; };
     const lerpS = (a, b, t) => {
       const sa = a.s || b.s, sb = b.s || a.s;
-      return { level: lerp(sa.level, sb.level, t), fx: lerp(sa.fx, sb.fx, t), fz: lerp(sa.fz, sb.fz, t) };
+      return { level: lerp(sa.level, sb.level, t), fx: lerp(sa.fx, sb.fx, t), fz: lerp(sa.fz, sb.fz, t),
+        e: lerp(a.s ? a.s.e : OVERSHOOT, b.s ? b.s.e : OVERSHOOT, t) };
     };
     const tri = (A, B, C) => {
       const poly = [];
@@ -208,6 +211,7 @@ function buildSurface() {
   geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   geo.setAttribute('aDepth', new THREE.Float32BufferAttribute(depth, 1));
   geo.setAttribute('aFlow', new THREE.Float32BufferAttribute(flow, 2));
+  geo.setAttribute('aEdge', new THREE.Float32BufferAttribute(edge, 1));
   geo.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(keep, 1) : new THREE.Uint16BufferAttribute(keep, 1));
   geo.computeBoundingSphere();
   console.log(`[boot] water surface: ${pos.length / 3} verts, ${keep.length / 3} tris (${coarseQuads} deep-lake quads), ${(performance.now() - t0).toFixed(0)} ms`);
@@ -231,6 +235,7 @@ uniform sampler2D uPondTex;
 uniform vec4 uPondBounds;   // x0, z0, width, depth of the flood mask
 uniform float uIsPond;
 varying float vWDepth;
+varying float vWEdge;
 varying vec2 vWFlow;
 varying vec3 vWPos;
 `;
@@ -260,12 +265,15 @@ function makeWaterMaterial(ripple, pondBounds, pondTex) {
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = `attribute float aDepth;
+attribute float aEdge;
+varying float vWEdge;
 attribute vec2 aFlow;
 varying float vWDepth;
 varying vec2 vWFlow;
 varying vec3 vWPos;
 ` + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
   vWDepth = aDepth;
+  vWEdge = aEdge;
   vWFlow = aFlow;
   vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     sh.fragmentShader = WATER_PARS + sh.fragmentShader
@@ -329,8 +337,12 @@ varying vec3 vWPos;
     refl *= 0.86;
     vec3 col = (column * (1.0 - T) * (1.0 - fres) + refl * fres) / max(a, 1e-3);
     col += reflectedLight.directSpecular * 0.9;
-    // the waterline itself: no hard sheet edge where depth → 0
-    a *= smoothstep(0.0, 0.12, d);
+    // The waterline. The ground meets the flat sheet along 2 m triangles,
+    // and that crossing is a sawtooth; so the sheet fades out along the
+    // SMOOTH analytic shoreline (signed distance e, negative in the water)
+    // before it gets there, with a gentle wander so it doesn't read ruled.
+    float wander = (texture2D(uRipple, vWPos.xz / 37.0).x - 0.5) * 0.5;
+    a *= smoothstep(-0.02, -1.2, vWEdge + wander) * smoothstep(0.0, 0.05, d);
     gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
   }`);
   };
@@ -429,6 +441,8 @@ function pondGeometry(P) {
   geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   geo.setAttribute('aDepth', new THREE.Float32BufferAttribute(depth, 1));
   geo.setAttribute('aFlow', new THREE.Float32BufferAttribute(flow, 2));
+  // no analytic shoreline for the flooded reach: fake one from depth
+  geo.setAttribute('aEdge', new THREE.Float32BufferAttribute(depth.map((d) => -d * 4), 1));
   geo.setIndex(cleanTriangles(pos, idx));
   geo.computeBoundingSphere();
   return geo;

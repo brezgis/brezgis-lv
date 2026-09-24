@@ -18,7 +18,7 @@ import { MAT } from './textures.js';
 import { roadMaterial, buildingMaterial, fieldMaterial } from './surfaces.js';
 import { buildRoadside } from './roadside.js';
 import { heightAt, meshHeightAt } from './terrain.js';
-import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W, fieldsForEra, FIELD_COLORS } from './landuse.js';
+import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W, fieldsForEra, FIELD_COLORS, blobInset } from './landuse.js';
 import { riverAt, streamAt, lakeAt, pondAt, vegExcluded, waterLevelAt, RIVER, STREAM_CHANNELS } from './riverzone.js';
 import { registerFootprints, registerTrample, buildingAt, stageFootprint } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
@@ -1861,15 +1861,19 @@ const FIELD_ROW_STYLE = { rye: 0, barley: 0, oats: 0, flax: 0, clover: 1, potato
 function fieldDecals(era) {
   const parcels = fieldsForEra(era);
   if (!parcels.length) return null;
-  const pos = [], col = [], row = [], idx = [];
+  const pos = [], col = [], row = [], edge = [], idx = [];
   for (const f of parcels) {
     const c = Math.cos(f.rot), s = Math.sin(f.rot);
-    const nu = Math.max(2, Math.ceil((2 * f.hw) / 6)), nv = Math.max(1, Math.ceil((2 * f.hh) / 6));
+    const nu = Math.max(2, Math.ceil((2 * f.hw) / 4)), nv = Math.max(2, Math.ceil((2 * f.hh) / 4));
     const base = pos.length / 3;
     const [r, g, b] = FIELD_COLORS[f.type];
-    // ~0.7: the terrain's detail shader darkens the ground it paints by
-    // about that much, and a crop is no brighter than the sward beside it
-    const tint = (0.9 + f.tint * 0.18) * 0.7;
+    // ~0.48: the terrain's detail shader darkens the ground it paints and
+    // the sward adds its own shade — a crop is no brighter than the meadow
+    // beside it (at 0.7 the plots read as pale slabs from any distance)
+    const tint = (0.9 + f.tint * 0.18) * 0.56;
+    // ragged border: Iron Age plots are small irregular clearings, later
+    // fields still fray into their balks — never a ruled outline
+    const rag = era === 2 ? 3.5 : 2.4;
     for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
       const u = -f.hw + (2 * f.hw * i) / nu, v = -f.hh + (2 * f.hh * j) / nv;
       const x = f.cx + u * c - v * s, z = f.cz + u * s + v * c;
@@ -1877,6 +1881,7 @@ function fieldDecals(era) {
       col.push(r * tint, g * tint, b * tint);
       // across-row coordinate, distance in from the nearest end, row style
       row.push(v, f.hw - Math.abs(u), FIELD_ROW_STYLE[f.type] ?? 0);
+      edge.push(f.blob !== null && f.blob !== undefined ? blobInset(f, u, v) : Math.min(f.hw - Math.abs(u), f.hh - Math.abs(v)), rag);
     }
     for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
       const a = base + j * (nu + 1) + i, b2 = a + 1, c2 = a + nu + 2, d = a + nu + 1;
@@ -1894,6 +1899,7 @@ function fieldDecals(era) {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.setAttribute('aRow', new THREE.Float32BufferAttribute(row, 3));
+  geo.setAttribute('aEdge', new THREE.Float32BufferAttribute(edge, 2));
   geo.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
   const nrm = new Float32Array(pos.length); for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
   geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
@@ -1904,6 +1910,50 @@ function fieldDecals(era) {
   mesh.name = 'field-parcels';
   mesh.userData.noCollide = true;
   return mesh;
+}
+
+// A līdums: burnt-cleared forest ground, sown between the stumps that were
+// never grubbed out, the stones picked off it heaped at its edge.
+function lidumsProps(era) {
+  const plots = fieldsForEra(era);
+  if (!plots.length) return null;
+  const rng = mulberry32(950);
+  const stumps = [], stones = [];
+  for (const f of plots) {
+    const c = Math.cos(f.rot), s = Math.sin(f.rot);
+    const n = Math.round((f.hw * f.hh) / 55);
+    for (let k = 0; k < n * 3 && stumps.length < 900; k++) {
+      const u = (rng() * 2 - 1) * f.hw, v = (rng() * 2 - 1) * f.hh;
+      if (blobInset(f, u, v) < 1.5 || rng() < 0.66) continue;
+      const x = f.cx + u * c - v * s, z = f.cz + u * s + v * c;
+      stumps.push([x, z, 0.16 + rng() * 0.16, 0.25 + rng() * 0.3, rng()]);
+    }
+    for (let h = 0; h < 3; h++) {
+      const a = rng() * Math.PI * 2;
+      // walk out from the centre to the edge of the clearing
+      let t = 0.2;
+      while (t < 1.4 && blobInset(f, Math.cos(a) * f.hw * t, Math.sin(a) * f.hh * t) > 0.5) t += 0.04;
+      const u = Math.cos(a) * f.hw * t, v = Math.sin(a) * f.hh * t;
+      const hx = f.cx + u * c - v * s, hz = f.cz + u * s + v * c;
+      const m = 5 + (rng() * 7) | 0;
+      for (let j = 0; j < m; j++) stones.push([hx + (rng() - 0.5) * 1.6, hz + (rng() - 0.5) * 1.6, 0.14 + rng() * 0.2, rng() * 6.3]);
+    }
+  }
+  const g = new THREE.Group();
+  g.name = 'lidums-props';
+  const d = new THREE.Object3D();
+  const stumpM = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.85, 1, 1, 7), new THREE.MeshLambertMaterial({ color: 0x3a2e24 }), stumps.length);
+  stumps.forEach(([x, z, r, h, t], i) => {
+    d.position.set(x, meshHeightAt(x, z) + h / 2 - 0.04, z); d.rotation.set((t - 0.5) * 0.15, t * 6, 0); d.scale.set(r, h, r); d.updateMatrix();
+    stumpM.setMatrixAt(i, d.matrix);
+  });
+  const stoneM = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), MAT.granite || new THREE.MeshLambertMaterial({ color: 0x8a867c }), stones.length);
+  stones.forEach(([x, z, r, rot], i) => {
+    d.position.set(x, meshHeightAt(x, z) + r * 0.35, z); d.rotation.set(rot, rot * 1.7, 0); d.scale.set(r * 1.2, r * 0.8, r); d.updateMatrix();
+    stoneM.setMatrixAt(i, d.matrix);
+  });
+  for (const m of [stumpM, stoneM]) { m.castShadow = m.receiveShadow = true; m.computeBoundingSphere(); m.userData.noCollide = true; g.add(m); }
+  return g;
 }
 
 export function buildEra(era, ctx) {
@@ -1927,6 +1977,7 @@ export function buildEra(era, ctx) {
   const smokes = [], fires = [];
   const spawns = [];
   if (era >= 2 && era <= 4) { const fd = fieldDecals(era); if (fd) g.add(fd); }
+  if (era === 2) { const lp = lidumsProps(era); if (lp) g.add(lp); }
   g.userData.fenceGates = {};
   const addStageFence = (kind, pts, label) => {
     refreshFootprints();

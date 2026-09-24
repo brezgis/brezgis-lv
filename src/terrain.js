@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
-import { PADS, fieldAt, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, FIELD_COLORS, LOC } from './landuse.js';
+import { PADS, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, LOC } from './landuse.js';
 import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, bankCharFromQuery, confluenceAt, lakeShoreSignedDistAt, bedDropAt } from './riverzone.js';
 import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
 import { shoreBodies, shoreHeight, nearestShore, waterSampleOf } from './shore.js';
@@ -682,15 +682,8 @@ function paintVertex(era, x, y, z) {
   }
 
   // fields
-  const fa = fieldAt(era, x, z);
-  if (fa) {
-    const [fr, fg, fb] = FIELD_COLORS[fa.field.type];
-    // soft underpaint only: the draped parcel decals (eras.js) carry the
-    // sharp edges and the rows
-    const t = smoothstep(0.05, 0.3, fa.edge);
-    r = lerp(r, fr, t); g = lerp(g, fg, t); b = lerp(b, fb, t);
-  }
-
+  // fields: no underpaint — the draped parcel decals (eras.js) carry the
+  // crop, and fray at their borders into the meadow painted here
   // roads & yard earth — the real network: asphalt on today's P30 and
   // V-roads, gravel elsewhere, bare dirt on the farm tracks
   if (era >= 2) {

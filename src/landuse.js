@@ -364,7 +364,17 @@ function parcelsOf(fl, era, seed) {
     let type = fl.type;
     if (era === 3) type = ROTATION_1860[(k + ((seed >> 3) % 3)) % ROTATION_1860.length];
     else if (era === 4 && k > 0) type = CROPS_1935[(r() * CROPS_1935.length) | 0];
-    out.push({ cx, cz, hw, hh: stripH / 2, rot, type, rx: hw, rz: stripH / 2, tint: r() });
+    // strips of one furlong never end in a ruled line: each was ploughed
+    // to its own headland, so the ends stagger
+    let phw = hw, pcx = cx, pcz = cz;
+    if (era === 3) {
+      const tl = r() * 0.14 * hw, tr = r() * 0.14 * hw;
+      phw = hw - (tl + tr) / 2;
+      const du = (tl - tr) / 2;
+      pcx += du * c; pcz += du * s;
+    }
+    out.push({ cx: pcx, cz: pcz, hw: phw, hh: stripH / 2, rot, type, rx: phw, rz: stripH / 2, tint: r(),
+      blob: era === 2 ? seed * 13 + k : null });
   }
   return out;
 }
@@ -473,6 +483,20 @@ function rawFieldsForEra(era) {
     { cx: K.x - 160, cz: K.z - 60, rx: 85, rz: 52, rot: 0.3, type: 'clover' },
   ];
 }
+// An Iron Age plot (līdums, a burn-cleared field) is a clearing, not a
+// rectangle: a lobed outline in normalised radius. Shared by fieldAt and
+// the decal so rules and rendering agree.
+const blobNoise = makeNoise(4404);
+export function blobRadius(seed, ang) {
+  const a = Math.cos(ang), b = Math.sin(ang);
+  return 0.82 + (blobNoise.fbm(a * 1.1 + seed * 0.37, b * 1.1 + seed * 0.11, 3) - 0.5) * 0.55;
+}
+// metres inside the blob outline for local (u, v) of parcel f (≤0 outside)
+export function blobInset(f, u, v) {
+  const nu = u / f.hw, nv = v / f.hh, rho = Math.hypot(nu, nv);
+  const R = blobRadius(f.blob, Math.atan2(nv, nu));
+  return (1 - rho / R) * R * Math.min(f.hw, f.hh);
+}
 export function fieldAt(era, x, z) {
   const { fields, map } = fieldsIndexed(era);
   const arr = map.get(gridKey(Math.floor(x / FIELD_CELL), Math.floor(z / FIELD_CELL)));
@@ -483,8 +507,10 @@ export function fieldAt(era, x, z) {
     const c = Math.cos(-f.rot), s = Math.sin(-f.rot);
     const u = dx * c - dz * s, v = dx * s + dz * c;
     const eu = f.hw - Math.abs(u), ev = f.hh - Math.abs(v);
+    if (eu <= 0 || ev <= 0) continue;
     // edge: metres in from the nearest side, normalised like the old ellipse
-    if (eu > 0 && ev > 0) return { field: f, edge: Math.min(1, Math.min(eu, ev) / 8) };
+    const inset = f.blob !== null && f.blob !== undefined ? blobInset(f, u, v) : Math.min(eu, ev);
+    if (inset > 0) return { field: f, edge: Math.min(1, inset / 8) };
   }
   return null;
 }

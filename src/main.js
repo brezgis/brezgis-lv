@@ -28,14 +28,14 @@ const I18N = {
   lv: {
     fly: 'Lidot', walk: 'Iet', toFly: 'Pārslēgt uz lidošanu', toWalk: 'Pārslēgt uz iešanu',
     flow: '▶ Laiks rit', dawn: 'Ausma', noon: 'Diena', evening: 'Vakars', timeOfDay: 'Diennakts laiks',
-    karte: 'Karte · M', soundOn: 'Skaņa ieslēgta', soundOff: 'Skaņa izslēgta', lang: 'Valoda: latviešu',
+    karte: 'Karte · M', soundOn: 'Skaņa ieslēgta', soundOff: 'Skaņa izslēgta', lang: 'Valoda latviešu',
     chronicle: 'Hronika un avoti', story: 'Stāsts', close: 'Aizvērt ✕', menu: 'Izvēlne',
     lookHere: 'Apskatīt', more: 'Lasīt vairāk ▾', less: 'Mazāk ▴', source: 'avots',
   },
   en: {
     fly: 'Fly', walk: 'Walk', toFly: 'Switch to flying', toWalk: 'Switch to walking',
     flow: '▶ Time flows', dawn: 'Dawn', noon: 'Noon', evening: 'Evening', timeOfDay: 'Time of day',
-    karte: 'Map · M', soundOn: 'Sound on', soundOff: 'Sound off', lang: 'Language: English',
+    karte: 'Map · M', soundOn: 'Sound on', soundOff: 'Sound off', lang: 'Language English',
     chronicle: 'Chronicle & sources', story: 'Story', close: 'Close ✕', menu: 'Menu',
     lookHere: 'Look here', more: 'Read more ▾', less: 'Less ▴', source: 'source',
   },
@@ -126,7 +126,7 @@ async function boot() {
   await progress('Raising the sky…');
   const sky = buildSky(scene, renderer);
 
-  await progress('Growing the forests — branches, twig atlases, impostors…');
+  await progress('Growing the forests, branch by branch…');
   const veg = buildVegetation(scene, renderer);
   window.__veg = veg;                    // debug hook for data/floracount.mjs
   window.__water = (x, z) => waterLevelAt(x, z, currentEra);   // debug hook: shot harnesses stay above water
@@ -393,14 +393,11 @@ async function boot() {
   function renderEraText(era) {
     if (era < 0) return;
     const T = eraText(era, lang), L = I18N[lang];
-    $('era-kick').textContent = T.caption;
-    $('era-title').textContent = T.title;
+    $('era-title').innerHTML = `${esc(T.title)} <span class="yr">${esc(T.year)}</span>`;
     $('era-lead').innerHTML = citeHTML(T.lead);
     $('era-body').innerHTML = citeHTML(T.more);
-    $('era-more').hidden = !moreOpen || !T.more;
-    $('more-btn').hidden = !T.more;
+    $('era-more').hidden = !moreOpen;
     $('more-btn').textContent = moreOpen ? L.less : L.more;
-    $('era-facts').innerHTML = T.facts.map((f) => `<span>${esc(f)}</span>`).join('');
     $('era-evidence').textContent = T.evidence;
     const row = document.querySelector('#era-moments .row');
     row.innerHTML = '';
@@ -410,14 +407,13 @@ async function boot() {
       b.addEventListener('click', () => goMoment(m));
       row.appendChild(b);
     }
-    // timeline: localized years and names, the caption above it
+    // timeline: localized years and names
     document.querySelectorAll('.era-btn').forEach((btn, i) => {
       const E = eraText(i, lang);
       btn.querySelector('.yr').textContent = E.year;
       btn.querySelector('.nm').textContent = E.name;
       btn.setAttribute('aria-label', `${E.year} — ${E.name}`);
     });
-    $('era-caption').textContent = T.caption;
   }
   $('more-btn').addEventListener('click', () => { moreOpen = !moreOpen; renderEraText(currentEra); });
   // citation tooltips: the source, one hover away; click opens it
@@ -706,7 +702,7 @@ async function boot() {
     const btn = $('intro-enter');
     btn.hidden = false;
     btn.addEventListener('click', enterWorld);
-    btn.focus();
+    btn.focus({ preventScroll: true });
     addEventListener('keydown', (e) => { if (introOpen && (e.code === 'Enter' || e.code === 'Escape')) enterWorld(); });
   }
 
@@ -891,6 +887,6 @@ async function boot() {
 
 boot().catch((err) => {
   const el = $('loader-status');
-  if (el) el.textContent = 'Something broke while building the world: ' + err.message;
+  if (el) el.textContent = 'Something broke while building the world. ' + err.message;
   console.error(err);
 });

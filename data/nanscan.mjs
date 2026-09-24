@@ -7,7 +7,7 @@ const browser = await puppeteer.launch({
 });
 try {
   const page = await browser.newPage();
-  await page.goto('file:///home/anna/projects/village/artifact/brezgi-taurene.html', { waitUntil: 'load', timeout: 120000 });
+  await page.goto(new URL('../artifact/brezgi-taurene.html', import.meta.url).href, { waitUntil: 'load', timeout: 120000 });
   await page.waitForFunction('window.__sim !== undefined', { timeout: 90000 });
   await new Promise((r) => setTimeout(r, 2500));
   for (const era of [2, 3, 4, 5]) {

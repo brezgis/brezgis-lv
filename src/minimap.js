@@ -23,9 +23,9 @@ const toPy = (z) => ((z - Z0) / HM_SPAN) * W;    // north = low z = top
 // present[era] truthy = filled diamond; falsy = hollow "site" diamond.
 const LANDMARKS = [
   { key: 'stead', x: () => LOC.STEAD.x, z: () => LOC.STEAD.z, lv: 'Brezgi', en: 'Brezgi farm', present: [0, 0, 1, 1, 1, 1], view: 'seta', dy: 0 },
-  { key: 'manor', x: () => LOC.MANOR.x, z: () => LOC.MANOR.z, lv: 'Nēķena muiža', en: 'Nēķens manor', present: [0, 0, 0, 1, 1, 1], view: 'muiza', dy: -14 },
-  { key: 'brezga', x: () => LOC.BREZGA.x, z: () => LOC.BREZGA.z, lv: 'Brežģa kalns', en: 'Brežģis hill', present: [1, 1, 1, 1, 1, 1], view: 'brezga', dy: 0 },
-  { key: 'krogs', x: () => LOC.KROGS.x, z: () => LOC.KROGS.z, lv: 'Brežģa krogs', en: 'Brežģis inn', present: [0, 0, 0, 1, 1, 0], dy: 14 },
+  { key: 'manor', x: () => LOC.MANOR.x, z: () => LOC.MANOR.z, lv: 'Nēķena muiža', en: 'Nēķene manor', present: [0, 0, 0, 1, 1, 1], view: 'muiza', dy: -14 },
+  { key: 'brezga', x: () => LOC.BREZGA.x, z: () => LOC.BREZGA.z, lv: 'Brežģa kalns', en: 'Brežģa kalns', present: [1, 1, 1, 1, 1, 1], view: 'brezga', dy: 0 },
+  { key: 'krogs', x: () => LOC.KROGS.x, z: () => LOC.KROGS.z, lv: 'Brežģa krogs', en: 'Brežģa tavern', present: [0, 0, 0, 1, 1, 0], dy: 14 },
   { key: 'fort', x: () => LOC.HILLFORT.x, z: () => LOC.HILLFORT.z, lv: 'Pilskalns', en: 'Hillfort', present: [0, 0, 1, 0, 0, 0], dy: 0 },
   { key: 'lake', x: () => LOC.LAKE_VIEW.x + 200, z: () => LOC.LAKE_VIEW.z, lv: 'Taurenes ezers', en: 'Lake Taurene', present: [1, 1, 1, 1, 1, 1], view: 'ezers', dy: 0 },
   { key: 'oak', x: () => LOC.OAK.x, z: () => LOC.OAK.z, lv: 'Vecais ozols', en: 'The old oak', present: [0, 0, 1, 1, 1, 0], dy: -15 },
@@ -171,8 +171,8 @@ export function buildMinimap({ camera, rig, getEra, getLang, flyToPoint, flyToVi
   let hoverLm = null;
 
   const L = () => (getLang() === 'lv'
-    ? { title: 'Novada karte', sub: 'tie paši orientieri cauri laikiem — klikšķini, lai lidotu', site: 'vieta', you: 'tu' }
-    : { title: 'Parish map', sub: 'the same landmarks through the ages — click to fly', site: 'site', you: 'you' });
+    ? { title: 'Novada karte', sub: 'tie paši orientieri cauri laikiem, klikšķini, lai lidotu', site: 'vieta', you: 'tu' }
+    : { title: 'Parish map', sub: 'the same landmarks through the ages, so click one to fly there', site: 'site', you: 'you' });
 
   function diamond(ctx2, px, py, r, filled, hot) {
     ctx2.save();

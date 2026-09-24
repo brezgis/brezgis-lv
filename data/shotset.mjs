@@ -3,7 +3,7 @@
 import puppeteer from 'puppeteer-core';
 
 const tag = process.argv[2] || 'after';
-const OUT = '/tmp/claude-1002/-home-anna-projects-village/1ddddc0a-f950-4449-8896-2b4ef65cfbe7/scratchpad';
+const OUT = process.env.OUT_DIR || (await import('node:os')).tmpdir();
 
 const browser = await puppeteer.launch({
   executablePath: '/usr/bin/google-chrome', headless: 'new', protocolTimeout: 180000,

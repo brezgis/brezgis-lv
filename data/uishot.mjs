@@ -25,6 +25,10 @@ try {
     await new Promise((r) => setTimeout(r, 400));
     await page.screenshot({ path: `${OUT}/${name}-dial.png` });
     await page.evaluate(() => document.getElementById('dial-btn').click());
+    await page.evaluate(() => document.getElementById('about-btn').click());
+    await new Promise((r) => setTimeout(r, 500));
+    await page.screenshot({ path: `${OUT}/${name}-chronicle.png` });
+    await page.evaluate(() => document.getElementById('about-close').click());
     if (name === 'phone') {
       await page.evaluate(() => document.getElementById('menu-btn').click());
       await new Promise((r) => setTimeout(r, 400));

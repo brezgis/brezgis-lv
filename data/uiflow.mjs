@@ -15,7 +15,7 @@ try {
   const introBtn = await page.$eval('#intro-enter', (b) => b.textContent);
   await page.keyboard.press('Enter');
   await new Promise((r) => setTimeout(r, 1500));
-  const s1 = await page.evaluate(() => ({ title: document.getElementById('era-title').textContent, cap: document.getElementById('era-caption').textContent,
+  const s1 = await page.evaluate(() => ({ title: document.getElementById('era-title').textContent,
     yr: document.querySelector('.era-btn .yr').textContent, lang: document.getElementById('lang-btn').textContent }));
   await page.click('.era-btn:nth-child(5)');
   await new Promise((r) => setTimeout(r, 2500));

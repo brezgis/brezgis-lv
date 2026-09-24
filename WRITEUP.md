@@ -330,6 +330,28 @@ water from the hydrology up:
   midsummer heights (rye in ear ~1.3 m, potato and clover short), and each
   shows its own rows, ridges or furrows up close.
 
+## Fifth edition: roads in the ground, fields on the land
+
+- **Roads are part of the ground.** They used to be ribbons crowned 16 cm
+  over the highest ground beneath them, with skirts down to grade, so they
+  read as slabs laid on the meadow, embanked on every slope. Every vertex of
+  the carriageway now drapes on the rendered ground itself, only the camber
+  rises above it, and the edge frays into the verge instead of ending on a
+  ruled line. The surfaces carry their wear. Gravel roads have two compacted
+  wheel tracks, a loose windrow on the crown and at the edges, and potholes.
+  Cart tracks have two ruts with the grass strip between them. The P30 is
+  aged asphalt (7.0 m, the carriageway for its class) with polished wheel
+  paths, repair patches, 1.5 m gravel shoulders, edge lines and a 3-in-12 m
+  dashed centreline.
+- **Fields have no ruled outlines.** Their borders fray into weedy balks. The
+  1860 strips end at staggered headlands, and midsummer fallow is grazed
+  weeds with the first ploughed patches. A 1935 reform farm's fields lie side
+  by side on its own axis. The AD 950 plots are *līdumi*, lobed burn clearings
+  with stumps left standing and the stones picked off them heaped at the edge.
+- **The waterline is smooth.** The water fades out along the analytic
+  shoreline distance instead of meeting the 2 m ground triangles in a
+  sawtooth.
+
 ## Sources
 
 1. Kārlis Bormanis — Vikipēdija. <https://lv.wikipedia.org/wiki/K%C4%81rlis_Bormanis>

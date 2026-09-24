@@ -314,20 +314,28 @@ function bgFieldsFor(era) {
     if (/pienotava/i.test(name || '')) return;      // the creamery farms no fields
     const r = mulberry32(si * 449 + era * 61);
     // 1929 census: ~20 ha holdings, a good third under the plough — two to
-    // three fields of 1-3 ha each (the old 0.8 ha ellipses read as gardens)
+    // three fields of 1-3 ha each (the old 0.8 ha ellipses read as gardens).
+    // A holding is ONE surveyed block: its fields lie side by side on the
+    // farm's own axis (1860: the manor's furlongs share an axis too), so they
+    // read as a patchwork around the steading, not tiles dropped at random.
     const n = 2 + (r() < 0.5 ? 1 : 0);
-    for (let k = 0; k < n; k++) {
-      let a = r() * 6.28, dist = 70 + r() * 80;
-      const rx = 62 + r() * 55, rz = 40 + r() * 32, rot = r() * 3.1;
-      const type = TYPES[(r() * 6) | 0];
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const cx = x + Math.cos(a) * dist, cz = z + Math.sin(a) * dist;
-        if (fieldOK(cx, cz, rx, rz)) {
-          out.push({ cx, cz, rx, rz, rot, type });
-          break;
-        }
-        a = r() * 6.28; dist = 70 + r() * 90;        // resample, don't shrink
+    const rot = r() * 3.1, c = Math.cos(rot), s = Math.sin(rot);
+    const side = r() < 0.5 ? -1 : 1;
+    const rz = 40 + r() * 28;                       // the block's depth, shared
+    let u = -((n - 1) * 60);                        // run along the farm's axis
+    let placed = 0;
+    for (let attempt = 0; attempt < 2 && !placed; attempt++) {
+      const v = side * (attempt ? -1 : 1) * (rz + 22);
+      const cand = [];
+      let uu = u;
+      for (let k = 0; k < n; k++) {
+        const rx = 45 + r() * 35;
+        uu += rx;
+        const cx = x + uu * c - v * s, cz = z + uu * s + v * c;
+        cand.push({ cx, cz, rx, rz, rot, type: TYPES[(r() * 6) | 0] });
+        uu += rx + 4;                               // a 4 m balk between fields
       }
+      for (const f of cand) if (fieldOK(f.cx, f.cz, f.rx, f.rz)) { out.push(f); placed++; }
     }
   });
   return out;
@@ -520,7 +528,10 @@ export function fieldAt(era, x, z) {
 // road), 1 = V-roads, 2 = local lanes, 3 = farm/forest tracks. Farm lanes
 // multiply after the 1920 agrarian reform, so 1860 carries only the main
 // roads and the old tracks.
-export const ROAD_HALF_W = [3.4, 2.4, 2.2, 1.45];
+// P30: a two-lane regional road — 7.0 m of asphalt (LVS 190-2 carriageway
+// for its class) on 1.5 m gravel shoulders; V-roads 4.8 m of gravel, local
+// lanes 4.4 m, farm and forest tracks a 2.9 m cart track
+export const ROAD_HALF_W = [3.5, 2.4, 2.2, 1.45];
 export const ROAD_MAX_OFFSET = [3.0, 2.5, 1.75, 1.25];
 const roadKey = (p) => `${p[0]},${p[1]}`;
 const roadSource = ROADS_OSM.map((r) => ({ ...r, pts: r.pts.map((p) => p.slice()) }));
@@ -876,11 +887,11 @@ export function forestDensity(era, x, z, y) {
 
 // Field palette (midsummer — Jāņi season, late June)
 export const FIELD_COLORS = {
-  rye: [0.5, 0.53, 0.31],       // winter rye in ear: tall, grey-green going gold
-  barley: [0.42, 0.55, 0.25],   // spring barley: bright green
-  oats: [0.45, 0.55, 0.3],
-  flax: [0.39, 0.52, 0.37],     // just coming into its blue flower at Jāņi
+  rye: [0.5, 0.54, 0.26],       // winter rye in ear: tall, grey-green going gold
+  barley: [0.4, 0.56, 0.2],     // spring barley: bright green
+  oats: [0.42, 0.55, 0.23],
+  flax: [0.36, 0.5, 0.28],      // green, a scatter of blue flowers at Jāņi
   fallow: [0.4, 0.33, 0.24],    // black fallow: ploughed bare
-  potato: [0.26, 0.4, 0.18],    // dark rows on ridged soil
-  clover: [0.33, 0.5, 0.24],
+  potato: [0.26, 0.4, 0.16],    // dark rows on ridged soil
+  clover: [0.3, 0.5, 0.2],
 };

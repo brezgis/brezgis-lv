@@ -194,26 +194,33 @@ function horseDrawnCart() {
   return g;
 }
 
-// The rendered road surface: the ribbon crowns 0.16 m over the ground, and
-// lifts onto a deck ≥ 1.9 m over the water where it bridges. Anything that
-// stands or rolls on the road must use THIS height, not the bare terrain —
-// placeOnGround's terrain seat buried a quarter of every wheel.
-const ROAD_CROWN = 0.16;
-// camber rise from edge to crown, per road class
-const CROWN_RISE = [0.095, 0.067, 0.058, 0.04];
-// ...and it crowns over the HIGHEST ground under the carriageway, not over
-// the centreline. A road is a graded bench: cut on the uphill side, filled on
-// the downhill one. Seating the edges off the centreline height instead let
-// the uphill edge sink into every hillside the road traversed — 10-12% of all
-// carriageway vertices sat under the terrain, up to 1.26 m deep, and the road
-// visibly dipped in and out of the ground. `data/roadcheck.mjs` guards this.
-function roadBenchY(x, z, dx, dz, half) {
+// The rendered road surface. Roads are PART of the ground, not a ribbon on
+// a bench: every vertex of the carriageway is draped on the rendered ground
+// itself (meshHeightAt — the 2 m shore mesh near water, the terrain grid
+// elsewhere), lifted by a few centimetres plus the camber, and the edges
+// fray into the verge in the shader. The old bench (crowned 0.16 m over the
+// HIGHEST ground under the carriageway, with batters down to grade) kept
+// every vertex above ground but read as a slab laid on the meadow, with a
+// dark embankment wherever the road crossed a slope. Bridges keep a deck
+// ≥ 1.9 m over the water. Anything that stands or rolls on the road must
+// use roadSurfaceY — placeOnGround's terrain seat buried the wheels.
+const ROAD_LIFT = 0.03;
+const ROAD_CROWN = ROAD_LIFT;
+// camber rise from edge to crown, per road class (2-2.5 % crossfall)
+const CROWN_RISE = [0.08, 0.06, 0.05, 0.02];
+function roadSurfaceY(x, z, dx, dz, off, half, c) {
+  const k = Math.min(1, Math.abs(off) / half);
+  return meshHeightAt(x + dz * off, z - dx * off) + ROAD_LIFT + CROWN_RISE[c] * (1 - k * k);
+}
+// centreline ground + lift (callers add the crown they need)
+function roadBenchY(x, z) {
+  return meshHeightAt(x, z) + ROAD_LIFT;
+}
+// highest ground across a width — for decks that must clear the land
+function groundMaxAcross(x, z, dx, dz, half) {
   let m = -Infinity;
-  for (const off of [-half, -half * 0.5, 0, half * 0.5, half]) {
-    const h = meshHeightAt(x + dz * off, z - dx * off);
-    if (h > m) m = h;
-  }
-  return m + ROAD_CROWN;
+  for (const off of [-half, -half * 0.5, 0, half * 0.5, half]) m = Math.max(m, meshHeightAt(x + dz * off, z - dx * off));
+  return m;
 }
 function waterDeckLevel(x, z) {
   const rv = riverAt(x, z);
@@ -280,10 +287,10 @@ function mainRoadRoute(era) {
     const y1 = meshHeightAt(p.x + p.dx * 2, p.z + p.dz * 2);
     // ride the graded bench, not the bare centreline — on a cross-slope the
     // two differ by up to a metre and the wheels sank into the carriageway
-    const ground = roadBenchY(p.x, p.z, p.dx, p.dz, ROAD_HALF_W[0] + (era === 5 ? 1.2 : 0))
-      + CROWN_RISE[0];
     const lift = deck[Math.max(0, Math.min(N - 1, Math.round(p.s / DS)))];
-    return { ...p, y: Math.max(ground, lift), rot: Math.atan2(-p.dz, p.dx), pitch: Math.atan2(y1 - y0, 4) };
+    // the lane surface either side (Latvia drives on the right; laneOffset)
+    const laneY = (side) => Math.max(roadSurfaceY(p.x, p.z, p.dx, p.dz, -1.6 * side, ROAD_HALF_W[0], 0), lift);
+    return { ...p, y: laneY(1), laneY, rot: Math.atan2(-p.dz, p.dx), pitch: Math.atan2(y1 - y0, 4) };
   };
   return { segs, total, poseAt };
 }
@@ -331,8 +338,7 @@ function drivingTraffic(group, route, vehicles) {
   const place = (car) => {
     const p = route.poseAt(car.s);
     const [lx, lz] = laneOffset(p, car.dir);
-    // -0.04: the camber drop from crown to lane centre on a class-0 road
-    car.obj.position.set(lx, p.y - 0.04, lz);
+    car.obj.position.set(lx, p.laneY(car.dir), lz);
     car.obj.rotation.set(0, car.dir > 0 ? p.rot : p.rot + Math.PI,
       car.dir > 0 ? p.pitch : -p.pitch);
   };
@@ -353,23 +359,20 @@ function drivingTraffic(group, route, vehicles) {
 // today; the V-roads, lanes and tracks keep their gravel or dirt skin.
 function roadRibbons(group, era) {
   if (era < 3) return;
-  const mkMat = (color, offset) => roadMaterial(color, offset);
   // roles: 1 per carriageway vertex, 0 per verge/skirt vertex (the skirt
   // tucks into the slope beside a cutting — data/roadcheck.mjs needs to know)
   const surf = {
-    asphalt: { mat: mkMat(0x393c40, -2), positions: [], indices: [], roles: [] },
-    gravel: { mat: mkMat(0x9d947f, -1), positions: [], indices: [], roles: [] },
-    darkGravel: { mat: mkMat(0x8d8570, -1), positions: [], indices: [], roles: [] },
-    dirt: {
-      mat: roadMaterial(0xffffff,-1,true),
-      positions: [], colors: [], indices: [], roles: [],
-    },
+    asphalt: { mat: roadMaterial(0x5a5c5e, -3, false, 0), positions: [], indices: [], roles: [], road: [] },
+    shoulder: { mat: roadMaterial(0x9a917d, -2, false, 3), positions: [], indices: [], roles: [], road: [] },
+    gravel: { mat: roadMaterial(0xa9a28f, -2, false, 1), positions: [], indices: [], roles: [], road: [] },
+    darkGravel: { mat: roadMaterial(0x958c77, -2, false, 1), positions: [], indices: [], roles: [], road: [] },
+    dirt: { mat: roadMaterial(0x8e7f63, -2, false, 2), positions: [], indices: [], roles: [], road: [] },
   };
   const patchSurf = {
-    asphalt: { mat: mkMat(0x393c40, -4), positions: [], indices: [], count: 0 },
-    gravel: { mat: mkMat(0x9d947f, -4), positions: [], indices: [], count: 0 },
-    darkGravel: { mat: mkMat(0x8d8570, -4), positions: [], indices: [], count: 0 },
-    dirt: { mat: mkMat(0x7d7558, -4), positions: [], indices: [], count: 0 },
+    asphalt: { mat: roadMaterial(0x5a5c5e, -4, false, 4), positions: [], indices: [], count: 0 },
+    gravel: { mat: roadMaterial(0xa9a28f, -4, false, 4), positions: [], indices: [], count: 0 },
+    darkGravel: { mat: roadMaterial(0x958c77, -4, false, 4), positions: [], indices: [], count: 0 },
+    dirt: { mat: roadMaterial(0x8e7f63, -4, false, 4), positions: [], indices: [], count: 0 },
   };
   const bridgeMat = era === 5 ? new THREE.MeshLambertMaterial({ color: 0x9a9a94 }) : MAT.darkWood;
   const bridgeFixtures = [], bridgeCandidates = [], bridgeSites = [];
@@ -454,7 +457,7 @@ function roadRibbons(group, era) {
       run.floor = [];
       for (let i = run.from; i <= run.to; i++) {
         const [tdx, tdz] = tangentAt(pts, i);
-        run.floor.push(roadBenchY(pts[i][0], pts[i][1], tdx, tdz, 4.2) - ROAD_CROWN + 0.14);
+        run.floor.push(groundMaxAcross(pts[i][0], pts[i][1], tdx, tdz, 4.2) + 0.14);
       }
     }
     return merged;
@@ -466,12 +469,12 @@ function roadRibbons(group, era) {
   };
   // Centreline paint rides the CROWN, so it must use the same graded bench
   // the asphalt does or the dashes sink through their own road.
-  const rowYAt = (pts, runs, dists, i, half) => {
+  const rowYAt = (pts, runs, dists, i, half, off = 0) => {
     const run = bridgeAt(runs, i);
     if (run) return bridgeYAt(run, dists, i);
     const [x, z] = pts[i];
     const [dx, dz] = tangentAt(pts, i);
-    return roadBenchY(x, z, dx, dz, half + 1.2) + CROWN_RISE[0];
+    return roadSurfaceY(x, z, dx, dz, off, half, 0);
   };
   const queueBridgeFixtures = (runs, pts, dists, half, c) => {
     for (const run of runs) {
@@ -519,61 +522,27 @@ function roadRibbons(group, era) {
     }
     fixtureClusterCount = clusters.length;
   };
-  // Batter the verge down to grade at roughly 45°, so a filled edge reads as
-  // a low embankment rather than a floating lip. Returns [offset, y] for the
-  // outer skirt vertex on the given side.
-  const shoulderVert = (x, z, dx, dz, half, edgeY, side, deckY) => {
-    if (deckY !== null) return [half + 0.3, deckY - 0.35];
-    const g = meshHeightAt(x + dz * side * half, z - dx * side * half);
-    const w = 0.3 + Math.max(0, edgeY - 0.08 - (g + 0.02)) * 0.9;
-    const gy = meshHeightAt(x + dz * side * (half + w), z - dx * side * (half + w));
-    return [half + w, Math.min(edgeY - 0.08, gy + 0.02)];
-  };
-  // benchHalf: how wide a strip of ground the bench must clear. The paved
-  // P30 carries gravel shoulders 1.2 m beyond the asphalt, and both must be
-  // graded off the SAME bench or the shoulder stands proud of its own road.
-  const pushCamberedRow = (positions, x, z, dx, dz, half, c, deckY = null, benchHalf = half) => {
-    const bench = deckY !== null ? deckY : roadBenchY(x, z, dx, dz, benchHalf);
-    const edgeY = deckY !== null ? deckY : bench;
-    const crownY = deckY !== null ? deckY : bench + CROWN_RISE[c];
-    const [wl, yl] = shoulderVert(x, z, dx, dz, half, edgeY, -1, deckY);
-    const [wr, yr] = shoulderVert(x, z, dx, dz, half, edgeY, 1, deckY);
-    for (const [off, y] of [[-wl, yl], [-half, edgeY], [0, crownY], [half, edgeY], [wr, yr]]) {
-      positions.push(x + dz * off, y, z - dx * off);
+  // One cross-section row. cols = [[offset, fray]] — offset in metres from
+  // the centreline (+ = the tangent's right), fray 0 on the made surface
+  // rising to 1 at the ragged outer edge where the verge takes over. Every
+  // vertex is draped on the rendered ground (or held on a bridge deck).
+  // aRoad = (offset / half, fray) drives the surface shader.
+  const pushRow = (S, x, z, dx, dz, half, c, cols, deckY, lift = 0) => {
+    for (const [off, fray] of cols) {
+      const y = deckY !== null ? deckY + (Math.abs(off) > half ? -0.02 : 0)
+        : roadSurfaceY(x, z, dx, dz, off, half, c) + lift - fray * 0.02;
+      S.positions.push(x + dz * off, y, z - dx * off);
+      S.road.push(off / half, fray);
+      S.roles.push(fray > 0.5 ? 0 : 1);
     }
   };
-  const pushShoulderRow = (positions, x, z, dx, dz, half, deckY = null) => {
-    // The gravel shoulders under today's asphalt: same graded bench, sampled
-    // over the full shoulder width so the verge cannot bury itself either.
-    const bench = deckY !== null ? deckY : roadBenchY(x, z, dx, dz, half + 1.2);
-    const edgeY = deckY !== null ? deckY : bench;
-    for (const off of [-half - 1.2, -half - 0.9, -half, half, half + 0.9, half + 1.2]) {
-      let y = edgeY - Math.max(0, Math.abs(off) - half) * 0.025;
-      if (Math.abs(off) > half + 0.9) y = deckY !== null ? deckY - 0.35
-        : Math.min(y - 0.08, meshHeightAt(x + dz * off, z - dx * off) + 0.02);
-      positions.push(x + dz * off, y, z - dx * off);
-    }
+  const FRAY = [0.4, 1.4, 1.3, 1.0];   // asphalt crumbles less than gravel spreads
+  const carriageCols = (half, c) => {
+    const f = FRAY[c];
+    return [[-half - f, 1], [-half, 0], [-half * 0.5, 0], [0, 0], [half * 0.5, 0], [half, 0], [half + f, 1]];
   };
-  const pushDirtRow = (positions, colors, x, z, dx, dz, half, deckY = null) => {
-    const rut = half * 0.45;
-    const rows = [
-      [-half - 0.25, null, [0.31, 0.26, 0.17]],
-      [-half, -CROWN_RISE[3], [0.38, 0.30, 0.20]],
-      [-rut, -CROWN_RISE[3] * 0.45, [0.20, 0.15, 0.095]],
-      [0, 0, [0.34, 0.29, 0.17]],
-      [rut, -CROWN_RISE[3] * 0.45, [0.20, 0.15, 0.095]],
-      [half, -CROWN_RISE[3], [0.38, 0.30, 0.20]],
-      [half + 0.25, null, [0.31, 0.26, 0.17]],
-    ];
-    const crownY = deckY !== null ? deckY : roadBenchY(x, z, dx, dz, half) + CROWN_RISE[3];
-    for (const [off, lift, rgb] of rows) {
-      let y = deckY !== null ? deckY : crownY + (lift ?? -CROWN_RISE[3] - 0.08);
-      if (lift === null) y = deckY !== null ? deckY - 0.35
-        : Math.min(y, meshHeightAt(x + dz * off, z - dx * off) + 0.02);
-      positions.push(x + dz * off, y, z - dx * off);
-      colors.push(...rgb);
-    }
-  };
+  // today's P30: 7 m of asphalt on a 1.5 m gravel shoulder each side
+  const shoulderCols = (half) => [[-half - 1.9, 1], [-half - 1.2, 0], [-half + 0.3, 0], [half - 0.3, 0], [half + 1.2, 0], [half + 1.9, 1]];
   for (const r of osmRoadsForEra(era)) {
     const half = ROAD_HALF_W[r.c];
     const pts = roadRows(r);
@@ -590,86 +559,56 @@ function roadRibbons(group, era) {
       bridgeSites.push({ x: (a[0] + b[0]) / 2, z: (a[1] + b[1]) / 2 });
     }
     if (r.c <= 1) queueBridgeFixtures(runs, pts, dists, half, r.c);
-    if (r.c === 3) {
-      const { positions, colors, indices } = surf.dirt;
-      const base = positions.length / 3;
+    const deckAt = (i) => { const run = bridgeAt(runs, i); return run ? bridgeYAt(run, dists, i) : null; };
+    const ribbon = (S, c, cols, spans = null, lift = 0) => {
+      const n = cols.length, base = S.positions.length / 3;
       for (let i = 0; i < pts.length; i++) {
         const [x, z] = pts[i];
         const [dx, dz] = tangentAt(pts, i);
-        const run = bridgeAt(runs, i);
-        pushDirtRow(positions, colors, x, z, dx, dz, half * endK(i), run ? bridgeYAt(run, dists, i) : null);
-        surf.dirt.roles.push(0, 1, 1, 1, 1, 1, 0);
-        if (i > 0) addIndices(indices, base, i, 7);
+        pushRow(S, x, z, dx, dz, half, c, cols, deckAt(i), lift);
+        if (i > 0) addIndices(S.indices, base, i, n, spans);
       }
+    };
+    const paved = era === 5 && (r.c === 0 || ['asphalt', 'paved', 'paving_stones'].includes(r.surface));
+    if (!paved) {
+      const S = r.c === 3 ? surf.dirt : r.c === 2 ? surf.darkGravel : surf.gravel;
+      ribbon(S, r.c, carriageCols(half, r.c));
       continue;
     }
-    if (era === 5 && (r.c === 0 || ['asphalt','paved','paving_stones'].includes(r.surface))) {
-      {
-        const { positions, indices } = surf.gravel;
-        const base = positions.length / 3;
-        for (let i = 0; i < pts.length; i++) {
-          const [x, z] = pts[i];
-          const [dx, dz] = tangentAt(pts, i);
-          const run = bridgeAt(runs, i);
-          pushShoulderRow(positions, x, z, dx, dz, half * endK(i), run ? bridgeYAt(run, dists, i) : null);
-          surf.gravel.roles.push(0, 1, 1, 1, 1, 0);
-          if (i > 0) addIndices(indices, base, i, 6, [0, 1, 3, 4]);
-        }
+    ribbon(surf.shoulder, r.c, shoulderCols(half), [0, 1, 3, 4], -0.012);
+    ribbon(surf.asphalt, r.c, carriageCols(half, 0));
+    if (r.c !== 0) continue;
+    // P30 markings: continuous edge lines 0.25 m in from the asphalt edge,
+    // and a dashed centreline (3 m of paint in a 12 m cycle — Latvian
+    // 1.5-type line on a two-lane road), each draped on the camber
+    const line = (x0, z0, x1, z1, off, w, y0, y1) => {
+      const [dx, dz] = [(x1 - x0), (z1 - z0)];
+      const l = Math.hypot(dx, dz) || 1, tx = dx / l, tz = dz / l;
+      const b = dashPos.length / 3;
+      dashPos.push(x0 + tz * (off - w), y0, z0 - tx * (off - w), x0 + tz * (off + w), y0, z0 - tx * (off + w),
+        x1 + tz * (off + w), y1, z1 - tx * (off + w), x1 + tz * (off - w), y1, z1 - tx * (off - w));
+      dashIdx.push(b, b + 2, b + 1, b, b + 3, b + 2);
+    };
+    let cyc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const [px, pz] = pts[i - 1], [x, z] = pts[i];
+      for (const side of [-1, 1]) {
+        const off = side * (half - 0.25);
+        line(px, pz, x, z, off, 0.06,
+          rowYAt(pts, runs, dists, i - 1, half, off) + 0.012, rowYAt(pts, runs, dists, i, half, off) + 0.012);
       }
-      {
-        const { positions, indices } = surf.asphalt;
-        const base = positions.length / 3;
-        for (let i = 0; i < pts.length; i++) {
-          const [x, z] = pts[i];
-          const [dx, dz] = tangentAt(pts, i);
-          const run = bridgeAt(runs, i);
-          pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c,
-            run ? bridgeYAt(run, dists, i) : null, half * endK(i) + 1.2);
-          surf.asphalt.roles.push(0, 1, 1, 1, 0);
-          if (i > 0) {
-            addIndices(indices, base, i, 5, [1, 2]);
-            if(r.c===0){
-              const [px,pz]=pts[i-1],[pdx,pdz]=tangentAt(pts,i-1);
-              const ya=rowYAt(pts,runs,dists,i-1,half)-CROWN_RISE[0]+.025;
-              const yb=rowYAt(pts,runs,dists,i,half)-CROWN_RISE[0]+.025;
-              for(const side of [-1,1]){
-                const b=dashPos.length/3,off=side*(half-.23);
-                dashPos.push(px+pdz*(off-.055),ya,pz-pdx*(off-.055),px+pdz*(off+.055),ya,pz-pdx*(off+.055),
-                  x+dz*(off+.055),yb,z-dx*(off+.055),x+dz*(off-.055),yb,z-dx*(off-.055));
-                dashIdx.push(b,b+2,b+1,b,b+3,b+2);
-              }
-            }
-            // dashed centreline on the paved P30: ~3.4m of paint per 18m cycle
-            // (the full-span 9m dashes read like runway markings from the air)
-            if (r.c === 0 && i % 2 === 0) {
-              const b2 = dashPos.length / 3;
-              const px = pts[i - 1][0], pz = pts[i - 1][1];
-              const sx = px + (x - px) * 0.31, sz = pz + (z - pz) * 0.31;
-              const ex = px + (x - px) * 0.69, ez = pz + (z - pz) * 0.69;
-              const yPrev = rowYAt(pts, runs, dists, i - 1, half * endK(i - 1));
-              const yNow = rowYAt(pts, runs, dists, i, half * endK(i));
-              const sy = yPrev + (yNow - yPrev) * 0.31 + 0.03;
-              const ey = yPrev + (yNow - yPrev) * 0.69 + 0.03;
-              dashPos.push(
-                sx - dz * 0.09, sy, sz + dx * 0.09, sx + dz * 0.09, sy, sz - dx * 0.09,
-                ex + dz * 0.09, ey, ez - dx * 0.09, ex - dz * 0.09, ey, ez + dx * 0.09);
-              dashIdx.push(b2, b2 + 2, b2 + 1, b2, b2 + 3, b2 + 2);
-            }
-          }
-        }
+      const segL = dists[i] - dists[i - 1];
+      const d0 = cyc, d1 = cyc + segL;
+      // paint the part of [d0, d1) inside the first 3 m of each 12 m cycle
+      for (let k = Math.floor(d0 / 12); k * 12 < d1; k++) {
+        const a0 = Math.max(d0, k * 12), a1 = Math.min(d1, k * 12 + 3);
+        if (a1 <= a0) continue;
+        const t0 = (a0 - d0) / segL, t1 = (a1 - d0) / segL;
+        const y0 = rowYAt(pts, runs, dists, i - 1, half), y1 = rowYAt(pts, runs, dists, i, half);
+        line(px + (x - px) * t0, pz + (z - pz) * t0, px + (x - px) * t1, pz + (z - pz) * t1, 0, 0.06,
+          y0 + (y1 - y0) * t0 + 0.012, y0 + (y1 - y0) * t1 + 0.012);
       }
-      continue;
-    }
-    const s = r.c === 2 ? surf.darkGravel : surf.gravel;
-    const { positions, indices } = s;
-    const base = positions.length / 3;
-    for (let i = 0; i < pts.length; i++) {
-      const [x, z] = pts[i];
-      const [dx, dz] = tangentAt(pts, i);
-      const run = bridgeAt(runs, i);
-      pushCamberedRow(positions, x, z, dx, dz, half * endK(i), r.c, run ? bridgeYAt(run, dists, i) : null);
-      s.roles.push(0, 1, 1, 1, 0);
-      if (i > 0) addIndices(indices, base, i, 5);
+      cyc = d1;
     }
   }
   finishBridgeFixtures();
@@ -709,14 +648,11 @@ function roadRibbons(group, era) {
     patch.count++;
     // A junction is a flat pad. Hold it at least at the bench height of every
     // arm meeting here, or the ribbons now ride above their own junction.
-    let nodeBench = -Infinity;
-    const armHalf = Math.max(...node.arms.map((a) => a.halfW));
-    for (const arm of node.arms) {
-      nodeBench = Math.max(nodeBench, roadBenchY(node.x, node.z, arm.dx, arm.dz, armHalf));
-    }
+    // draped like the ribbons, a hair above them so the pad reads as one
+    // surface where the arms meet
     const yAt = (x, z) => {
       const water = crossingAt(x, z);
-      return Math.max(nodeBench, meshHeightAt(x, z) + 0.18, water === null ? -Infinity : water + 1.9);
+      return Math.max(meshHeightAt(x, z) + ROAD_LIFT + CROWN_RISE[dominant] + 0.006, water === null ? -Infinity : water + 1.9);
     };
     patch.positions.push(node.x, yAt(node.x, node.z), node.z);
     for (const [x, z] of hull) patch.positions.push(x, yAt(x, z), z);
@@ -728,19 +664,20 @@ function roadRibbons(group, era) {
     dg.setAttribute('position', new THREE.Float32BufferAttribute(dashPos, 3));
     dg.setIndex(dashIdx);
     dg.computeVertexNormals();
+    dg.computeBoundingSphere();
     const dashes = new THREE.Mesh(dg, new THREE.MeshLambertMaterial({
-      color: 0xc9cdd1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+      color: 0xd8dbde, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5,
     }));
     dashes.receiveShadow = true;
     group.add(dashes);
   }
-  for (const key of ['asphalt', 'gravel', 'darkGravel', 'dirt']) {
-    const { mat, positions, colors, indices } = surf[key];
+  for (const key of ['asphalt', 'shoulder', 'gravel', 'darkGravel', 'dirt']) {
+    const { mat, positions, indices } = surf[key];
     if (!positions.length) continue;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    if (colors) geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geo.setIndex(indices);
+    geo.setAttribute('aRoad', new THREE.Float32BufferAttribute(surf[key].road, 2));
+    geo.setIndex(positions.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(indices, 1) : new THREE.Uint16BufferAttribute(indices, 1));
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
     if (surf[key].roles.length * 3 === positions.length) geo.userData.carriage = Uint8Array.from(surf[key].roles);
@@ -1873,7 +1810,7 @@ function fieldDecals(era) {
     const tint = (0.9 + f.tint * 0.18) * 0.56;
     // ragged border: Iron Age plots are small irregular clearings, later
     // fields still fray into their balks — never a ruled outline
-    const rag = era === 2 ? 3.5 : 2.4;
+    const rag = era === 2 ? 3.5 : 3.2;
     for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
       const u = -f.hw + (2 * f.hw * i) / nu, v = -f.hh + (2 * f.hh * j) / nv;
       const x = f.cx + u * c - v * s, z = f.cz + u * s + v * c;

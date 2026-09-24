@@ -684,28 +684,9 @@ function paintVertex(era, x, y, z) {
   // fields
   // fields: no underpaint — the draped parcel decals (eras.js) carry the
   // crop, and fray at their borders into the meadow painted here
-  // roads & yard earth — the real network: asphalt on today's P30 and
-  // V-roads, gravel elsewhere, bare dirt on the farm tracks
-  if (era >= 2) {
-    const ri = distToRoadEx(era, x, z);
-    // the ribbons carry the surface; paint only a NARROW dirt fringe and
-    // a worn-green verge — the old 2.5m halo painted every road corridor
-    // brown from the air (roads read as fat tan stripes)
-    if (ri.d < 0.8) {
-      const t = smoothstep(0.8, -1, ri.d);
-      if (era === 5 && ri.c === 0) {   // P30 only — class-1 V-roads stay gravel like their ribbons
-        const lane = 0.30 + n2 * 0.03;
-        r = lerp(r, lane, t); g = lerp(g, lane + 0.008, t); b = lerp(b, lane + 0.02, t);
-      } else if (ri.c === 3) {
-        r = lerp(r, 0.42, t); g = lerp(g, 0.35, t); b = lerp(b, 0.25, t);
-      } else {
-        r = lerp(r, 0.44, t); g = lerp(g, 0.36, t); b = lerp(b, 0.26, t);
-      }
-    } else if (ri.d < 3.2) {
-      const t = smoothstep(3.2, 0.8, ri.d) * 0.5;
-      r = lerp(r, 0.36, t); g = lerp(g, 0.42, t); b = lerp(b, 0.20, t);   // trodden verge green
-    }
-  }
+  // roads: no underpaint — the ribbons are draped on the ground and fray
+  // into the meadow painted here (painting them into the 17 m grid only
+  // ever smeared a brown halo metres wide around every road)
   for (const p of PADS) {
     if (era === 1 && p !== PADS[2]) continue;             // only the camp pad reads as trodden in AD 50
     if (era === 2 && Math.hypot(x - LOC.MANOR.x, z - LOC.MANOR.z) < 80) continue;

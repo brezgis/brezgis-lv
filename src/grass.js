@@ -417,7 +417,7 @@ export function buildGrass(scene) {
       }
       if (cellOK) {
         cFd = forestDensity(era, ccx, ccz, cY);
-        if (!band.roadPerBlade && era >= 2 && distToRoad(era, ccx, ccz) < 1.2) cellOK = false;
+        if (!band.roadPerBlade && era >= 2 && distToRoad(era, ccx, ccz) < 0.6) cellOK = false;
       }
       if (cellOK) {
         for (const p of PADS) {
@@ -459,13 +459,18 @@ export function buildGrass(scene) {
         fd = cFd;
         trodden = cTrodden;
         fa = cFa;
-        if (band.roadPerBlade && era >= 2 && distToRoad(era, x, z) < 1.4) continue;
+        if (band.roadPerBlade && era >= 2) {
+          // grass runs into the frayed verge; a cart track keeps its strip
+          // of grass between the ruts
+          const rd = distToRoadEx(era, x, z);
+          if (rd.d < 0.35 && !(rd.c === 3 && rd.d < -ROAD_HALF_W[3] + 0.28)) continue;
+        }
       } else {
         y = heightAt(x, z);
         dRiv = distToRiver(x, z);
         if (vegExcluded(x, z, y, era, 2)) continue;
         fd = forestDensity(era, x, z, y);
-        if (era >= 2 && distToRoad(era, x, z) < 1.2) continue;
+        if (era >= 2 && distToRoad(era, x, z) < 0.5) continue;
         trodden = false;
         for (const p of PADS) {
           if (era === 1 && p !== PADS[2]) continue;

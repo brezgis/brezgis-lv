@@ -43,6 +43,19 @@ export class Effects {
     this.group = new THREE.Group();
     this.group.name = 'effects';
     scene.add(this.group);
+    // A fixed pool of fire lights, always in the scene. three keys every lit
+    // shader on the number of point lights, so adding and removing a light
+    // per era made every material in the world re-link on each era switch
+    // (a 0.3-0.6 s hitch). Unused pool lights sit dark at intensity 0.
+    this.lightPool = [];
+    for (let i = 0; i < 2; i++) {
+      const l = new THREE.PointLight(0xff7a28, 0, 26, 1.8);
+      l.userData.free = true;
+      // on the scene, not this group: the water mirror hides this group, and
+      // a hidden light changes the count just the same
+      scene.add(l);
+      this.lightPool.push(l);
+    }
 
     // fireflies (shared; shown at dusk near the meadow around the stage)
     const N = 90;
@@ -144,9 +157,11 @@ export class Effects {
   }
 
   addFire(x, y, z, { intensity = 5, dist = 26, duskOnly = false, scale = 1 } = {}) {
-    const light = new THREE.PointLight(0xff7a28, intensity, dist, 1.8);
+    // a third simultaneous fire would get its flame but no light
+    let light = this.lightPool.find((l) => l.userData.free);
+    if (light) { light.userData.free = false; light.distance = dist; light.intensity = intensity; }
+    else light = { intensity: 0, position: new THREE.Vector3() };
     light.position.set(x, y + 0.7, z);
-    this.group.add(light);
     const flame = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this.blob, color: 0xffa030, transparent: true, opacity: 0.85,
       blending: THREE.AdditiveBlending, depthWrite: false,
@@ -160,7 +175,8 @@ export class Effects {
 
   clearDynamic() {
     for (const s of this.smokes) { this.group.remove(s.pts); s.pts.geometry.dispose(); s.pts.material.dispose(); }
-    for (const f of this.fires) { this.group.remove(f.light); this.group.remove(f.flame); f.flame.material.dispose(); }
+    for (const f of this.fires) { this.group.remove(f.flame); f.flame.material.dispose(); }
+    for (const l of this.lightPool) { l.userData.free = true; l.intensity = 0; }
     this.smokes = [];
     this.fires = [];
   }

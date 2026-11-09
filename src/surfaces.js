@@ -2,7 +2,7 @@
 // one-texture-per-building UVs; fine detail fades with screen-space derivatives.
 import * as THREE from 'three';
 const noise = `
-float surfaceHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float surfaceHash(vec2 p){vec3 p3=fract(vec3(p.xyx)*0.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 float surfaceNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
 return mix(mix(surfaceHash(i),surfaceHash(i+vec2(1,0)),f.x),mix(surfaceHash(i+vec2(0,1)),surfaceHash(i+vec2(1,1)),f.x),f.y);}
 float surfaceLine(float p,float period,float width){float q=abs(fract(p/period+.5)-.5)*period;return 1.0-smoothstep(width,width+max(fwidth(p),.002),q);}

@@ -5,10 +5,10 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { initTextures } from './textures.js';
-import { buildTerrain, paintEra, meshHeightAt } from './terrain.js';
+import { buildTerrainJob, paintEra, preparePaint, meshHeightAt } from './terrain.js';
 import { buildWater } from './water.js';
 import { buildSky } from './sky.js';
-import { buildVegetation, WIND } from './vegetation.js';
+import { buildVegetationJob, WIND } from './vegetation.js';
 import { buildGrass } from './grass.js';
 import { buildEra, applySpawns } from './eras.js';
 import { AnimalManager } from './animals.js';
@@ -17,25 +17,30 @@ import { Ambience } from './audio.js';
 import { Rig } from './rig.js';
 import { buildMinimap } from './minimap.js';
 import { LOC } from './landuse.js';
+import { setMaxAnisotropy, smoothstep } from './util.js';
+import { MAT, WINDOW_GLOW } from './textures.js';
 import { RIVER_PTS, LAKES } from './geodata.js';
 import { ERAS, SOURCES, INTRO, eraText } from './content.js';
 
 const S = LOC.STEAD;
 const $ = (id) => document.getElementById(id);
 
+// a phone or tablet with no mouse: touch wording, no keyboard hints
+const TOUCH = matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+
 // ---------------- UI language: everything but the long Chronicle ------------
 const I18N = {
   lv: {
     fly: 'Lidot', walk: 'Iet', toFly: 'Pārslēgt uz lidošanu', toWalk: 'Pārslēgt uz iešanu',
     flow: '▶ Laiks rit', dawn: 'Ausma', noon: 'Diena', evening: 'Vakars', timeOfDay: 'Diennakts laiks',
-    karte: 'Karte · M', soundOn: 'Skaņa ieslēgta', soundOff: 'Skaņa izslēgta', lang: 'Valoda latviešu',
+    karte: TOUCH ? 'Karte' : 'Karte · M', allSources: 'Visi avoti Hronikā →', langName: 'English', soundOn: 'Skaņa ieslēgta', soundOff: 'Skaņa izslēgta', lang: 'Valoda latviešu',
     chronicle: 'Hronika un avoti', story: 'Stāsts', close: 'Aizvērt ✕', menu: 'Izvēlne',
     lookHere: 'Apskatīt', more: 'Lasīt vairāk ▾', less: 'Mazāk ▴', source: 'avots',
   },
   en: {
     fly: 'Fly', walk: 'Walk', toFly: 'Switch to flying', toWalk: 'Switch to walking',
     flow: '▶ Time flows', dawn: 'Dawn', noon: 'Noon', evening: 'Evening', timeOfDay: 'Time of day',
-    karte: 'Map · M', soundOn: 'Sound on', soundOff: 'Sound off', lang: 'Language English',
+    karte: TOUCH ? 'Map' : 'Map · M', allSources: 'All sources in the Chronicle →', langName: 'Latviski', soundOn: 'Sound on', soundOff: 'Sound off', lang: 'Language English',
     chronicle: 'Chronicle & sources', story: 'Story', close: 'Close ✕', menu: 'Menu',
     lookHere: 'Look here', more: 'Read more ▾', less: 'Less ▴', source: 'source',
   },
@@ -44,37 +49,42 @@ const ICONS = {
   soundOn: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.6 6a8.6 8.6 0 0 1 0 12" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg>',
   soundOff: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   fly: '<svg viewBox="0 0 24 24"><path d="M1.5 11.5c3.2-2.6 6.3-2.4 10.5 1.2 4.2-3.6 7.3-3.8 10.5-1.2-3.9-.6-6.9.6-10.5 4.3-3.6-3.7-6.6-4.9-10.5-4.3z" fill="currentColor"/></svg>',
+  lang: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M3.6 12h16.8M12 3.4c2.6 2.4 3.9 5.3 3.9 8.6s-1.3 6.2-3.9 8.6c-2.6-2.4-3.9-5.3-3.9-8.6S9.4 5.8 12 3.4z" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>',
   walk: '<svg viewBox="0 0 24 24"><circle cx="13" cy="4.2" r="2.1" fill="currentColor"/><path d="M12.5 8.2l-2.6 5.1 2.9 2.6-1.4 5.8M12.5 8.2l2.3 4.4 3.3 1.3M9.9 13.3l-3.2 2.4M12.8 15.9l3.9 5.8" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 // compact keycap chips per mode — the old prose hint line read as a manual
 const KEYCHIPS = {
   lv: {
     cinema: [['Klikšķis / WASD', 'lidot'], ['1–6', 'laikmeti'], ['M', 'karte']],
-    fly: [['WASD', 'lidot'], ['Space · Shift', 'augšup · lejup'], ['W W', 'ātri'], ['Ritenis', 'ātrums'], ['Space ×2', 'iet'], ['M', 'karte']],
-    walk: [['WASD', 'iet'], ['Shift', 'skriet'], ['Space', 'lēkt'], ['Space ×2', 'lidot'], ['1–6', 'laikmeti'], ['M', 'karte']],
+    fly: [['WASD', 'lidot'], ['Space · Shift', 'augšup · lejup'], ['Space ×2', 'iet']],
+    walk: [['WASD', 'iet'], ['Shift', 'skriet'], ['Space ×2', 'lidot']],
   },
   en: {
     cinema: [['Click / WASD', 'fly'], ['1–6', 'eras'], ['M', 'map']],
-    fly: [['WASD', 'fly'], ['Space · Shift', 'up · down'], ['W W', 'boost'], ['Wheel', 'speed'], ['Space ×2', 'walk'], ['M', 'map']],
-    walk: [['WASD', 'walk'], ['Shift', 'sprint'], ['Space', 'jump'], ['Space ×2', 'fly'], ['1–6', 'eras'], ['M', 'map']],
+    fly: [['WASD', 'fly'], ['Space · Shift', 'up · down'], ['Space ×2', 'walk']],
+    walk: [['WASD', 'walk'], ['Shift', 'sprint'], ['Space ×2', 'fly']],
   },
 };
 let lang = 'lv';
 try { lang = localStorage.getItem('brezgi-lang') === 'en' ? 'en' : 'lv'; } catch { /* storage may be unavailable for local files */ }
 
-// The welcome card: context to read while the landscape builds; once it is
-// built, "Step in" (or Enter) dismisses it. Automated browsers skip it.
+// The welcome card: a short read that fits the loading time; once the world
+// is built, "Step in" (or Enter) dismisses it. Automated browsers skip it.
+let stageKey = null;
 function renderIntro() {
   const T = INTRO[lang];
   const k = $('intro-kicker'), tx = $('intro-text'), how = $('intro-how'), en = $('intro-enter'), lb = $('intro-lang');
   if (!tx) return;
   k.textContent = T.kicker;
   tx.innerHTML = T.paras.map((p) => `<p>${p}</p>`).join('');
-  how.textContent = T.how;
+  how.textContent = TOUCH ? T.howTouch : T.how;
   en.textContent = T.enter + ' →';
   lb.textContent = lang === 'lv' ? 'EN' : 'LV';
+  const st = $('loader-status');
+  if (st) st.textContent = stageKey ? T.stages[stageKey] : (st.textContent ? T.loading : '');
 }
 renderIntro();
+if (!navigator.webdriver) document.body.classList.add('intro');
 $('intro-lang')?.addEventListener('click', () => {
   lang = lang === 'lv' ? 'en' : 'lv';
   try { localStorage.setItem('brezgi-lang', lang); } catch { /* optional */ }
@@ -82,22 +92,53 @@ $('intro-lang')?.addEventListener('click', () => {
   window.__applyLang?.(lang);
 });
 
+// Boot stages and the diamond each one lights: earlier diamonds turn gold,
+// the current one pulses (a compositor animation, so it keeps going even
+// while a slice of work holds the main thread).
+const STAGE_DIAMOND = { terrain: 0, water: 1, sky: 1, forest: 2, grass: 2, era: 3, warm: 4 };
+function lightDiamonds(cur) {
+  document.querySelectorAll('#loader-band i').forEach((d, i) => {
+    d.classList.toggle('lit', i < cur);
+    d.classList.toggle('now', i === cur);
+  });
+}
 let bootT0 = 0;
-const progress = (msg) => {
+const progress = (key) => {
   const now = performance.now();
-  if (bootT0) console.log(`[boot] +${((now - bootT0) / 1000).toFixed(2)}s — ${msg}`);
+  if (bootT0) console.log(`[boot] +${((now - bootT0) / 1000).toFixed(2)}s — ${key}`);
   else bootT0 = now;
+  stageKey = key;
   const el = $('loader-status');
-  if (el) el.textContent = msg;
+  if (el) el.textContent = INTRO[lang].stages[key];
+  lightDiamonds(STAGE_DIAMOND[key]);
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 };
+// Long builds run as generators, stepped in short slices with a yield to the
+// browser between them, so a click on the card (EN/LV) is answered within a
+// frame instead of after a multi-second freeze.
+const yieldToBrowser = () => (globalThis.scheduler?.yield
+  ? globalThis.scheduler.yield()
+  : new Promise((r) => setTimeout(r, 0)));
+async function runSliced(job, budgetMs = 40) {
+  let end = performance.now() + budgetMs;
+  for (;;) {
+    const r = job.next();
+    if (r.done) return r.value;
+    if (performance.now() > end) { await yieldToBrowser(); end = performance.now() + budgetMs; }
+  }
+}
 
 async function boot() {
   const canvas = $('scene');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  // 1.75 cap: with 4x MSAA in the composer, full hi-DPI supersampling is
-  // wasted fill — this keeps text-sharpness without doubling the pixel bill
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+  // up to 2x: a Retina screen gets its native resolution (no upscale blur);
+  // the FPS governor below steps it down when the GPU cannot keep up
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  setMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
+  // three checks every new shader for errors by default, which makes the
+  // driver finish compiling it on the spot (a visible hitch whenever an era
+  // first appears). The shaders are fixed; keep the check for debugging only.
+  renderer.debug.checkShaderErrors = /[?&]debug\b/.test(location.search);
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -113,26 +154,26 @@ async function boot() {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 12000);
 
-  await progress('Sculpting the Vidzeme Upland from real elevation data…');
+  await progress('terrain');
   initTextures();
-  const terrain = buildTerrain();
+  const terrain = await runSliced(buildTerrainJob());
   scene.add(terrain);
   const steadY = meshHeightAt(S.x, S.z);
 
-  await progress('Filling the Gauja and Dabaru lake…');
+  await progress('water');
   const water = buildWater();
   scene.add(water.group);
 
-  await progress('Raising the sky…');
+  await progress('sky');
   const sky = buildSky(scene, renderer);
 
-  await progress('Growing the forests, branch by branch…');
-  const veg = buildVegetation(scene, renderer);
+  await progress('forest');
+  const veg = await runSliced(buildVegetationJob(scene, renderer));
   window.__veg = veg;                    // debug hook for data/floracount.mjs
   window.__water = (x, z) => waterLevelAt(x, z, currentEra);   // debug hook: shot harnesses stay above water
   window.__waterSys = water;                                    // debug hook: shader uniforms, reflector
   window.__meshHeightAt = meshHeightAt;                         // debug hook: the RENDERED ground (2 m shore mesh included)
-  await progress('Sowing half a million blades of grass…');
+  await progress('grass');
   const grass = buildGrass(scene);
   window.__grass = grass;                // debug hook for data/dbg.mjs grassstate
 
@@ -189,7 +230,10 @@ async function boot() {
 
   // Minecraft-style rig: fly + walk only; 'cinema' idles until first input
   const rig = new Rig(camera, canvas);
-  const cinema = { angle: Math.atan2(88, 68), r: 110, h: 26 };
+  // the opening orbit rides above the crowns: the farmstead in its clearing
+  // with the Gauja beyond, never a trunk across the view
+  const cinema = { angle: Math.atan2(88, 68), r: 175, h: 55 };
+  window.__cinema = cinema;              // debug hook: opening-shot tuning
   const keysEl = $('keys');
   let keysDimT = null;
   const renderKeys = () => {
@@ -336,6 +380,11 @@ async function boot() {
     return _collHit;
   };
 
+  // FPS governor state (the governor itself is below): a hold makes it ignore
+  // the frames around known one-off stalls such as an era switch
+  const gov = { holdUntil: 0 };
+  const govHold = (sec) => { gov.holdUntil = Math.max(gov.holdUntil, performance.now() + sec * 1000); };
+
   // ------- era management -------
   const eraCache = new Map();
   let current = null, currentEra = -1, eraTicks = [];
@@ -371,12 +420,56 @@ async function boot() {
     effects.setFireflies(era >= 1);
     ambience.setScene(era, sky.state.sunLow, built.fires.length > 0);
     rebuildColliders(built.group, era);
+    govHold(3);                          // the switch itself is not a slow GPU
     // HUD
     document.querySelectorAll('.era-btn').forEach((b, i) => {
       b.classList.toggle('active', i === era);
       b.setAttribute('aria-pressed', String(i === era));
     });
     renderEraText(era);
+  }
+
+  // ------- preparing the other eras in the background -------
+  // Each era's objects, terrain colours and tree placements are prepared in
+  // small slices, so a later switch only swaps what is already built. The
+  // order matches activateEra (buildEra registers the footprints the tree
+  // placement reads). buildEra cannot be sliced: it runs while the welcome
+  // card is up, or when the visitor has been still for a moment; otherwise
+  // a switch to that era builds it under the fade, as before.
+  let introOpen = true;
+  let prepGen = null, lastInput = performance.now();
+  for (const ev of ['keydown', 'pointerdown', 'wheel', 'touchstart']) {
+    addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true, capture: true });
+  }
+  const WAIT = Symbol('wait');
+  const PREP_ORDER = [3, 4, 5, 1, 0];          // neighbours of the opening era first
+  function* prepAll() {
+    const t0 = performance.now();
+    for (const era of PREP_ORDER) {
+      while (!eraCache.has(era) && !(introOpen || (!camTween && !switching && performance.now() - lastInput > 2500))) yield WAIT;
+      if (!eraCache.has(era)) {
+        const built = buildEra(era, { water });
+        eraCache.set(era, built);
+        govHold(2);
+        yield;
+        // new materials compile on the GPU driver's threads, not at switch time
+        renderer.compileAsync(built.group, camera, scene).catch(() => {});
+        yield;
+      }
+      yield* preparePaint(era);
+      yield* veg.prepare(era);
+    }
+    window.__prepDone = true;
+    console.log(`[boot] all eras prepared in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+  }
+  function prepTick(budgetMs) {
+    if (!prepGen || budgetMs <= 0) return;
+    const end = performance.now() + budgetMs;
+    do {
+      const r = prepGen.next();
+      if (r.done) { prepGen = null; return; }
+      if (r.value === WAIT) return;
+    } while (performance.now() < end);
   }
 
   // ------- the story panel -------
@@ -445,39 +538,50 @@ async function boot() {
   });
 
   // era switch with fade + year spin
+  // Era switch as one title card on the parchment: it rises showing the year
+  // being left, holds it while the new era is switched on underneath, counts
+  // to the new year as the era's name changes, then lifts as a whole, so no
+  // numerals are left rolling over the landscape.
   let switching = false;
+  const fmtYear = (y) => (lang === 'lv'
+    ? (y < 0 ? `${(-y).toLocaleString('lv')} p. m. ē.` : `${Math.max(1, y)}. g.`)
+    : (y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${Math.max(1, y)}`));
   function switchEra(era) {
     if (era === currentEra || switching) return;
     switching = true;
-    const fade = $('fade');
-    const yearEl = $('year-spin');
-    fade.classList.add('on');
+    const fade = $('fade'), yearEl = $('year-spin'), labelEl = $('era-label');
     const fromYear = currentEra >= 0 ? ERAS[currentEra].year : ERAS[era].year;
     const toYear = ERAS[era].year;
-    const labelEl = $('era-label');
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    yearEl.textContent = fmtYear(fromYear);
+    labelEl.textContent = currentEra >= 0 ? eraText(currentEra, lang).name : '';
+    fade.classList.add('on');
+    yearEl.style.opacity = 1;
+    labelEl.style.opacity = 1;
     setTimeout(() => {
       activateEra(era);
+      // one full frame while the parchment is still opaque: the grass rings
+      // regrow for the new era and the water mirror meets the new objects
+      // here, unseen, instead of as a stall on the first visible frame
+      try { frame(); } catch (err) { console.error('[frame]', err); }
       if (!matchMedia('(max-width: 760px)').matches) showPanel(true);
-      const t0 = performance.now();
-      yearEl.style.opacity = 1;
       labelEl.textContent = eraText(era, lang).name;
-      labelEl.style.opacity = 1;
+      const t0 = performance.now(), DUR = still ? 0 : 950;
+      const lift = () => {
+        fade.classList.remove('on');
+        yearEl.style.opacity = 0;
+        labelEl.style.opacity = 0;
+        setTimeout(() => { switching = false; }, 450);
+      };
       const spin = () => {
-        const u = Math.min(1, (performance.now() - t0) / 1100);
+        const u = DUR ? Math.min(1, (performance.now() - t0) / DUR) : 1;
         const e = u < 0.5 ? 2 * u * u : -1 + (4 - 2 * u) * u;
-        const y = Math.round(fromYear + (toYear - fromYear) * e);
-        yearEl.textContent = lang === 'lv'
-          ? (y < 0 ? `${(-y).toLocaleString('lv')} p. m. ē.` : `${Math.max(1, y)}. g.`)
-          : (y < 0 ? `${(-y).toLocaleString('en')} BC` : `AD ${Math.max(1, y)}`);
+        yearEl.textContent = fmtYear(Math.round(fromYear + (toYear - fromYear) * e));
         if (u < 1) requestAnimationFrame(spin);
-        else setTimeout(() => { yearEl.style.opacity = 0; labelEl.style.opacity = 0; }, 600);
+        else setTimeout(lift, 260);           // let the landed year be read
       };
       spin();
-      // hold the parchment a beat — the gold sweep and the emblem deserve
-      // to be SEEN, and the new era loading its meshes hides behind it
-      setTimeout(() => fade.classList.remove('on'), 480);
-      setTimeout(() => { switching = false; }, 1150);
-    }, 620);
+    }, 500);
   }
 
   // ------- camera presets -------
@@ -611,10 +715,11 @@ async function boot() {
       if (L[key]) el.textContent = L[key];
     });
     renderSound();
-    $('lang-btn').textContent = l === 'lv' ? 'EN' : 'LV';
+    $('lang-btn').innerHTML = ICONS.lang + `<span class="lab">${L.langName}</span>`;
     $('lang-btn').title = L.lang;
     $('menu-btn').setAttribute('aria-label', L.menu);
     $('dial-btn').title = L.timeOfDay;
+    $('about-btn-m').title = L.chronicle;
     renderKeys();
     renderMode();
     renderEraText(currentEra);
@@ -648,14 +753,17 @@ async function boot() {
   });
   addEventListener('click', (e) => { if (!timePop.hidden && !e.target.closest('#dial')) timePop.hidden = true; });
   addEventListener('keydown', (e) => { if (e.code === 'Escape') { timePop.hidden = true; $('ctl-bar').classList.remove('open'); } });
-  const closeAbout = () => { $('about').classList.remove('open'); $('about-btn').focus(); };
+  const closeAbout = () => { $('about').classList.remove('open'); $('about-btn-m').focus(); };
   $('about-btn').addEventListener('click', () => {
     rig.keys.clear(); rig.vel.set(0, 0, 0); rig.sprint = false;
     if (document.pointerLockElement) document.exitPointerLock();
     $('about').classList.add('open'); $('about-close').focus();
   });
   $('about-close').addEventListener('click', closeAbout);
-  $('about-btn-m').addEventListener('click', () => { $('ctl-bar').classList.remove('open'); $('about-btn').click(); });
+  const closeMenu = () => { $('ctl-bar').classList.remove('open'); $('menu-btn').setAttribute('aria-expanded', 'false'); };
+  $('about-btn-m').addEventListener('click', () => { closeMenu(); $('about-btn').click(); });
+  $('sources-btn').addEventListener('click', () => $('about-btn').click());
+  addEventListener('click', (e) => { if (!e.target.closest('#menu')) closeMenu(); });
   addEventListener('keydown', (e) => {
     if (e.code === 'Escape' && $('about').classList.contains('open')) closeAbout();
   });
@@ -682,29 +790,37 @@ async function boot() {
   // animal system's buzzards with their wing-flap rig own the sky now)
 
   // ------- start -------
-  await progress('Herding the aurochs…');
+  await progress('era');
   setLang(lang);
-  activateEra(2);                       // begin in the Latgalian age
+  // begin in the Latgalian age: build it in slices first, so switching it on
+  // is quick and the card keeps answering clicks
+  eraCache.set(2, buildEra(2, { water }));
+  await yieldToBrowser();
+  await runSliced(preparePaint(2));
+  await runSliced(veg.prepare(2));
+  activateEra(2);
   if (matchMedia('(max-width: 760px)').matches) $('panel').classList.add('closed');
-  console.log(`[boot] total ${((performance.now() - bootT0) / 1000).toFixed(2)}s`);
-  let introOpen = true;
   const enterWorld = () => {
     if (!introOpen) return;
     introOpen = false;
+    document.body.classList.remove('intro');
+    renderKeys();                        // the key hints start their timer now
     $('loader').classList.add('done');
     setTimeout(() => $('loader')?.remove(), 900);
     canvas.focus?.();
   };
-  if (navigator.webdriver) enterWorld();
-  else {
+  const showEnter = () => {
+    stageKey = null;
     $('loader-status').textContent = '';
-    document.querySelector('#loader .band').style.display = 'none';
+    lightDiamonds(5);
+    $('loader').classList.add('ready');   // the landscape shows through the card
     const btn = $('intro-enter');
     btn.hidden = false;
     btn.addEventListener('click', enterWorld);
     btn.focus({ preventScroll: true });
     addEventListener('keydown', (e) => { if (introOpen && (e.code === 'Enter' || e.code === 'Escape')) enterWorld(); });
-  }
+  };
+  if (navigator.webdriver) enterWorld();
 
   const clock = new THREE.Clock();
   const wind = new THREE.Vector2(0.6, 0.25);
@@ -714,16 +830,17 @@ async function boot() {
   // never the trees. Kicks in early (below ~34fps) so it never feels laggy
   // for long.
   const HEADROOM_SHADOW_MAP = renderer.capabilities.maxTextureSize >= 5120 ? 5120 : 4096;
-  const gov = {
+  Object.assign(gov, {
     acc: 0, frames: 0, level: 1, shadowEvery: 2, shadowTick: 0,
     fps: 0, highSamples: 0, upgradeCooldown: 0,
-  };
+  });
   const GOV_STEPS = [
     // A high-FPS-only rung: 5120 is 1.56x the texel memory of the 4096
     // default, and is never selected when the GPU's texture limit is lower.
     // refl: the water mirror's resolution as a fraction of the frame
-    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP, refl: 0.5 },
-    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096, refl: 0.5 },
+    { pr: Math.min(devicePixelRatio, 2), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP, refl: 0.5 },
+    { pr: Math.min(devicePixelRatio, 2), grass: 1, shadowEvery: 2, shadowMap: 4096, refl: 0.5 },
+    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096, refl: 0.45 },
     { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 3, shadowMap: 4096, refl: 0.4 },
     { pr: Math.min(devicePixelRatio, 1.25), grass: 0.65, shadowEvery: 4, shadowMap: 2048, refl: 0.33 },
     { pr: Math.min(devicePixelRatio, 1), grass: 0.45, shadowEvery: 5, shadowMap: 2048, refl: 0.25 },
@@ -743,6 +860,7 @@ async function boot() {
     }
   }
   function govern(dt) {
+    if (performance.now() < gov.holdUntil) { gov.acc = 0; gov.frames = 0; return; }
     gov.acc += dt; gov.frames++;
     if (gov.acc < 3) return;
     const fps = gov.frames / gov.acc;
@@ -767,6 +885,9 @@ async function boot() {
       gov.highSamples = 0;
     }
   }
+  // phones and tablets start a rung lower (their screens run at 3x and the
+  // GPUs are smaller) and climb back up if the frame rate allows
+  if (TOUCH) { gov.level = 3; applyGov(GOV_STEPS[3]); }
   window.__gov = gov;
   window.__renderer = renderer;
   window.__shadow = sky.shadowInfo;
@@ -778,6 +899,69 @@ async function boot() {
   // keep the picture moving.
   const frameErrors = [];
   window.__frameErrors = frameErrors;
+  // Warm-up behind the card, before the first real frame: compile every
+  // shader in parallel (where the browser supports it), then draw the scene
+  // one part at a time into a tiny offscreen target, so geometry uploads
+  // and material setup happen in short slices instead of one long first
+  // frame that would freeze the card. Lights stay on throughout, so the
+  // shader variants are the ones the real frames use.
+  if (introOpen) {
+    await progress('warm');
+    // from where the opening orbit starts, so the passes below see what the
+    // first frames will see
+    camera.position.set(S.x + Math.cos(cinema.angle) * cinema.r, steadY + cinema.h, S.z + Math.sin(cinema.angle) * cinema.r);
+    camera.lookAt(S.x, steadY + 4, S.z);
+    camera.updateMatrixWorld();
+    try { await renderer.compileAsync(scene, camera); } catch { /* compiled on first use instead */ }
+    const rt = new THREE.WebGLRenderTarget(4, 4);
+    const units = [];
+    for (const c of scene.children) {
+      if (c.isLight || !c.visible) continue;
+      if (c.children.length > 12 && !c.isMesh) units.push(...c.children.filter((k) => k.visible));
+      else units.push(c);
+    }
+    const culled = [];
+    scene.traverse((o) => { if (o.frustumCulled) { culled.push(o); o.frustumCulled = false; } });
+    const was = units.map((u) => u.visible);
+    const shadowUpdate = renderer.shadowMap.needsUpdate;
+    try {
+      for (let i = 0; i < units.length; i++) {
+        units.forEach((u, j) => { u.visible = j === i && was[j]; });
+        renderer.shadowMap.needsUpdate = true;   // this part's shadow shaders too
+        renderer.setRenderTarget(rt);
+        renderer.render(scene, camera);
+        await yieldToBrowser();
+      }
+    } finally {
+      units.forEach((u, j) => { u.visible = was[j]; });
+      for (const o of culled) o.frustumCulled = true;
+      renderer.setRenderTarget(null);
+      renderer.shadowMap.needsUpdate = shadowUpdate;
+      rt.dispose();
+    }
+    // the passes a real frame adds, one per slice: the sun's shadow map, the
+    // sky cube for the water, the water mirror, and the post chain
+    const rt2 = new THREE.WebGLRenderTarget(4, 4);
+    try {
+      renderer.shadowMap.needsUpdate = true;
+      renderer.setRenderTarget(rt2);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(null);
+      await yieldToBrowser();
+      const shadowEnabled = renderer.shadowMap.enabled;
+      renderer.shadowMap.enabled = false;
+      try { cubeCam.update(renderer, scene); } finally { renderer.shadowMap.enabled = shadowEnabled; }
+      await yieldToBrowser();
+      water.updateReflection(renderer, scene, camera, reflHide, 1);
+      await yieldToBrowser();
+      composer.render();
+      await yieldToBrowser();
+    } finally {
+      renderer.setRenderTarget(null);
+      rt2.dispose();
+    }
+  }
+
   renderer.setAnimationLoop(() => {
     try {
       frame();
@@ -787,6 +971,34 @@ async function boot() {
       try { composer.render(); } catch { /* the renderer itself is gone */ }
     }
   });
+
+  // Warm-up behind the card: compile every shader in parallel (where the
+  // browser supports it) and let the first frames upload the geometry, so
+  // the first second in the world does not stall.
+  if (introOpen) await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  console.log(`[boot] total ${((performance.now() - bootT0) / 1000).toFixed(2)}s`);
+  if (introOpen) showEnter();
+  prepGen = prepAll();
+
+  // Lamplight in house windows: comes up around sunset, burns through the
+  // night and into dawn. Strength and colour follow the century: tallow and
+  // candles in 1860, kerosene lamps in 1935 (rural Vidzeme was not yet
+  // electrified), electric light in 2025. AD 950 houses had no windows;
+  // their light is the hearth fires.
+  const LAMPS = {
+    3: { k: 0.5, color: new THREE.Color(0xff8f34) },
+    4: { k: 0.72, color: new THREE.Color(0xffa043) },
+    5: { k: 1.15, color: new THREE.Color(0xffd6a4) },
+  };
+  function lampLight() {
+    const lamp = LAMPS[currentEra];
+    const st = sky.state;
+    const night = lamp ? Math.max(smoothstep(0.6, 1.0, st.sunLow) * 0.55, smoothstep(0.08, 0.5, st.dark || 0)) : 0;
+    const k = lamp ? lamp.k * night : 0;
+    MAT.glassLit.emissiveIntensity = k;
+    WINDOW_GLOW.k.value = k;
+    if (lamp) { MAT.glassLit.emissive.copy(lamp.color); WINDOW_GLOW.color.value.copy(lamp.color); }
+  }
 
   function frame() {
     renderer.info.reset();
@@ -849,6 +1061,7 @@ async function boot() {
       renderer.shadowMap.needsUpdate = true;
     }
     sky.update(dt, focus, shadowNow, agl);
+    lampLight();
     veg.tick(sky.state.sunColor, sky.state.ambient);
     veg.promoteTransitions(dt);
     veg.promote(camera.position.x, camera.position.z);
@@ -882,6 +1095,9 @@ async function boot() {
     // the water's planar mirror (grass is sub-pixel in a half-res reflection)
     water.updateReflection(renderer, scene, camera, reflHide, dt);
     composer.render();
+    // background era preparation: generous behind the welcome card, a few
+    // ms per frame in the world, nothing while the frame rate is struggling
+    prepTick(introOpen ? 28 : switching ? 0 : gov.fps && gov.fps < 40 ? 2 : 5);
   }
 }
 

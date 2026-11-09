@@ -117,26 +117,44 @@ export function eraText(era, lang) {
 // The welcome card: context to read while the landscape builds.
 export const INTRO = {
   "lv": {
-    "kicker": "Taurenes pagasts · Vidzeme · Latvija",
+    "kicker": "Taurenes pagasts, Cēsu novads, Latvija",
     "paras": [
-      "Šis ir viens Latvijas lauku kvadrāts, 8,8 kilometrus plats, ap Taurenes ciemu Vidzemē. To var apmeklēt sešos brīžos divpadsmit tūkstošu gadu garumā. Zeme zem kājām ir īstais reljefa modelis, un Gauja ar strautiem un ezeriem nāk no kartēm, tāpat kā šodienas ceļi un mājas.",
-      "Sēta centrā nes Brezgu stāstu cauri laikmetiem. Tā atrodas pie Taurenes ciema. Īstās Brezgu mājas un Brežģa kalns, kura vārdu uzvārds atbalso, ir pa ceļu uz dienvidiem, un turp var aizlidot minūtes laikā.",
-      "Katrs laikmets ir rekonstrukcija. Daļa ir dokumentēta, piemēram, muiža, Taurenes vārds, 1930. gadu dzirnavu dīķis un tornis uz kalna. Citas daļas nāk no arheoloģijas citviet Latvijā, un dažas ir iztēle. Katra laikmeta stāsts pasaka, kas ir kas, un Hronikā ir visi avoti."
+      "Attēlota 8,8 km plata teritorija ap Taurenes ciemu sešos laikmetos, no aptuveni 10 800. gada p. m. ē. līdz mūsdienām. Reljefa pamatā ir digitālais augstuma modelis, upju un ezeru pamatā ir kartogrāfiskie dati.",
+      "Katrs laikmets ir rekonstrukcija. Laikmetu aprakstos ir nošķirti dokumentētie, secinātie un iztēlotie elementi, un visi avoti ir uzskaitīti Hronikā."
     ],
-    "how": "Pārvietojies ar WASD vai bultiņām, bet telefonā velc un spied pogas. Laikmetus maini ar taustiņiem 1 līdz 6 vai laika joslā, un karti atver ar M.",
+    "how": "WASD vai bultiņas kustībai, 1 līdz 6 laikmetiem, M kartei.",
+    "howTouch": "Velc, lai skatītos apkārt, spied bultiņas, lai kustētos, un laikmetu maini laika joslā.",
     "enter": "Ienākt ainavā",
-    "loading": "Ainava top…"
+    "loading": "Ainava top…",
+    "stages": {
+      "terrain": "Veido pakalnus…",
+      "water": "Piepilda Gauju un ezerus…",
+      "sky": "Iekārto debesis…",
+      "forest": "Stāda mežus…",
+      "grass": "Sēj zāli…",
+      "era": "Ceļ latgaļu sētu…",
+      "warm": "Gatavo skatu…"
+    }
   },
   "en": {
-    "kicker": "Taurene parish · Vidzeme · Latvia",
+    "kicker": "Taurene parish, Cēsis Municipality, Latvia",
     "paras": [
-      "This is one square of Latvian countryside, 8.8 kilometres across, around the village of Taurene in Vidzeme. You can visit it at six moments across twelve thousand years. The ground under your feet is the real elevation model, and the Gauja with its brooks and lakes comes from maps, along with today's roads and houses.",
-      "A farm at the centre carries the Brezgi story through the eras. It stands near Taurene village. The real Brezgi homestead and Brežģa kalns, the hill the name echoes, lie up the road to the south, and you can fly there in a minute.",
-      "Each era is a reconstruction. Some of it is documented, such as the manor, the name Taurene, the mill pond of the 1930s and the tower on the hill. Other parts come from archaeology elsewhere in Latvia, and some are imagined. Each era's story tells you which is which, and the Chronicle lists every source."
+      "The area shown is an 8.8 km square around Taurene, in six eras from about 10,800 BC to the present. The terrain is based on a digital elevation model, and the rivers and lakes on mapped hydrography.",
+      "Each era is a reconstruction. Documented, inferred and imagined elements are distinguished in each era's text, and all sources are listed in the Chronicle."
     ],
-    "how": "Move with WASD or the arrow keys, or drag and use the buttons on a phone. Change eras with keys 1 to 6 or the timeline, and press M for the map.",
+    "how": "WASD or arrow keys to move, 1 to 6 for eras, M for the map.",
+    "howTouch": "Drag to look around, tap the arrows to move, and change eras on the timeline.",
     "enter": "Step in",
-    "loading": "Building the landscape…"
+    "loading": "Building the landscape…",
+    "stages": {
+      "terrain": "Building the hills…",
+      "water": "Filling the Gauja and the lakes…",
+      "sky": "Setting up the sky…",
+      "forest": "Planting the forests…",
+      "grass": "Sowing the grass…",
+      "era": "Building the Latgalian farmstead…",
+      "warm": "Preparing the view…"
+    }
   }
 };
 

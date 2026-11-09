@@ -7,6 +7,10 @@ let random = mulberry32(808);
 
 export const TEX = {};
 export const MAT = {};
+// Lamplight in house windows after dark. main.js drives the strength and
+// colour per frame from the sky and the era (candle, kerosene, electric);
+// the background farms' instanced windows read the same two uniforms.
+export const WINDOW_GLOW = { k: { value: 0 }, color: { value: new THREE.Color(0xffa040) } };
 
 function grainStreaks(ctx, w, h, base, streak, count, horizontal = true) {
   ctx.fillStyle = base;
@@ -237,6 +241,11 @@ export function initTextures() {
   MAT.white = new THREE.MeshLambertMaterial({ color: 0xf2ede0 });
   MAT.door = new THREE.MeshLambertMaterial({ color: 0x352718 });
   MAT.glass = new THREE.MeshPhongMaterial({ color: 0x35484c, shininess: 80, specular: 0x9faeaf });
+  // the same glass with a lamp behind it (house windows only; emissive is a
+  // uniform, so night falling never recompiles anything)
+  MAT.glassLit = MAT.glass.clone();
+  MAT.glassLit.emissive = new THREE.Color(0xffa040);
+  MAT.glassLit.emissiveIntensity = 0;
   TEX.hay = canvasTexture(256,256,(ctx,w,h)=>{
     ctx.fillStyle='#a09161';ctx.fillRect(0,0,w,h);
     for(let i=0;i<3200;i++){

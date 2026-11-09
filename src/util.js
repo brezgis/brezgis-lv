@@ -40,6 +40,11 @@ export function makeNoise(seed = 1) {
   return { noise2, fbm, rng };
 }
 
+// the GPU's anisotropic filtering limit, set once the renderer exists:
+// surfaces seen at grazing angles stay sharp instead of smearing
+export let MAX_ANISO = 4;
+export function setMaxAnisotropy(n) { MAX_ANISO = Math.max(1, Math.min(16, n || 1)); }
+
 export function canvasTexture(w, h, draw, opts = {}) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -48,7 +53,7 @@ export function canvasTexture(w, h, draw, opts = {}) {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   if (opts.repeat) tex.repeat.set(opts.repeat[0], opts.repeat[1]);
-  tex.anisotropy = 4;
+  tex.anisotropy = MAX_ANISO;
   return tex;
 }
 

@@ -175,7 +175,7 @@ function grassMaterial() {
         #ifdef USE_INSTANCING
         {
           vec2 wp = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
-          float hash = fract(sin(dot(wp, vec2(12.9898, 78.233))) * 43758.5453);
+          vec3 hp3 = fract(vec3(wp.xyx) * 0.1031); hp3 += dot(hp3, hp3.yzx + 33.33); float hash = fract((hp3.x + hp3.y) * hp3.z);
           float tN = clamp(position.y, 0.0, 1.5);
           // gentle meadow breeze: shallow gust contrast, slow tempo, and the
           // tip ARCS DOWN as it deflects (constant blade length) — the old

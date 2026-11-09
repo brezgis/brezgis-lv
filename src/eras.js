@@ -14,7 +14,7 @@ import {
   krogs, observationTower, modernHouse, car, motorcar1930s, erratics, deadIce, placeOnGround,
   barrowMounds,
 } from './buildings.js';
-import { MAT } from './textures.js';
+import { MAT, WINDOW_GLOW } from './textures.js';
 import { roadMaterial, buildingMaterial, fieldMaterial } from './surfaces.js';
 import { buildRoadside } from './roadside.js';
 import { heightAt, meshHeightAt } from './terrain.js';
@@ -1264,6 +1264,22 @@ function bgSettlement(group, era, smokes, stageItems = []) {
   };
   facadeMesh(door, new THREE.MeshLambertMaterial({ color: 0x201712 }), facades.door, 'door');
   const windowMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  // lamplight after dark: about two windows in three (picked per instance),
+  // and only the glass (the dark vertex colour), never the white frames
+  windowMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uGlow = WINDOW_GLOW.k;
+    sh.uniforms.uGlowCol = WINDOW_GLOW.color;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vLit;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        { vec3 p3 = fract(vec3(float(gl_InstanceID)) * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33);
+          vLit = step(fract((p3.x + p3.y) * p3.z), 0.66); }`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vLit;\nuniform float uGlow;\nuniform vec3 uGlowCol;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        totalEmissiveRadiance += uGlowCol * uGlow * vLit * step(dot(vColor.rgb, vec3(0.333)), 0.2);`);
+  };
+  windowMat.customProgramCacheKey = () => 'bg-window-lamplight-v1';
   facadeMesh(window4, windowMat, facades.window4, 'window-4');
   facadeMesh(window6, windowMat, facades.window6, 'window-6');
   facadeMesh(chimney, new THREE.MeshLambertMaterial({ color: 0x6f4030 }), facades.chimney, 'chimney');

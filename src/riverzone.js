@@ -539,9 +539,23 @@ function bucketsFor(chans) {
 }
 const rivBK = bucketsFor([RIVER]);
 const strmBK = bucketsFor(STREAM_CHANNELS);
+// keys of every bucket with a segment within the 7x7 search window: a point
+// far from all water answers with ONE lookup instead of 49
+function reachSet(m) {
+  const r = new Set();
+  for (const k of m.keys()) {
+    const bx = Math.round(k / 8192), bz = k - bx * 8192;
+    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) r.add((bx + dx) * 8192 + (bz + dz));
+  }
+  return r;
+}
+const REACH = new Map();
 function nearest(m, x, z, channel = null, not = null) {
   const bx = Math.floor(x / BK), bz = Math.floor(z / BK);
-  let best = null, bd = QUERY_R * QUERY_R;
+  let reach = REACH.get(m);
+  if (!reach) REACH.set(m, reach = reachSet(m));
+  if (!reach.has(bx * 8192 + bz)) return null;
+  let bseg = null, bu = 0, bd = QUERY_R * QUERY_R;
   for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
     const arr = m.get((bx + dx) * 8192 + (bz + dz));
     if (!arr) continue;
@@ -553,18 +567,18 @@ function nearest(m, x, z, channel = null, not = null) {
       const u = clamp(((x - a[0]) * sx + (z - a[1]) * sz) / (sl2 || 1), 0, 1);
       const qx = a[0] + sx * u, qz = a[1] + sz * u;
       const d2 = (qx - x) ** 2 + (qz - z) ** 2;
-      if (d2 < bd) {
-        const sl = Math.sqrt(sl2) || 1;
-        const s = lerp(seg.chan.sampleS[seg.i], seg.chan.sampleS[seg.i + 1], u);
-        const p = profileAtS(seg.chan, s);
-        const left = (x - qx) * (-sz / sl) + (z - qz) * (sx / sl);
-        bd = d2;
-        best = { d: Math.sqrt(d2), level: p.level, hw: p.hw, curvature: p.curvature,
-          x: qx, z: qz, dx: sx / sl, dz: sz / sl, side: Math.sign(left) || 1, s, chan: seg.chan };
-      }
+      if (d2 < bd) { bd = d2; bseg = seg; bu = u; }
     }
   }
-  return best;
+  if (!bseg) return null;
+  const a = bseg.chan.samples[bseg.i], b = bseg.chan.samples[bseg.i + 1];
+  const sx = b[0] - a[0], sz = b[1] - a[1], sl = Math.sqrt(sx * sx + sz * sz) || 1;
+  const qx = a[0] + sx * bu, qz = a[1] + sz * bu;
+  const s = lerp(bseg.chan.sampleS[bseg.i], bseg.chan.sampleS[bseg.i + 1], bu);
+  const p = profileAtS(bseg.chan, s);
+  const left = (x - qx) * (-sz / sl) + (z - qz) * (sx / sl);
+  return { d: Math.sqrt(bd), level: p.level, hw: p.hw, curvature: p.curvature,
+    x: qx, z: qz, dx: sx / sl, dz: sz / sl, side: Math.sign(left) || 1, s, chan: bseg.chan };
 }
 // nearest river/stream sample within ~40m: {d, level, hw} — d is to the
 // CENTERLINE; d - hw is the signed distance to the rugged water's edge.
@@ -696,7 +710,8 @@ export function bankCharFromQuery(q, x, z, sideSign = q ? q.side : 1) {
 }
 export function bankCharSideAt(x, z, side = 1, chan = null) {
   const sideSign = side === 'right' || side === -1 ? -1 : 1;
-  let q = chan ? projectChannel(chan, x, z) : riverAt(x, z);
+  // the bucketed query is exact within QUERY_R; only farther points need the full scan
+  let q = chan ? (channelAt(chan, x, z) ?? projectChannel(chan, x, z)) : riverAt(x, z);
   if (!q) q = streamAt(x, z);
   return bankCharFromQuery(q, x, z, sideSign);
 }

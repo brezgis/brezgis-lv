@@ -41,8 +41,12 @@ Open `artifact/brezgi-taurene.html` straight from disk (everything is inlined
 into that one file), or run `node serve.mjs` and visit
 `http://localhost:4119`.
 
-A welcome card gives the context while the landscape builds; **Step in** (or
-Enter) opens the world. The whole interface, including every era story, is in
+A short welcome card gives the context while the landscape builds (about 6 s
+on a fast desktop); when it is ready the landscape shows through the card and
+**Step in** (or Enter) opens the world. The other five eras are prepared in
+the background, so switching eras later is quick. Language, sound and the
+**Chronicle & sources** sit in the menu at the top right; the Chronicle is
+also linked from each era's "Read more". The whole interface, including every era story, is in
 Latvian and English (the long Chronicle is English). Each era's story opens
 with a short lead ("Read more" for the rest). Superscript numbers show their
 source on hover, and **Look here** buttons glide to the era's best sights.
@@ -118,7 +122,7 @@ on `window.__sim`.)
 ## Research
 
 Cited research notes live in `research/`; the interpretive write-up with
-sources is `WRITEUP.md` and is embedded in the app under **Chronicle & sources**.
+sources is `WRITEUP.md` and is embedded in the app under **Chronicle & sources** (top-right menu).
 
 ## License
 

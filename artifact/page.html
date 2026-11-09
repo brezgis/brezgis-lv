@@ -20,15 +20,29 @@
     --sans: -apple-system, 'Segoe UI', system-ui, Roboto, sans-serif;
   }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #12100c; }
+  /* clicking and dragging the landscape must not paint a text selection
+     across the HUD; text worth copying opts back in */
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #panel p, #era-title, #about .inner, #intro-text, #map-sub { -webkit-user-select: text; user-select: text; }
+  #scene { outline: none; }
   #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 
   /* ---------- loader ---------- */
   #loader {
     position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 18px;
-    background: radial-gradient(ellipse at 50% 60%, #1c2416 0%, #12100c 70%);
+    /* once the world is ready the opaque layer below fades and this veil
+       stays, so the landscape shows through behind the text */
+    background: radial-gradient(ellipse at 50% 50%, rgba(14, 12, 9, 0.78) 0%, rgba(14, 12, 9, 0.62) 55%, rgba(14, 12, 9, 0.4) 100%);
     color: var(--ink); transition: opacity 0.8s ease; font-family: var(--serif);
   }
+  #loader::before {
+    content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 60%, #1c2416 0%, #12100c 70%);
+    transition: opacity 1.6s ease;
+  }
+  #loader.ready::before { opacity: 0; }
+  #loader.ready #intro-text p, #loader.ready .t, #loader.ready .s, #loader.ready #intro-how { text-shadow: 0 1px 12px rgba(0, 0, 0, 0.85); }
   #loader.done { opacity: 0; pointer-events: none; }
   #loader { overflow-y: auto; padding: 32px 20px; box-sizing: border-box; justify-content: safe center; }
   #loader .coa-big { flex: none; width: 64px; height: 76px; background: var(--coa) center / contain no-repeat; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6)); }
@@ -38,7 +52,31 @@
   #intro-text p { font-size: 20px; line-height: 1.65; color: #d9d2bf; margin: 0 0 14px; text-wrap: pretty; }
   #intro-text p:first-child::first-letter { font-size: 1.5em; color: var(--bronze-bright); }
   #intro-how { max-width: 62ch; font: 15px/1.6 var(--sans); color: var(--sage); text-align: center; letter-spacing: 0.02em; }
-  #intro-foot { display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 64px; margin-top: 6px; }
+  /* pinned to the bottom of the card, so on a phone the way in and the
+     loading status are always on screen, never below the fold */
+  #intro-foot {
+    position: sticky; bottom: -32px; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; min-height: 76px; width: 100%; margin-top: 6px;
+    padding: 14px 0 calc(34px + env(safe-area-inset-bottom));
+  }
+  /* on short screens the text can scroll under the pinned footer: give it a
+     soft full-width backdrop there (on a desktop it would read as a box) */
+  @media (max-width: 760px), (max-height: 720px) {
+    #intro-foot { margin: 6px -20px 0; width: calc(100% + 40px); background: linear-gradient(rgba(14, 12, 9, 0), rgba(14, 12, 9, 0.72) 35%); }
+  }
+  /* the HUD waits until you step in: behind the see-through card it only
+     reads as clutter */
+  body.intro :is(#masthead, #controls, #timeline, #panel, #panel-toggle, #mini, #keys, #touch-controls) { visibility: hidden; }
+  /* five diamonds: grey, then gold as each stage of the build finishes; the
+     current one pulses. The gold is a layer whose opacity animates, which
+     the compositor keeps running even while the page is busy. */
+  #loader-band { display: flex; gap: 9px; transition: opacity 0.5s ease 0.4s; }
+  #loader-band i { position: relative; width: 8px; height: 8px; transform: rotate(45deg); background: rgba(232, 226, 210, 0.22); }
+  #loader-band i::after { content: ''; position: absolute; inset: 0; background: var(--bronze-bright); opacity: 0; transition: opacity 0.35s ease; }
+  #loader-band i.lit::after { opacity: 1; }
+  #loader-band i.now::after { animation: dpulse 1.3s ease-in-out infinite; }
+  @keyframes dpulse { 0%, 100% { opacity: 0.12; } 50% { opacity: 0.85; } }
+  #loader.ready #loader-band { opacity: 0; height: 0; }
   #loader-status { font-family: var(--sans); font-size: 15px; color: var(--ink-dim); font-style: italic; }
   #intro-enter {
     font: 19px/1 var(--serif); letter-spacing: 0.12em; color: #1a150c; cursor: pointer;
@@ -49,13 +87,6 @@
   #intro-enter:focus-visible { outline: 2px solid #f0cf86; outline-offset: 3px; }
   #intro-lang { position: absolute; top: 18px; right: 22px; }
   @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  #loader .band { display: flex; gap: 7px; }
-  #loader .band i { width: 8px; height: 8px; background: var(--bronze); transform: rotate(45deg); opacity: 0.35; animation: bpulse 1.6s infinite; }
-  #loader .band i:nth-child(2) { animation-delay: 0.2s; }
-  #loader .band i:nth-child(3) { animation-delay: 0.4s; }
-  #loader .band i:nth-child(4) { animation-delay: 0.6s; }
-  #loader .band i:nth-child(5) { animation-delay: 0.8s; }
-  @keyframes bpulse { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
 
   /* ---------- title ---------- */
   #masthead {
@@ -158,8 +189,8 @@
 
   /* ---------- controls ---------- */
   #controls {
-    position: fixed; top: 18px; right: 22px; z-index: 10; display: flex; flex-direction: column;
-    gap: 8px; align-items: flex-end;
+    position: fixed; top: 18px; right: 22px; z-index: 10; display: flex; flex-direction: row;
+    gap: 6px; align-items: flex-start;
   }
   .ctl-row { display: flex; gap: 6px; }
   .ctl {
@@ -170,7 +201,17 @@
   .ctl:hover { color: var(--ink); border-color: var(--ink-dim); }
   .ctl.active { color: var(--bronze-bright); border-color: var(--bronze); }
   .ctl:focus-visible { outline: 1px solid var(--bronze); outline-offset: 2px; }
-  #ctl-bar { display: flex; gap: 6px; align-items: flex-start; }
+  /* walk/fly and the sun dial stay out; language, sound and the Chronicle
+     live in one menu so the corner stays quiet */
+  #menu { position: relative; }
+  #ctl-bar {
+    display: none; position: absolute; right: 0; top: 50px; z-index: 12; flex-direction: column; align-items: stretch; gap: 4px;
+    background: rgba(18, 15, 10, 0.92); border: 1px solid var(--line); padding: 6px; border-radius: 2px; min-width: 190px;
+  }
+  #ctl-bar.open { display: flex; }
+  #ctl-bar .icon-btn { justify-content: flex-start; height: 42px; white-space: nowrap; background: transparent; border-color: transparent; }
+  #ctl-bar .icon-btn:hover { border-color: var(--line); }
+  #ctl-bar .icon-btn .lab { display: inline; letter-spacing: 0.04em; }
   .icon-btn {
     height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
     color: var(--ink); background: rgba(18, 15, 10, 0.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -193,43 +234,49 @@
   .pop .ctl { font-size: 14px; padding: 10px 12px; background: transparent; border-color: transparent; }
   .pop .ctl:hover { border-color: var(--line); }
   .pop .ctl.active { border-color: var(--bronze); }
-  #menu-btn { display: none; }
   .icon-btn .lab { display: none; }
-  #about-btn-m { display: none; }
+  /* the Chronicle lives in the control bar on every screen size */
+  #masthead #about-btn { display: none; }
+  /* the story button only matters while the story is folded away */
+  #panel:not(.closed) ~ #panel-toggle { display: none; }
+  /* keyboard hints mean nothing on a touch screen */
+  @media (hover: none) { #keys { display: none; } }
 
   /* ---------- era fade: a page of time, not a white flash ---------- */
   #fade {
     position: fixed; inset: 0; z-index: 20; opacity: 0; pointer-events: none;
-    transition: opacity 0.62s ease;
+    transition: opacity 0.5s ease;
     background:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.06'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E"),
       radial-gradient(ellipse at 50% 42%, #f2ead6 0%, #e6d8b8 52%, #bda67e 100%);
     box-shadow: inset 0 0 18vmax rgba(58, 44, 20, 0.45);
   }
   #fade.on { opacity: 1; }
+  /* one title card: the crest as a small seal, the year as the hero with the
+     gold line sweeping beneath it, the era's name under the line */
   #fade .emblem {
-    position: absolute; left: 50%; top: 42%; width: 150px; height: 178px;
+    position: absolute; left: 50%; top: calc(46% - 118px); width: 64px; height: 76px;
     transform: translate(-50%, -50%);
     background: var(--coa) center / contain no-repeat;
-    opacity: 0.16; filter: sepia(0.55) contrast(0.85);
+    opacity: 0.38; filter: sepia(0.5) contrast(0.9);
   }
   #fade::after {
-    content: ''; position: absolute; left: 14%; right: 14%; top: 56%; height: 1px;
+    content: ''; position: absolute; left: 22%; right: 22%; top: calc(46% + 58px); height: 1px;
     background: linear-gradient(90deg, transparent, rgba(185, 140, 46, 0.85), transparent);
-    transform: scaleX(0);
   }
-  #fade.on::after { animation: erasweep 1.5s ease 0.25s forwards; }
-  @keyframes erasweep { to { transform: scaleX(1); } }
+  /* sweeps in as the card rises; stays drawn while the card lifts away */
+  #fade.on::after { animation: erasweep 1.3s ease 0.15s both; }
+  @keyframes erasweep { from { transform: scaleX(0); } to { transform: scaleX(1); } }
   #year-spin {
-    position: fixed; left: 50%; top: 44%; transform: translate(-50%, -50%); z-index: 21;
-    font-family: var(--serif); font-size: clamp(44px, 8vw, 92px); color: #2d2716;
-    letter-spacing: 0.06em; opacity: 0; transition: opacity 0.5s; pointer-events: none;
+    position: fixed; left: 50%; top: 46%; transform: translate(-50%, -50%); z-index: 21;
+    font-family: var(--serif); font-size: clamp(44px, 8vw, 92px); color: #2d2716; white-space: nowrap;
+    letter-spacing: 0.06em; opacity: 0; transition: opacity 0.5s ease; pointer-events: none;
     font-variant-numeric: tabular-nums; text-shadow: 0 2px 30px rgba(45, 39, 22, 0.25);
   }
   #era-label {
-    position: fixed; left: 50%; top: 44%; transform: translate(-50%, 74px); z-index: 21;
-    font-family: var(--sans); font-size: 12px; letter-spacing: 0.42em; text-transform: uppercase;
-    color: #5a4a28; opacity: 0; transition: opacity 0.5s; pointer-events: none;
+    position: fixed; left: 50%; top: 46%; transform: translate(-50%, 76px); z-index: 21;
+    font-family: var(--sans); font-size: 13px; letter-spacing: 0.42em; text-transform: uppercase; white-space: nowrap;
+    color: #5a4a28; opacity: 0; transition: opacity 0.5s ease; pointer-events: none;
     padding-left: 0.42em;
   }
 
@@ -262,12 +309,14 @@
 
   /* ---------- keys card (compact, mode-aware controls) ---------- */
   #keys {
-    position: fixed; right: 22px; bottom: 26px; z-index: 9;
+    /* the right-hand column, just above the minimap: clear of the timeline
+       at every desktop width */
+    position: fixed; right: 22px; bottom: 304px; z-index: 9;
     display: flex; flex-wrap: wrap; gap: 5px 10px; justify-content: flex-end;
-    max-width: 270px; font-family: var(--sans); pointer-events: none;
-    transition: opacity 0.4s;
+    max-width: 300px; font-family: var(--sans); pointer-events: none;
+    transition: opacity 1.2s;
   }
-  #keys.dim { opacity: 0.35; }
+  #keys.dim { opacity: 0; }
   #keys .kc { display: flex; align-items: center; gap: 5px; }
   #keys kbd {
     font-family: var(--sans); font-size: 12.5px; letter-spacing: 0.06em;
@@ -309,19 +358,10 @@
     #masthead h1 { font-size: 20px; letter-spacing: 0.12em; }
     #masthead p { display: none; }
     #controls { top: 14px; right: 12px; gap: 6px; }
+    #day-clock { display: none; }
     .ctl { font-size: 12px; letter-spacing: 0.08em; padding: 8px 10px; }
-    #menu-btn { display: inline-flex; }
-    #ctl-bar { display: none; position: absolute; right: 0; top: 42px; flex-direction: column; align-items: stretch;
-      background: rgba(18, 15, 10, 0.92); border: 1px solid var(--line); padding: 6px; border-radius: 2px; }
-    #ctl-bar.open { display: flex; }
-    #ctl-bar .icon-btn { justify-content: flex-start; }
-    #ctl-bar .icon-btn .lab { display: inline; }
-    .pop { position: static; margin-top: 4px; }
-    #masthead #about-btn { display: none; }
-    #about-btn-m { display: inline-flex; }
-    #ctl-bar .icon-btn { height: 40px; white-space: nowrap; }
-    #dial, #dial-btn { width: 100%; }
     #intro-text p { font-size: 17.5px; }
+    #loader .s { letter-spacing: 0.12em; font-size: 12px; }
     #about p, #about li { font-size: 17.5px; }
     #panel { top: auto; left: 12px; right: 12px; bottom: 108px; width: auto; box-sizing: border-box; transform: none; }
     #panel.closed { transform: translateX(-16px); }
@@ -339,7 +379,8 @@
   }
   @media (prefers-reduced-motion: reduce) {
     #fade { transition: none; }
-    #loader .band i { animation: none; }
+    #loader::before { transition: none; }
+    #loader-band i.now::after { animation: none; opacity: 0.5; }
   }
 </style>
 
@@ -357,12 +398,12 @@
   <button class="ctl" id="intro-lang" type="button">EN</button>
   <div class="coa-big" aria-hidden="true"></div>
   <div class="t" id="intro-title">BREZGI</div>
-  <div class="s" id="intro-kicker">Taurenes pagasts · Vidzeme · Latvija</div>
+  <div class="s" id="intro-kicker">Taurenes pagasts, Cēsu novads, Latvija</div>
   <div id="intro-text"></div>
   <div id="intro-how"></div>
   <div id="intro-foot">
-    <div class="band"><i></i><i></i><i></i><i></i><i></i></div>
-    <div id="loader-status">Waking the time machine…</div>
+    <div id="loader-band" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div id="loader-status" role="status">Ainava top…</div>
     <button id="intro-enter" type="button" hidden>Ienākt ainavā</button>
   </div>
 </div>
@@ -371,7 +412,6 @@
   <div class="coa" title="Taurenes pagasta ģerbonis"></div>
   <div class="mh">
     <h1>BREZGI</h1>
-    <p>Taurenes pagasts · 57.159° N 25.665° E</p>
     <button class="ctl" id="about-btn" type="button" data-i18n="chronicle">Hronika un avoti</button>
   </div>
 </header>
@@ -390,7 +430,7 @@
   <button id="panel-close" type="button" aria-label="Aizvērt">×</button>
   <h2 id="era-title"></h2>
   <p id="era-lead"></p>
-  <div id="era-more" hidden><p id="era-body"></p><p id="era-evidence"></p></div>
+  <div id="era-more" hidden><p id="era-body"></p><p id="era-evidence"></p><button class="linkbtn" id="sources-btn" type="button" data-i18n="allSources">Visi avoti Hronikā →</button></div>
   <button class="linkbtn" id="more-btn" type="button">Lasīt vairāk ▾</button>
   <div id="era-moments"><span class="lbl" data-i18n="lookHere">Apskatīt</span><span class="row"></span></div>
 </aside>
@@ -398,13 +438,8 @@
 <div id="cite-tip" role="tooltip"></div>
 
 <div id="controls">
-  <button class="icon-btn" id="menu-btn" type="button" aria-label="Izvēlne" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none"/></svg></button>
-  <div id="ctl-bar">
-    <button class="icon-btn" id="lang-btn" type="button" title="Valoda / language">EN</button>
-    <button class="icon-btn" id="sound-btn" type="button"></button>
-    <button class="icon-btn" id="mode-btn" type="button"></button>
-    <button class="icon-btn" id="about-btn-m" type="button"><svg viewBox="0 0 24 24"><path d="M5 4h9l5 5v11H5z M14 4v5h5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/><path d="M8 13h8M8 16.5h6" stroke="currentColor" stroke-width="1.6"/></svg><span class="lab" data-i18n="chronicle">Hronika un avoti</span></button>
-    <div id="dial">
+  <button class="icon-btn" id="mode-btn" type="button"></button>
+  <div id="dial">
       <button class="icon-btn" id="dial-btn" type="button" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6"><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></g></svg>
         <span id="day-clock">--:--</span>
@@ -415,6 +450,13 @@
         <button class="ctl" data-time="noon" type="button" data-i18n="noon">Diena</button>
         <button class="ctl" data-time="evening" type="button" data-i18n="evening">Vakars</button>
       </div>
+    </div>
+  <div id="menu">
+    <button class="icon-btn" id="menu-btn" type="button" aria-label="Izvēlne" aria-expanded="false" aria-haspopup="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none"/></svg></button>
+    <div id="ctl-bar">
+      <button class="icon-btn" id="lang-btn" type="button" title="Valoda / language">EN</button>
+      <button class="icon-btn" id="sound-btn" type="button"></button>
+      <button class="icon-btn" id="about-btn-m" type="button" title="Hronika un avoti"><svg viewBox="0 0 24 24"><path d="M5 4h9l5 5v11H5z M14 4v5h5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/><path d="M8 13h8M8 16.5h6" stroke="currentColor" stroke-width="1.6"/></svg><span class="lab" data-i18n="chronicle">Hronika un avoti</span></button>
     </div>
   </div>
 </div>

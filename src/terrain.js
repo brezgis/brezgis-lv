@@ -6,7 +6,7 @@ import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightm
 import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
 import { PADS, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, LOC } from './landuse.js';
 import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, bankCharFromQuery, confluenceAt, lakeShoreSignedDistAt, bedDropAt } from './riverzone.js';
-import { makeNoise, clamp, lerp, smoothstep, pointInPoly } from './util.js';
+import { makeNoise, clamp, lerp, smoothstep, pointInPoly, MAX_ANISO } from './util.js';
 import { shoreBodies, shoreHeight, nearestShore, waterSampleOf } from './shore.js';
 import { SAT_JPEG_B64 } from './sat2025.js';
 
@@ -349,7 +349,9 @@ export function shoreLatticeWater(ix, iz) {
 }
 export function releaseShoreLattice() { for (const ch of chunks.values()) { ch.ws = null; ch.tr = null; } }
 let shoreTiles = [];
-function buildShoreMesh() {
+// A generator: it yields between chunks and tiles so the welcome card stays
+// responsive while the shore is built (same work, same order).
+function* buildShoreMesh() {
   const t0 = performance.now();
   // 1 · candidate chunks: every chunk a water body's corridor can touch
   const want = new Set();
@@ -370,6 +372,7 @@ function buildShoreMesh() {
   }
   // 2 · vertices: shore-law height feathered to the coarse surface by keep
   for (const key of want) {
+    yield;
     const cx = Math.floor(key / 8192) - 4096, cz = key % 8192 - 4096;
     const h = new Float32Array(CV * CV), k = new Float32Array(CV * CV), ws = new Array(CV * CV), tr = new Float32Array(CV * CV * TREC), hcs = new Float32Array(CV * CV);
     let any = false;
@@ -397,7 +400,9 @@ function buildShoreMesh() {
     chunks.set(key, { cx, cz, h, k, m, ws, tr, hcs });
   }
   // 3 · coarse-grid discard mask: texels whose centre is fully shore-owned
+  let nY = 0;
   for (const ch of chunks.values()) {
+    if ((++nY & 31) === 0) yield;
     const x0 = ch.cx * CH * SC, z0 = ch.cz * CH * SC, span = CH * SC;
     const tx0 = Math.floor(((x0 - OX) / SPAN + 0.5) * MASK_N), tx1 = Math.ceil(((x0 + span - OX) / SPAN + 0.5) * MASK_N);
     const tz0 = Math.floor(((z0 - OZ) / SPAN + 0.5) * MASK_N), tz1 = Math.ceil(((z0 + span - OZ) / SPAN + 0.5) * MASK_N);
@@ -421,6 +426,7 @@ function buildShoreMesh() {
     return tx < 0 || tz < 0 || tx >= MASK_N || tz >= MASK_N ? 0 : shoreMaskData[tz * MASK_N + tx];
   };
   for (const ch of chunks.values()) {
+    if ((++nY & 31) === 0) yield;
     for (let lz = 0; lz < CV; lz++) for (let lx = 0; lx < CV; lx++) {
       const i = lz * CV + lx;
       if (ch.h[i] >= ch.hcs[i]) continue;
@@ -439,6 +445,7 @@ function buildShoreMesh() {
   }
   const meshes = [];
   for (const list of tiles.values()) {
+    yield;
     const pos = [], nrm = [], uv = [], idx = [], rec = [];
     for (const ch of list) {
       const vi = new Int32Array(CV * CV).fill(-1);
@@ -482,11 +489,19 @@ function buildShoreMesh() {
 }
 
 export function buildTerrain() {
+  const job = buildTerrainJob();
+  let r;
+  while (!(r = job.next()).done);
+  return r.value;
+}
+// the same build as a generator, stepped in slices by main.js's boot runner
+export function* buildTerrainJob() {
   const geo = new THREE.PlaneGeometry(SPAN, SPAN, RES - 1, RES - 1);
   geo.rotateX(-Math.PI / 2);
   geo.translate(OX, 0, OZ);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
+    if ((i & 8191) === 0) yield;
     pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
   }
   // record the rendered grid for meshHeightAt
@@ -503,7 +518,8 @@ export function buildTerrain() {
   }
   geo.computeVertexNormals();
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));
-  buildShoreMesh();
+  yield;
+  yield* buildShoreMesh();
   colorMaterial = makeGroundMaterial(true);
   colorMaterialFine = makeGroundMaterial(false);
   terrainMesh = new THREE.Mesh(geo, colorMaterial);
@@ -706,67 +722,98 @@ function paintVertex(era, x, y, z) {
 // The coarse grid is painted in full; its land colours are kept so the 2 m
 // shore mesh can take its land-use colour from them and only compute the
 // water-edge tint itself, from the bank record cached at build time.
-let coarseLand = null;
-function paintCoarse(geo, era) {
-  const pos = geo.attributes.position, col = geo.attributes.color;
-  if (!coarseLand) coarseLand = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) {
+// Painting writes into plain arrays, not the live attribute, so an era can be
+// painted a slice at a time in the background while another one is shown.
+function paintCoarseInto(geo, era, out, land, i0, i1) {
+  const pos = geo.attributes.position;
+  for (let i = i0; i < i1; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
     const rgb = paintVertex(era, x, y, z);
-    coarseLand[i * 3] = rgb[0]; coarseLand[i * 3 + 1] = rgb[1]; coarseLand[i * 3 + 2] = rgb[2];
+    land[i * 3] = rgb[0]; land[i * 3 + 1] = rgb[1]; land[i * 3 + 2] = rgb[2];
     shoreTint(era, x, y, z, rgb, _n2);
-    col.setXYZ(i, c.set(rgb[0], rgb[1], rgb[2]).r, c.g, c.b);
+    c.set(rgb[0], rgb[1], rgb[2]);
+    out[i * 3] = c.r; out[i * 3 + 1] = c.g; out[i * 3 + 2] = c.b;
   }
-  col.needsUpdate = true;
 }
-function coarseLandAt(x, z, out) {
+function coarseLandAt(land, x, z, out) {
   const { x0, z0, sx, sz, n } = meshH;
   const fx = clamp((x - x0) / sx, 0, n - 1.001), fz = clamp((z - z0) / sz, 0, n - 1.001);
   const cc = Math.floor(fx), r = Math.floor(fz), u = fx - cc, v = fz - r;
   const A = (r * n + cc) * 3, B = A + 3, C = A + n * 3, D = C + 3;
   for (let k = 0; k < 3; k++) {
     out[k] = u + v <= 1
-      ? coarseLand[A + k] + (coarseLand[B + k] - coarseLand[A + k]) * u + (coarseLand[C + k] - coarseLand[A + k]) * v
-      : coarseLand[D + k] + (coarseLand[C + k] - coarseLand[D + k]) * (1 - u) + (coarseLand[B + k] - coarseLand[D + k]) * (1 - v);
+      ? land[A + k] + (land[B + k] - land[A + k]) * u + (land[C + k] - land[A + k]) * v
+      : land[D + k] + (land[C + k] - land[D + k]) * (1 - u) + (land[B + k] - land[D + k]) * (1 - v);
   }
 }
-function paintShoreTile(geo, era) {
-  const pos = geo.attributes.position, col = geo.attributes.color, R = geo.userData.rec;
+function paintShoreTileInto(geo, era, out, land) {
+  const pos = geo.attributes.position, R = geo.userData.rec;
   const f = era === 0 ? 0.07 : 0.09;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    coarseLandAt(x, z, _rgb);
+    coarseLandAt(land, x, z, _rgb);
     shoreTintRec(era, y, _rgb, noise.noise2(x * f, z * f), R, i * TREC);
-    col.setXYZ(i, c.set(_rgb[0], _rgb[1], _rgb[2]).r, c.g, c.b);
+    c.set(_rgb[0], _rgb[1], _rgb[2]);
+    out[i * 3] = c.r; out[i * 3 + 1] = c.g; out[i * 3 + 2] = c.b;
   }
-  col.needsUpdate = true;
+}
+// one era's colours for every terrain geometry, yielding between slices
+const paintJobs = new Map();
+function* paintGen(era) {
+  const t0 = performance.now();
+  const geos = [terrainMesh.geometry, ...shoreMeshes.map((m) => m.geometry)];
+  const coarse = geos[0], nC = coarse.attributes.position.count;
+  const land = new Float32Array(nC * 3);
+  const out = geos.map((g) => new Float32Array(g.attributes.position.count * 3));
+  const SLICE = 16384;
+  for (let i0 = 0; i0 < nC; i0 += SLICE) {
+    paintCoarseInto(coarse, era, out[0], land, i0, Math.min(nC, i0 + SLICE));
+    yield;
+  }
+  for (let i = 1; i < geos.length; i++) {
+    paintShoreTileInto(geos[i], era, out[i], land);
+    if (i % 12 === 0) yield;
+  }
+  eraColorCache[era] = out;
+  console.log(`[boot] painted era ${era} in ${(performance.now() - t0).toFixed(0)} ms`);
+}
+function paintJob(era) {
+  if (era === 5 || eraColorCache[era]) return null;
+  let job = paintJobs.get(era);
+  if (!job) paintJobs.set(era, job = paintGen(era));
+  return job;
+}
+// background preparation of an era's terrain colours (see main.js)
+function ensureSat() {
+  if (satMaterial) return;
+  const tex = new THREE.TextureLoader().load(
+    'data:image/jpeg;base64,' + SAT_JPEG_B64,
+    (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.max(8, MAX_ANISO); t.needsUpdate = true; }
+  );
+  satMaterial = makeSatMaterial(tex, true);
+  satMaterialFine = makeSatMaterial(tex, false);
+}
+export function* preparePaint(era) {
+  if (era === 5) ensureSat();
+  const job = paintJob(era);
+  if (!job) return;
+  while (!job.next().done) yield;
+  paintJobs.delete(era);
 }
 
 export function paintEra(era) {
   // era 5: the real Sentinel-2 drape replaces painted colours entirely
   if (era === 5) {
-    if (!satMaterial) {
-      const tex = new THREE.TextureLoader().load(
-        'data:image/jpeg;base64,' + SAT_JPEG_B64,
-        (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; }
-      );
-      satMaterial = makeSatMaterial(tex, true);
-      satMaterialFine = makeSatMaterial(tex, false);
-    }
+    ensureSat();
     terrainMesh.material = satMaterial;
     for (const m of shoreMeshes) m.material = satMaterialFine;
     return;
   }
   terrainMesh.material = colorMaterial;
   for (const m of shoreMeshes) m.material = colorMaterialFine;
+  const job = paintJob(era);
+  if (job) { while (!job.next().done); paintJobs.delete(era); }
+  const cached = eraColorCache[era];
   const geos = [terrainMesh.geometry, ...shoreMeshes.map((m) => m.geometry)];
-  let cached = eraColorCache[era];
-  if (!cached) {
-    const t0 = performance.now();
-    cached = geos.map((g, i) => { if (i === 0) paintCoarse(g, era); else paintShoreTile(g, era); return new Float32Array(g.attributes.color.array); });
-    eraColorCache[era] = cached;
-    console.log(`[boot] painted era ${era} in ${(performance.now() - t0).toFixed(0)} ms`);
-    return;
-  }
   geos.forEach((g, i) => { g.attributes.color.array.set(cached[i]); g.attributes.color.needsUpdate = true; });
 }

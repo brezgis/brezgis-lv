@@ -41,7 +41,7 @@ export function windifyVeg(material) {
         #ifdef USE_INSTANCING
         iPos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
         #endif
-        float phase = aWind.y + fract(sin(dot(iPos.xz, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831;
+        float phase = aWind.y + fract(dot(fract(vec2(iPos.xz) * vec2(0.1031, 0.1030)) + 19.19, fract(vec2(iPos.zx) * vec2(0.0973, 0.1099)) + 33.33) * 43.7) * 6.2831;
         float gust = 0.6 + 0.4 * sin(dot(iPos.xz, uWindD) * 0.02 - uWindT * 1.35 + phase * 0.13);
         float f1 = 0.9 + fract(phase * 1.7) * 0.7;
         float hK = min(transformed.y * 0.09, 1.2);
@@ -70,7 +70,7 @@ export function windify(material) {
       #ifdef USE_INSTANCING
       {
         vec3 iPos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
-        float phase = fract(sin(dot(iPos.xz, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831;
+        float phase = fract(dot(fract(vec2(iPos.xz) * vec2(0.1031, 0.1030)) + 19.19, fract(vec2(iPos.zx) * vec2(0.0973, 0.1099)) + 33.33) * 43.7) * 6.2831;
         float flex = clamp((vColor.g - vColor.r) * 2.2, 0.0, 1.0) * transformed.y * transformed.y;
         float gust = 0.55 + 0.45 * sin(dot(iPos.xz, uWindD) * 0.018 - uWindT * 1.25 + phase * 0.31);
         float f = 1.0 + fract(phase * 2.7) * 1.6;
@@ -226,7 +226,7 @@ function promotionMaterial(base, far=false) {
     compile.call(base,sh);
     sh.vertexShader='attribute float aLodFade; varying float vLodFade;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n vLodFade=aLodFade;');
     sh.fragmentShader='varying float vLodFade;\n'+sh.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
-      float lodNoise=fract(sin(dot(floor(gl_FragCoord.xy),vec2(12.9898,78.233)))*43758.5453);
+      float lodNoise=fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(0.06711056,0.00583715))));
       ${far?'if(vLodFade>=1.0 || lodNoise<vLodFade) discard;':'if(vLodFade<=0.0 || lodNoise>vLodFade) discard;'}
     `);
   };
@@ -376,6 +376,14 @@ const CAPS = {
 const FULL_R = 260; // full-detail radius around points of interest
 
 export function buildVegetation(scene, renderer) {
+  const job = buildVegetationJob(scene, renderer);
+  let r;
+  while (!(r = job.next()).done);
+  return r.value;
+}
+// the same build as a generator: one species per slice, so the welcome card
+// stays responsive while the forests grow
+export function* buildVegetationJob(scene, renderer) {
   const group = new THREE.Group();
   group.name = 'vegetation';
   scene.add(group);
@@ -385,6 +393,7 @@ export function buildVegetation(scene, renderer) {
   const species = {};
   const impostorEntries = [];
   for (const key of SP_KEYS) {
+    yield;
     const sp = SPECIES[key];
     if (!barkTexes[sp.bark]) barkTexes[sp.bark] = barkTex(sp.bark);
     const twigAtlas = sp.foliage ? captureTwigAtlas(renderer, sp, 900 + SP_KEYS.indexOf(key) * 17) : null;
@@ -408,7 +417,9 @@ export function buildVegetation(scene, renderer) {
   }
 
   // ---- far-tier impostors ---------------------------------------------------
+  yield;
   const impostor = captureImpostorAtlas(renderer, impostorEntries);
+  yield;
   // NO alpha-to-coverage here: on distant subpixel quads the 4-sample dither
   // reads as fragmented, crawling silhouettes — a plain mid alpha test keeps
   // far crowns solid
@@ -458,6 +469,7 @@ export function buildVegetation(scene, renderer) {
     group.add(farMeshes[e.key]);
   });
 
+  yield;
   // ---- near-tier instanced meshes ------------------------------------------
   // meshes[key] = { full: [{cells: Map<gridCell, {bark, cards}>}] }
   const NEAR_CELL = 256;
@@ -489,6 +501,7 @@ export function buildVegetation(scene, renderer) {
     };
   }
 
+  yield;
   // ---- impostor promotion pool ---------------------------------------------
   // The two LOD tiers are keyed to POI distance, so a walker OUTSIDE the six
   // full-detail discs met flat billboard impostors at arm's length. A small
@@ -517,6 +530,7 @@ export function buildVegetation(scene, renderer) {
   }
   const farPlaced = {};   // per species: { entries, byCell, widen } for the ACTIVE era
 
+  yield;
   // ---- understory assets -----------------------------------------------------
   const fernAtlas = captureTwigAtlas(renderer, {
     // pinnate frond reads through the needle-spray comb builder
@@ -549,6 +563,7 @@ export function buildVegetation(scene, renderer) {
   group.add(rocks);
   boulders.forEach((b) => group.add(b));
 
+  yield;
   // ---- forest-floor still life: era-refreshed micro props --------------------
   const plainM = (c) => new THREE.MeshLambertMaterial({ color: c });
   const anthillGeo = new THREE.SphereGeometry(1, 9, 6);
@@ -639,8 +654,32 @@ export function buildVegetation(scene, renderer) {
   };
 
   // ---- placements per era ------------------------------------------------
+  // A generator so an era can be prepared in slices while another one is on
+  // screen: it yields between grid rows, and the rng draws stay in exactly
+  // the same order, so the result is identical to a single synchronous run.
+  const placeJobs = new Map();
+  function placementsJob(era) {
+    if (eraCache.has(era)) return null;
+    let job = placeJobs.get(era);
+    if (!job) placeJobs.set(era, job = placementsGen(era));
+    return job;
+  }
   function placementsFor(era) {
-    if (eraCache.has(era)) return eraCache.get(era);
+    if (!eraCache.has(era)) {
+      const job = placementsJob(era);
+      while (!job.next().done);
+      placeJobs.delete(era);
+    }
+    return eraCache.get(era);
+  }
+  // background preparation: step this until done, a slice at a time
+  function* prepare(era) {
+    const job = placementsJob(era);
+    if (!job) return;
+    while (!job.next().done) yield;
+    placeJobs.delete(era);
+  }
+  function* placementsGen(era) {
     const rng = makeNoise(1000 + era * 7).rng;
     const lists = {};
     for (const k of SP_KEYS) lists[k] = { full: [], far: [] };
@@ -662,6 +701,7 @@ export function buildVegetation(scene, renderer) {
     const EXT = HM_SPAN - 120;
     const N = Math.floor(EXT / step);
     for (let iz = 0; iz < N; iz++) {
+      if (iz && (iz & 3) === 0) yield;
       for (let ix = 0; ix < N; ix++) {
         const x = (ix / (N - 1) - 0.5) * EXT + HM_OFF_X + (rng() - 0.5) * step * 1.4;
         const z = (iz / (N - 1) - 0.5) * EXT + HM_OFF_Z + (rng() - 0.5) * step * 1.4;
@@ -993,7 +1033,6 @@ export function buildVegetation(scene, renderer) {
       lists.oak.full.push([B.x + 9, heightAt(B.x + 9, B.z + 11), B.z + 11, 15 + (era - 3) * 1.5, 0.8, 1.15]);
     }
     eraCache.set(era, lists);
-    return lists;
   }
 
   function fillTier(tiers, heights, arr) {
@@ -1206,6 +1245,7 @@ export function buildVegetation(scene, renderer) {
     }
   }
 
+  yield;
   // ---- static across eras: glacial erratics, reeds -------------------------
   const boulderColliders = [];
   {
@@ -1248,6 +1288,7 @@ export function buildVegetation(scene, renderer) {
     }
     boulders.forEach((b, i) => { b.count = bi[i]; b.instanceMatrix.needsUpdate = true; refreshBounds(b); });
   }
+  yield;
   {
     // reed clumps along the real lake shorelines and slack river reaches
     const reedG = (() => {
@@ -1301,6 +1342,7 @@ export function buildVegetation(scene, renderer) {
     reeds.name = 'reeds';
     const rng = makeNoise(2211).rng;
     let i = 0;
+    yield;
     for (const lake of LAKE_SHORES) {
       const poly = lake.poly;   // canonical rendered shoreline + side oracle
       for (let e = 0; e < poly.length; e++) {
@@ -1326,6 +1368,7 @@ export function buildVegetation(scene, renderer) {
         }
       }
     }
+    yield;
     for (const p of RIVER_PTS) {
       if (rng() < 0.4) continue;
       for (const side of [-1, 1]) {
@@ -1401,6 +1444,7 @@ export function buildVegetation(scene, renderer) {
       }
     };
     addStones(RIVER, 1, 0x71710000, riverPebbles, riverCobbles);
+    yield;
     STREAM_CHANNELS.forEach((chan, si) => {
       addStones(chan, 0.5, 0x57130000 + si * 100000, streamPebbles, streamCobbles);
     });
@@ -1447,6 +1491,7 @@ export function buildVegetation(scene, renderer) {
     driftMeshes.forEach((mesh, mi) => { mesh.name = `driftwood:${mi}`; });
     const driftCounts = [0, 0, 0];
     const samples = RIVER.samples;
+    yield;
     for (let si = 0; si < samples.length && driftCounts.reduce((a, b) => a + b, 0) < 150; si++) {
       const [x, z, , hw] = samples[si];
       const [nx, nz] = sampleNormal(samples, si), tx = -nz, tz = nx;
@@ -1483,6 +1528,7 @@ export function buildVegetation(scene, renderer) {
   // cattail seeds discrete stands of 5-14 stalks rather than one per point.
   // Static across every era, same as the reeds above — use the modern OSM
   // footprints directly because this pass runs before the registry is warm.
+  yield;
   {
     const wetPatch = makeNoise(8181);
     const patchAt = (x, z) => smoothstep(0.26, 0.46, wetPatch.fbm(x * 0.028, z * 0.028, 2));
@@ -1706,6 +1752,7 @@ export function buildVegetation(scene, renderer) {
     addChannelSedge(RIVER, 0x53440001);
     addChannelCattail(RIVER, 0x43540001);
     addChannelIris(RIVER, 0x49520001);
+    yield;
     STREAM_CHANNELS.forEach((chan, si) => {
       addChannelSedge(chan, 0x53440100 + si * 0x1000);
       addChannelCattail(chan, 0x43540100 + si * 0x1000);
@@ -1713,6 +1760,7 @@ export function buildVegetation(scene, renderer) {
     });
 
     // -- lake shores: sedge/iris on the bank, cattail wading just inside ----
+    yield;
     LAKE_SHORES.forEach((lake, li) => {
       const poly = lake.poly;
       for (let e = 0; e < poly.length; e++) {
@@ -1943,5 +1991,5 @@ export function buildVegetation(scene, renderer) {
     }
     return out;
   }
-  return { setEra, group, tick, getColliders, promote, promoteTransitions, counts };
+  return { setEra, prepare, group, tick, getColliders, promote, promoteTransitions, counts };
 }

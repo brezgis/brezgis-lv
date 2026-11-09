@@ -102,7 +102,8 @@ const cloudFrag = /* glsl */ `
 varying vec2 vUv;
 uniform float uT, uSeed, uOp, uAspect, uSharp;
 uniform vec3 uSunL, uLitCol, uShadeCol;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// sin-free hash (Hoskins): fract(sin(big)) turns blocky on GPUs with low-precision sin
+float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
   vec2 u = f * f * (3.0 - 2.0 * f);
@@ -122,14 +123,14 @@ void main() {
   float base = fbm(bp);
   float detail = fbm(p * vec2(4.2, 7.5) - vec2(t * 3.8, uSeed * 3.0));
   float env = 1.0 - length(vec2(p.x * 0.72, max(p.y, -0.12) * 1.5));
-  float dens = clamp((env + base * 0.85 - 0.62 + (detail - 0.5) * 0.5
+  float dens = clamp((env + base * 0.85 - 0.62 + (detail - 0.5) * 0.34
     - max(0.0, -p.y - 0.25) * 1.4) * uSharp, 0.0, 1.0);
   if (dens < 0.006) discard;
   vec2 gdir = normalize(uSunL.xy + vec2(1e-4, 0.0));
   float dSun = fbm(bp + gdir * 0.15);
-  float lit = clamp(0.62 + (dSun - base) * 3.0, 0.0, 1.25);
+  float lit = clamp(0.72 + (dSun - base) * 2.2, 0.0, 1.2);
   float powder = 1.0 - exp(-dens * 2.8);
-  vec3 col = mix(uShadeCol, uLitCol, lit) * (1.0 - powder * 0.38);
+  vec3 col = mix(uShadeCol, uLitCol, lit) * (1.0 - powder * 0.28);
   col *= 0.68 + 0.32 * smoothstep(-0.7, 0.55, p.y);
   float rim = smoothstep(0.4, 0.02, dens) * max(0.0, -uSunL.z);
   col += uLitCol * rim * 0.55;
@@ -466,5 +467,5 @@ export function buildSky(scene, renderer) {
   for (const object of [sky, clouds, stars, sunGlow, horizon]) {
     object.traverse((o) => o.layers.enable(1));
   }
-  return { update, state, sun, hemi, shadowInfo };
+  return { update, state, sun, hemi, shadowInfo, skyMesh: sky, clouds };   // skyMesh, clouds: debug hooks for look tuning
 }

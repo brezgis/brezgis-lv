@@ -150,6 +150,10 @@ function addDoor(g, { axis = 'z', face, along = 0, w = 0.9, h = 1.7, lintel = tr
   }
 }
 
+// About two windows in three have a lamp behind them after dark. The choice
+// is a hash of the window's build order, so it is the same on every visit.
+let windowSerial = 0;
+const windowLit = () => ((Math.imul(++windowSerial, 2654435761) >>> 0) / 4294967296) < 0.66;
 function addWindow(g, { axis = 'z', face, along, y, w = 1, h = 1.4, trim = MAT.white, panes = 6 }) {
   const side = Math.sign(face) || 1;
   registerOpening(g, 'window', axis, face, along, w, y - h / 2, y + h / 2);
@@ -160,7 +164,7 @@ function addWindow(g, { axis = 'z', face, along, y, w = 1, h = 1.4, trim = MAT.w
     g.add(wallBox(axis, 0.09, h, 0.08, along + offset * (w - 0.09) / 2, y, face + side * 0.045, trim));
     g.add(wallBox(axis, innerW, 0.09, 0.08, along, y + offset * (h - 0.09) / 2, face + side * 0.045, trim));
   }
-  const gl = wallBox(axis, innerW, innerH, 0.018, along, y, face + side * 0.058, MAT.glass);
+  const gl = wallBox(axis, innerW, innerH, 0.018, along, y, face + side * 0.058, windowLit() ? MAT.glassLit : MAT.glass);
   gl.name = 'window-glass';
   g.add(gl);
   const addBar = (bw, bh, da, dy) => {

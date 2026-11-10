@@ -154,4 +154,7 @@ sources is `WRITEUP.md` and is embedded in the app under **Chronicle & sources**
 
 ## License
 
-[MIT](LICENSE).
+The code is [MIT](LICENSE). The embedded data keeps its own terms: LĢIA laser
+survey and orthophotos (CC BY 4.0), Sentinel-2 cloudless by EOX (CC BY 4.0),
+OpenStreetMap (ODbL), and the animal models (CC0 and CC BY 3.0, listed with
+their authors in `assets-src/animals/SOURCES.md`).

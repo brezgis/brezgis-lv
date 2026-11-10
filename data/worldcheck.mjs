@@ -99,7 +99,9 @@ try {
         vehicles, litterError, gardenError, gardenVertices,
       };
     });
-    const wantBarrows = era >= 2 ? 1 : 0;
+    // stone-kerbed barrows belong to the Early Iron Age farm only: Latgalians
+    // of AD 950 buried in flat cemeteries, and no mounds are recorded later
+    const wantBarrows = era === 1 ? 1 : 0;
     if (info.barrows !== wantBarrows) fail(`era ${era} barrow groups ${info.barrows}, expected ${wantBarrows}`);
     else pass(`era ${era} barrow chronology`);
     const expected = era === 3 ? [1, 0, 0] : era === 4 ? [1, 1, 0] : era === 5 ? [0, 0, 4] : [0, 0, 0];

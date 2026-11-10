@@ -890,7 +890,8 @@ export function* buildVegetationJob(scene, renderer) {
       // this pass produced twelve alders along 16.7 km of river.
       const chans = [{ chan: RIVER, step: 7, inset: 11.5, reach: 17, density: 1 },
         ...STREAM_CHANNELS.map((c) => ({ chan: c, step: 6, inset: 5.5, reach: 9, density: 0.8 }))];
-      for (const { chan, step, inset, reach, density } of chans) {
+      // the tundra has no alder or willow trees to line a river with
+      for (const { chan, step, inset, reach, density } of (era === 0 ? [] : chans)) {
         const gap = Math.max(1, Math.round(step / (chan.sampleS[1] - chan.sampleS[0] || 4)));
         for (let i = 2; i < chan.samples.length - 2; i += gap) {
           const [sx, sz, , hw] = chan.samples[i];

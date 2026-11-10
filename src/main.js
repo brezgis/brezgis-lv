@@ -12,6 +12,7 @@ import { buildVegetationJob, WIND } from './vegetation.js';
 import { buildGrass } from './grass.js';
 import { buildEra, applySpawns } from './eras.js';
 import { AnimalManager } from './animals.js';
+import { loadAnimalModels } from './animal-models.js';
 import { Effects } from './effects.js';
 import { Ambience } from './audio.js';
 import { Rig } from './rig.js';
@@ -154,6 +155,7 @@ async function boot() {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 12000);
 
+  const animalsReady = loadAnimalModels();     // parsed while the land is built
   await progress('terrain');
   initTextures();
   const terrain = await runSliced(buildTerrainJob());
@@ -691,6 +693,7 @@ async function boot() {
       jumpTo(pos, tgt);
     },
     setCam: (px, py, pz, tx, ty, tz) => jumpTo([px, py, pz], [tx, ty, tz]),
+    groundAt: (x, z) => meshHeightAt(x, z),
     era: (e) => { activateEra(e); },
   };
   document.querySelectorAll('.era-btn').forEach((b, i) => b.addEventListener('click', () => switchEra(i)));
@@ -790,6 +793,7 @@ async function boot() {
   // animal system's buzzards with their wing-flap rig own the sky now)
 
   // ------- start -------
+  await animalsReady;
   await progress('era');
   setLang(lang);
   // begin in the Latgalian age: build it in slices first, so switching it on

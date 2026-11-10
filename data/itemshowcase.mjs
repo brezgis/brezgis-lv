@@ -6,6 +6,8 @@ const out = mkdtempSync((process.env.OUT_DIR || '/tmp') + '/village-items-');
 const result = await build({ stdin: { contents: `
 import * as THREE from 'three';
 import { SPECIES } from './src/animals.js';
+import { loadAnimalModels, makeAnimalModel } from './src/animal-models.js';
+window.modelsReady = loadAnimalModels();
 import * as B from './src/buildings.js';
 import { leanTo, fishRack } from './src/eras.js';
 import { initTextures } from './src/textures.js';
@@ -23,7 +25,7 @@ window.show=(kinds)=>{
  document.querySelectorAll('label').forEach(e=>e.remove());
  renderer.setScissorTest(true);
  kinds.forEach((kind,i)=>{
-  const object=SPECIES[kind]?SPECIES[kind]().group:structures[kind](),scene=new THREE.Scene();scene.add(object);
+  const object=SPECIES[kind]?(makeAnimalModel(kind)||SPECIES[kind]()).group:structures[kind](),scene=new THREE.Scene();scene.add(object);
   scene.add(new THREE.HemisphereLight(0xe8f0ff,0x746c50,2));
   const sun=new THREE.DirectionalLight(0xffeed7,2.2);sun.position.set(-3,6,5);scene.add(sun);
   const box=new THREE.Box3().setFromObject(object), size=box.getSize(new THREE.Vector3()), center=box.getCenter(new THREE.Vector3());
@@ -44,6 +46,7 @@ try {
  const page=await browser.newPage();await page.setViewport({width:1200,height:800});
  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
  await page.setContent('<!doctype html><html><body></body></html>');await page.addScriptTag({content:result.outputFiles[0].text});
+ await page.evaluate(()=>window.modelsReady);
  const sets=[['aurochsBull','cattleFarm','horseBay','elk','redDeer','reindeer'],['sheepWhite','boar','fox','wolf','roeDeer','hare'],['stork','duckM','swanWhooper','chicken','beaver','crane']];
  const remaining=(await page.evaluate(()=>window.kinds)).filter(k=>!sets.flat().includes(k));
  for(let i=0;i<remaining.length;i+=6)sets.push(remaining.slice(i,i+6));

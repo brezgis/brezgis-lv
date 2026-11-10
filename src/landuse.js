@@ -886,6 +886,8 @@ export function forestDensity(era, x, z, y) {
     d *= smoothstep(15, 70, dRiver) * 0.9 + 0.1;
     d *= smoothstep(42, 145, dStead);                       // farmstead clearing
     for (const f of ERA2_FARMS) d *= smoothstep(18, 60, Math.hypot(x - f.x, z - f.z));
+    // a fort in use stands on a cleared hill: felled for timber and for a field of view
+    d *= smoothstep(55, 110, Math.hypot(x - LOC.HILLFORT.x, z - LOC.HILLFORT.z));
   } else if (era === 5) {
     // Today: the woodland the laser survey measured in autumn 2019, as the
     // share of ground under canopy taller than five metres. Yard and garden

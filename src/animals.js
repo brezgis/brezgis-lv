@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { makeNoise, clamp, lerp } from './util.js';
 import { quadruped, organicTube, ellipsoid } from './fauna-models.js';
+import { makeAnimalModel, bakeAnimalModel } from './animal-models.js';
+import { lakeAt, riverAt } from './riverzone.js';
 
 const rng = makeNoise(909).rng;
 const M = (c) => new THREE.MeshLambertMaterial({ color: c });
@@ -766,6 +768,8 @@ export const SPECIES = {
 // the paddock grazers were primitive box assemblies ("a super square cow");
 // now they are the real animals, frozen mid-graze, cheap to instance.
 export function bakeSpeciesGeometry(kind, { grazing = true } = {}) {
+  const baked = bakeAnimalModel(kind, grazing ? 'Eat' : 'Idle');
+  if (baked) return baked;
   const a = SPECIES[kind]();
   if (grazing && a.neck && a.neck.rotation) a.neck.rotation.x = 0.72;
   a.group.updateMatrixWorld(true);
@@ -792,6 +796,33 @@ export function bakeSpeciesGeometry(kind, { grazing = true } = {}) {
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.computeBoundingSphere();
   return geo;
+}
+
+// --- dry ground -----------------------------------------------------------------
+// Land animals live on land. A home that the surveyed water now covers is
+// moved to the nearest dry spot, once, and shared by the whole herd.
+function dryAt(x, z) {
+  if (lakeAt(x, z)) return false;
+  const rv = riverAt(x, z);
+  return !(rv && rv.d < rv.hw + 1);
+}
+const movedHomes = new WeakMap();
+function dryHome(home) {
+  const probe = (x, z) => dryAt(x, z) && dryAt(x + home.r * 0.5, z) && dryAt(x - home.r * 0.5, z)
+    && dryAt(x, z + home.r * 0.5) && dryAt(x, z - home.r * 0.5);
+  if (probe(home.x, home.z)) return home;
+  let moved = movedHomes.get(home);
+  if (moved) return moved;
+  moved = home;
+  search: for (let ring = 15; ring <= 450; ring += 15) {
+    for (let k = 0; k < 16; k++) {
+      const a = k * Math.PI / 8;
+      const x = home.x + Math.cos(a) * ring, z = home.z + Math.sin(a) * ring;
+      if (probe(x, z)) { moved = { ...home, x, z }; break search; }
+    }
+  }
+  movedHomes.set(home, moved);
+  return moved;
 }
 
 // --- behaviour ----------------------------------------------------------------
@@ -835,10 +866,19 @@ export class AnimalManager {
   }
 
   spawn(kind, home, opts = {}) {
-    const a = SPECIES[kind]();
+    const a = makeAnimalModel(kind) || SPECIES[kind]();
+    const land = !opts.medium || opts.medium === 'land';
+    if (land && !opts.static) home = dryHome(home);
     const angle = rng() * Math.PI * 2;
     const r = Math.sqrt(rng()) * home.r;
     let x = home.x + Math.cos(angle) * r, z = home.z + Math.sin(angle) * r;
+    if (land && !opts.static) {
+      for (let tries = 0; tries < 20 && !dryAt(x, z); tries++) {
+        const a2 = rng() * Math.PI * 2, r2 = Math.sqrt(rng()) * home.r;
+        x = home.x + Math.cos(a2) * r2; z = home.z + Math.sin(a2) * r2;
+      }
+      if (!dryAt(x, z)) { x = home.x; z = home.z; }
+    }
     // water dwellers must START in water, not on the bank
     if (opts.inWater) {
       for (let tries = 0; tries < 24 && !opts.inWater(x, z); tries++) {
@@ -901,6 +941,8 @@ export class AnimalManager {
   clear() {
     const geometries = new Set(), materials = new Set();
     for (const a of this.animals) {
+      // loaded models share their geometry and coats between every instance
+      if (a.model) { a.dispose(); this.group.remove(a.group); continue; }
       a.group.traverse((o) => {
         if (o.geometry) geometries.add(o.geometry);
         if (Array.isArray(o.material)) o.material.forEach((m) => materials.add(m));
@@ -1240,6 +1282,7 @@ export class AnimalManager {
         if (a.group.visible !== vis) a.group.visible = vis;
       }
       if (a.static) {
+        if (a.model) a.pose('idle', 0, false, dt);
         // nest stork: occasional preen
         if (a.neck) a.neck.rotation.x = Math.sin(t * 0.3 + a.phase) > 0.92 ? 0.8 : Math.sin(t * 0.5 + a.phase) * 0.06;
         continue;
@@ -1280,7 +1323,7 @@ export class AnimalManager {
         const sx = herd.cx + Math.sin(slotA) * slotR;
         const sz = herd.cz + Math.cos(slotA) * slotR;
         const slotD = Math.hypot(sx - g.position.x, sz - g.position.z);
-        if (hd > herd.profile.radius || slotD > herd.profile.spacing * 0.2) {
+        if ((hd > herd.profile.radius || slotD > herd.profile.spacing * 0.2) && dryAt(sx, sz)) {
           a.tx = sx; a.tz = sz;
           a.state = 'walk'; a.timer = 30;
         }
@@ -1288,9 +1331,14 @@ export class AnimalManager {
       a.timer -= dt;
       if (a.timer <= 0) {
         if (a.state !== 'walk' && rng() > a.grazeBias) {
-          const ang = rng() * Math.PI * 2, r = Math.sqrt(rng()) * a.home.r;
-          a.tx = a.home.x + Math.cos(ang) * r;
-          a.tz = a.home.z + Math.sin(ang) * r;
+          // grazers keep to dry ground: the surveyed lakes reach further
+          // than the old river line did
+          for (let tries = 0; tries < 8; tries++) {
+            const ang = rng() * Math.PI * 2, r = Math.sqrt(rng()) * a.home.r;
+            a.tx = a.home.x + Math.cos(ang) * r;
+            a.tz = a.home.z + Math.sin(ang) * r;
+            if (dryAt(a.tx, a.tz)) break;
+          }
           if (a.herd) {
             // Preserve the established RNG stream, but let herd members take
             // short walks around their own loose slot instead of crossing the
@@ -1358,13 +1406,15 @@ export class AnimalManager {
             if (lower) lower.rotation.x = Math.max(0,Math.cos(phase)) * .48 * stride * (a.legs[i].userData.hind ? -1 : 1);
           }
           if (a.neck) a.neck.rotation.x = swing * 0.04 * stride;
+          if (a.model) a.pose('walk', stride, a.fleeing, dt);
           g.position.y = meshHeightAt(g.position.x, g.position.z);
-          g.position.y += a.legs.length ? Math.abs(swing) * 0.015 * (a.shoulder || 0.3) * stride
+          if (!a.model) g.position.y += a.legs.length ? Math.abs(swing) * 0.015 * (a.shoulder || 0.3) * stride
             : Math.abs(swing) * 0.03 * stride;
         }
       } else {
         a.moveSpeed = Math.max(0, a.moveSpeed - 1.35 * dt);
         g.rotation.x = lerp(g.rotation.x, 0, clamp(dt * 7, 0, 1));
+        if (a.model) a.pose(a.state, 0, false, dt);
         for (const leg of a.legs) {
           leg.rotation.x *= 0.85;
           if (leg.userData.lowerLeg) leg.userData.lowerLeg.rotation.x *= .85;

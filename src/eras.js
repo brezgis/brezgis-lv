@@ -1969,7 +1969,7 @@ export function buildEra(era, ctx) {
     spawns.push(['elk', 1, { x: S.x + 500, z: S.z + 600, r: 80 }]);
     // A small mammoth family. No mammoth is dated to these centuries in
     // Latvia, but the youngest in Europe are from Puurmani in Estonia,
-    // 250 km north and several hundred years later, so they were still
+    // about 160 km north and several hundred years later, so they were still
     // about. They mostly stand and graze.
     const steppe = { x: S.x + 300, z: S.z + 230, r: 120 };
     spawns.push(['mammoth', 3, steppe, { speed: 0.42, grazeBias: 0.86 }]);

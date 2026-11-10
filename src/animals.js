@@ -662,6 +662,9 @@ export const SPECIES = {
     shoulder: 0.62, length: 1.2, width: 0.44, legR: 0.04, color: 0x3d3229,
     neckLen: 0.1, headSize: 0.24, ears: true, tail: 0.12,
   }),
+  // fallbacks only: the loaded model (animal-models.js) is what is shown
+  mammoth: () => quadruped({ shoulder: 2.9, length: 3.6, width: 1.5, legR: 0.22, color: 0x5a3c2a, neckLen: 0.5, headSize: 0.8 }),
+  mammothCalf: () => quadruped({ shoulder: 1.5, length: 1.9, width: 0.8, legR: 0.12, color: 0x6a4630, neckLen: 0.3, headSize: 0.45 }),
   elk: () => quadruped({
     family: 'elk',
     shoulder: 1.9, length: 2.7, width: 0.7, legR: 0.08, color: 0x4d4136,
@@ -834,9 +837,11 @@ const HERD_PROFILES = {
   cattleFarm: { radius: 26, spacing: 2.7 },
   horseKonik: { radius: 30, spacing: 2.8 },
   reindeer: { radius: 55, spacing: 2.4 },
+  mammoth: { radius: 70, spacing: 7 },
 };
 
 function turnRateFor(kind) {
+  if (kind.startsWith('mammoth')) return 0.3;
   if (kind.startsWith('aurochs')) return 0.55;
   if (kind.startsWith('cattle')) return 0.65;
   if (kind.startsWith('horse')) return 0.82;

@@ -2,7 +2,7 @@
 
 Every GLB in this directory was downloaded from a public page without a login and carries a licence that allows
 redistribution in a public MIT-licensed site (CC0 1.0 or CC-BY 3.0). The original downloads are kept outside the
-repository in `/mnt/ssd240gb/brezgi-animals-src/` together with the scripts that produced these files (`_tools/`).
+repository, together with the scripts that produced these files.
 
 Total: 38 files, 2.16 MB as GLB (about 2.88 MB once base64-encoded).
 
@@ -156,3 +156,9 @@ The "Ultimate Animated Animals" rigs share one bone naming scheme: `Body`, `Back
 - [Fish (Animated) - Scardinius](https://opengameart.org/content/fish-animated) by **XaosXV (Cestmir Dammer, kelgar.org)**, licensed [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 
 CC0 works need no attribution, and their authors are credited here as a courtesy. The CC-BY 3.0 entries are the ones that must stay in the site credits.
+
+## Added later
+
+| File | Stands in for | Tris | kB | Rigged | Licence | Author | Source |
+|---|---|---|---|---|---|---|---|
+| `elephant.glb` | woolly mammoth and calf. Unmodified download, in centimetres and centred on its middle. `src/animal-models.js` (`mammothify`) reshapes it at load: ears, crown, back line, tusks, coat | 934 | 64 | no | CC-BY 3.0 | Poly by Google | https://poly.pizza/m/cx0-TiCjDOx |

@@ -47,7 +47,7 @@ try {
  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
  await page.setContent('<!doctype html><html><body></body></html>');await page.addScriptTag({content:result.outputFiles[0].text});
  await page.evaluate(()=>window.modelsReady);
- const sets=[['aurochsBull','cattleFarm','horseBay','elk','redDeer','reindeer'],['sheepWhite','boar','fox','wolf','roeDeer','hare'],['stork','duckM','swanWhooper','chicken','beaver','crane']];
+ const sets=[['mammoth','mammothCalf','aurochsBull','aurochsCow','reindeer','elk'],['cattleFarm','horseBay','redDeer','horseKonik','cattleIron','pig'],['sheepWhite','boar','fox','wolf','roeDeer','hare'],['stork','duckM','swanWhooper','chicken','beaver','crane']];
  const remaining=(await page.evaluate(()=>window.kinds)).filter(k=>!sets.flat().includes(k));
  for(let i=0;i<remaining.length;i+=6)sets.push(remaining.slice(i,i+6));
  for(let i=0;i<sets.length;i++){await page.evaluate(k=>window.show(k),sets[i]);await page.screenshot({path:out+'/animals-'+i+'.png'});}

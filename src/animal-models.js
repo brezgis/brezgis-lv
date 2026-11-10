@@ -62,7 +62,58 @@ const KINDS = {
   swanWhooper: { file: 'swan_standin', h: 1.0, sink: 0.2, tilt: 0.4 },
   swanMute: { file: 'swan_standin', h: 1.05, sink: 0.2, tilt: 0.4 },
   frog: { file: 'frog', h: 0.06 },
+  // Woolly mammoth: no free model exists, so a low-poly elephant is reshaped
+  // when it loads (see mammothify) and given a dark coat and long tusks.
+  mammoth: { file: 'elephant', h: 3.1, tint: 0x6a4630, sway: 1 },
+  mammothCalf: { file: 'elephant', h: 1.7, tint: 0x7a5238, sway: 1, hide: 'mammoth-tusk' },
 };
+
+// An African elephant made into a woolly mammoth: small ears folded to the
+// head, a high domed crown, a shoulder hump with the back sloping down to
+// the rump, and tusks that sweep down, forward and up. The source file is in
+// centimetres and centred on its own middle, so it is also stood on y = 0.
+function mammothify(scene) {
+  const tusks = [];
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    const p = o.geometry.attributes.position, v = new THREE.Vector3();
+    const ss = (a, b, t) => { const k = Math.min(1, Math.max(0, (t - a) / (b - a))); return k * k * (3 - 2 * k); };
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      // ears: the wide flaps beside the head shrink to a hand's breadth
+      if (Math.abs(v.x) > 38 && v.z > -8 && v.z < 48 && v.y > -25) v.x = Math.sign(v.x) * (38 + (Math.abs(v.x) - 38) * 0.22);
+      const upper = ss(15, 75, v.y);
+      // the back: high at the shoulder, falling away to the rump
+      if (v.z < 45) v.y += upper * (-16 + 34 * ss(-110, 20, v.z));
+      // the crown of the head
+      if (v.z >= 30) v.y += upper * 20 * Math.exp(-(((v.z - 60) / 24) ** 2));
+      p.setXYZ(i, v.x, v.y + 93.42, v.z);
+    }
+    p.needsUpdate = true;
+    o.geometry.computeVertexNormals();
+    o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
+    const ivory = new THREE.MeshLambertMaterial({ color: 0xe6dcc0 });
+    ivory.name = 'ivory';
+    for (const side of [-1, 1]) {
+      const P = (x, y, z) => new THREE.Vector3(side * x, y + 93.42, z);
+      const curve = new THREE.CatmullRomCurve3([P(15, 2, 86), P(24, -48, 112), P(34, -66, 156), P(22, -46, 196), P(4, -14, 204)]);
+      const N = 14, R = 6, geo = new THREE.TubeGeometry(curve, N, 5.2, R, false), q = geo.attributes.position;
+      for (let i = 0; i <= N; i++) {
+        const c = curve.getPoint(i / N), k = 1 - 0.88 * (i / N);
+        for (let j = 0; j <= R; j++) {
+          const n = i * (R + 1) + j;
+          v.fromBufferAttribute(q, n).sub(c).multiplyScalar(k).add(c);
+          q.setXYZ(n, v.x, v.y, v.z);
+        }
+      }
+      geo.computeVertexNormals();
+      const t = new THREE.Mesh(geo, ivory);
+      t.name = 'mammoth-tusk';
+      tusks.push(t);
+    }
+  });
+  for (const t of tusks) scene.add(t);
+}
 
 const loaded = new Map();     // file -> gltf
 const coats = new Map();      // kind -> Map(material name -> material)
@@ -80,6 +131,7 @@ export async function loadAnimalModels() {
   await Promise.all(Object.entries(ANIMAL_GLB).map(async ([name, b64]) => {
     try {
       const gltf = await loader.parseAsync(bytes(b64), '');
+      if (name === 'elephant') mammothify(gltf.scene);
       gltf.scene.traverse((o) => {
         if (!o.isMesh) return;
         o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
@@ -113,7 +165,7 @@ export function hasAnimalModel(kind) {
 
 function coatFor(kind, material) {
   const K = KINDS[kind];
-  if (K.tint !== undefined) {
+  if (K.tint !== undefined && material.name !== 'ivory') {
     let m = coats.get(kind);
     if (!m) coats.set(kind, m = new Map());
     let c = m.get(material.uuid);
@@ -188,6 +240,7 @@ export function makeAnimalModel(kind) {
   const inner = cloneSkinned(gltf.scene);
   inner.traverse((o) => {
     if (!o.isMesh) return;
+    if (K.hide && o.name === K.hide) o.visible = false;
     o.material = Array.isArray(o.material) ? o.material.map((m) => coatFor(kind, m)) : coatFor(kind, o.material);
   });
   const s = K.h / gltf.userData.height;
@@ -200,7 +253,17 @@ export function makeAnimalModel(kind) {
     // a static model: behaviour that lowers "the neck" tips the whole animal
     const k = K.tilt || 0;
     const neck = k ? { rotation: { get x() { return inner.rotation.x / k; }, set x(v) { inner.rotation.x = v * k; }, y: 0 } } : null;
-    return { group, legs: [], neck, model: true, dispose() {}, pose() {}, ...(K.extra || {}) };
+    // a heavy animal with no skeleton: a slow roll and nod while it walks
+    // keeps it from gliding
+    let gait = Math.random() * 6;
+    const pose = K.sway ? (state, speed01, fleeing, dt) => {
+      const moving = state === 'walk' ? Math.min(1, speed01 * 1.5) : 0;
+      gait += dt * (1.2 + 2.2 * moving);
+      inner.rotation.z = Math.sin(gait) * 0.022 * moving;
+      inner.rotation.x = Math.sin(gait * 2) * 0.012 * moving + Math.sin(gait * 0.31) * 0.01;
+      inner.position.y = Math.abs(Math.sin(gait)) * 0.035 * moving * (K.h / 3);
+    } : () => {};
+    return { group, legs: [], neck, model: true, shoulder: K.h * 0.9, dispose() {}, pose, ...(K.extra || {}) };
   }
 
   const hornGeos = K.horns ? addHorns(inner, K.horns) : [];

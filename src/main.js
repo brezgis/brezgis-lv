@@ -641,7 +641,7 @@ async function boot() {
   // preset name; t sets the time of day on arrival.
   const MOMENTS = [
     [{ lv: 'Ziemeļbriežu bars', en: 'The reindeer band', at: [S.x - 60, S.z + 120, 30] },
-     { lv: 'Kūstošais ledus ezera ieplakā', en: 'Dead ice melting in a lake hollow', at: [1780, -280, 160] },
+     { lv: 'Mamuti', en: 'The mammoths', at: [S.x + 300, S.z + 230, 34] },
      { lv: 'Ziemeļblāzma', en: 'The northern lights', at: [S.x, S.z + 200, 60], t: 0.0 }],
     [{ lv: 'Dzelzs laikmeta sēta', en: 'The Iron Age farm', at: [LOC.CAMP.x, LOC.CAMP.z, 22] },
      { lv: 'Akmeņiem aplikti kapu uzkalniņi', en: 'The stone-ringed grave mounds', at: [LOC.BARROWS.x, LOC.BARROWS.z, 26] },

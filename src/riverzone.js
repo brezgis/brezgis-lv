@@ -357,8 +357,10 @@ for (let i = 0; i < STREAMS.length; i++) {
   const continuation = i === 1 && STREAMS[0].name === STREAMS[1].name;
   const prior = continuation ? STREAM_CHANNELS[0] : null;
   STREAM_CHANNELS.push(buildChannel(STREAMS[i].pts, {
-    baseHW: 2.1, swellAmp: 0.55, swellL: 60, nibbleAmp: 0.25, nibbleL: 14,
-    minHW: 1.5, maxHW: 3.0, seedY: continuation ? 20 : 20 + i * 9.1,
+    // brooks two to three metres wide: the survey shows the Pīsla and the
+    // Dzērbe as narrow ditched channels, not four-metre streams
+    baseHW: 1.35, swellAmp: 0.35, swellL: 60, nibbleAmp: 0.18, nibbleL: 14,
+    minHW: 0.9, maxHW: 2.0, seedY: continuation ? 20 : 20 + i * 9.1,
     arcOffset: prior ? prior.length : 0,
     startHW: prior ? prior.samples[prior.samples.length - 1][3] : undefined,
     name: STREAMS[i].name || 'Unnamed brook', kind: 'stream',

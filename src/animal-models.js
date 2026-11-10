@@ -17,8 +17,10 @@ import { ANIMAL_GLB } from './animal-assets.js';
 // coat = material colours, tint = multiply a textured model's colour
 const KINDS = {
   // the wild ox: bulls near black with a pale eel stripe, cows red-brown
-  aurochsBull: { file: 'cattle_bull', h: 2.0, coat: { Horns: 0xd8cfae } },
-  aurochsCow: { file: 'cattle_cow', h: 1.72, coat: { Main: 0x5e3320, Main_Light: 0x7a5236, Horns: 0xd8cfae } },
+  // The model is a short-horned farm bull, so the aurochs's long horns, which
+  // swept out, forward and up, are added on the head bone.
+  aurochsBull: { file: 'cattle_bull', h: 2.0, coat: { Horns: 0xd8cfae }, horns: 0.8 },
+  aurochsCow: { file: 'cattle_cow', h: 1.72, coat: { Main: 0x5e3320, Main_Light: 0x7a5236, Horns: 0xd8cfae }, horns: 0.6 },
   // small dark Iron Age cattle, barely over a metre at the shoulder
   cattleIron: { file: 'cattle_cow', h: 1.22, coat: { Main: 0x3f2c20, Main_Light: 0x5d4632 } },
   // Latvian Brown
@@ -126,6 +128,59 @@ function coatFor(kind, material) {
   return c;
 }
 
+const hornMat = new THREE.MeshLambertMaterial({ color: 0xd9cfae });
+// Long horns grown from where the model's own stubs sit, parented to the
+// head bone so they nod with it. len is in metres on the finished animal.
+function addHorns(inner, len) {
+  inner.updateMatrixWorld(true);
+  const head = inner.getObjectByName('Head');
+  if (!head) return [];
+  const v = new THREE.Vector3();
+  const base = { '-1': null, '1': null };
+  inner.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    o.skeleton.update();
+    const g = o.geometry, idx = g.index, mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const gr of (g.groups.length ? g.groups : [{ start: 0, count: idx ? idx.count : g.attributes.position.count, materialIndex: 0 }])) {
+      if (mats[gr.materialIndex || 0].name !== 'Horns') continue;
+      for (let k = gr.start; k < gr.start + gr.count; k++) {
+        const i = idx ? idx.getX(k) : k;
+        o.getVertexPosition(i, v).applyMatrix4(o.matrixWorld);
+        const side = v.x < 0 ? '-1' : '1';
+        // the stub's root is its vertex nearest the skull's midline
+        if (!base[side] || Math.abs(v.x) < Math.abs(base[side].x)) base[side] = v.clone();
+      }
+    }
+  });
+  const made = [];
+  for (const side of [-1, 1]) {
+    const b = base[String(side)];
+    if (!b) continue;
+    const P = (dx, dy, dz) => new THREE.Vector3(b.x + side * dx * len, b.y + dy * len, b.z + dz * len);
+    const curve = new THREE.CatmullRomCurve3([P(0, 0, 0), P(0.42, 0.1, 0.1), P(0.6, 0.3, 0.45), P(0.42, 0.55, 0.8)]);
+    const N = 10, R = 6;
+    const geo = new THREE.TubeGeometry(curve, N, 0.075 * len, R, false);
+    const pos = geo.attributes.position;
+    for (let i = 0; i <= N; i++) {
+      const c = curve.getPoint(i / N), k = 1 - 0.9 * (i / N);      // taper to a point
+      for (let j = 0; j <= R; j++) {
+        const q = i * (R + 1) + j;
+        v.fromBufferAttribute(pos, q).sub(c).multiplyScalar(k).add(c);
+        pos.setXYZ(q, v.x, v.y, v.z);
+      }
+    }
+    geo.computeVertexNormals();
+    const horn = new THREE.Mesh(geo, hornMat);
+    horn.castShadow = true;
+    horn.name = 'aurochs-horn';
+    inner.add(horn);
+    horn.updateMatrixWorld(true);
+    head.attach(horn);
+    made.push(geo);
+  }
+  return made;
+}
+
 // -> { group, legs: [], neck: null, shoulder, model: true, pose(state, speed01, fleeing, dt) }
 export function makeAnimalModel(kind) {
   if (!hasAnimalModel(kind)) return null;
@@ -148,6 +203,7 @@ export function makeAnimalModel(kind) {
     return { group, legs: [], neck, model: true, dispose() {}, pose() {}, ...(K.extra || {}) };
   }
 
+  const hornGeos = K.horns ? addHorns(inner, K.horns) : [];
   const mixer = new THREE.AnimationMixer(inner);
   const clip = (n) => gltf.animations.find((c) => c.name === n);
   const actions = {};
@@ -166,7 +222,7 @@ export function makeAnimalModel(kind) {
   return {
     group, legs: [], neck: null, shoulder: K.h * 0.72, model: true, mixer,
     // each instance owns its skeleton (and the bone texture behind it)
-    dispose() { inner.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.dispose(); }); mixer.stopAllAction(); mixer.uncacheRoot(inner); },
+    dispose() { inner.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.dispose(); }); hornGeos.forEach((g) => g.dispose()); mixer.stopAllAction(); mixer.uncacheRoot(inner); },
     // state: 'walk' | 'graze' | 'idle'
     pose(state, speed01, fleeing, dt) {
       let a;

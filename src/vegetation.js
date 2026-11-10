@@ -7,6 +7,7 @@
 // moraine, birch and alder along water, oaks on the terrace, manor lindens.
 import * as THREE from 'three';
 import { heightAt, meshHeightAt } from './terrain.js';
+import { canopyHeightAt } from './lidar2025.js';
 import { forestDensity, distToRiver, fieldAt, farmSiteKept, nearStagePOI, distToRoadEx, ROAD_HALF_W, LOC } from './landuse.js';
 import { RIVER_PTS } from './geodata.js';
 import { RIVER, STREAM_CHANNELS, LAKE_SHORES, vegExcluded, lakeAt, riverAt, bankCharAt, bankCharSideAt, lakeShoreDistAt, waterLevelAt } from './riverzone.js';
@@ -759,7 +760,13 @@ export function* buildVegetationJob(scene, renderer) {
         else kind = r < 0.34 ? 'birch' : r < 0.6 ? 'spruce' : r < 0.82 ? 'pine' : 'oak';
         // old-growth snags in the primeval eras (near only — no far impostor)
         if ((era === 1 || era === 2) && tier === 'full' && d > 0.5 && rng() < 0.045) kind = 'snag';
-        const h = { spruce: 17, pine: 19, birch: 13, oak: 13, alder: 8, snag: 10 }[kind] * (0.75 + rng() * 0.55);
+        let h = { spruce: 17, pine: 19, birch: 13, oak: 13, alder: 8, linden: 16, snag: 10 }[kind] * (0.75 + rng() * 0.55);
+        if (era === 5) {
+          // today's stands are as tall as the laser survey measured them:
+          // young plantations stay low, old spruce reaches thirty metres
+          const ch = canopyHeightAt(x, z);
+          if (ch > 4) h = Math.min(34, ch * (0.9 + rng() * 0.25));
+        }
         const rot = rng() * 6.3, tint = 0.86 + rng() * 0.28;
         let leanX = 0, leanZ = 0;
         if (kind === 'alder') {

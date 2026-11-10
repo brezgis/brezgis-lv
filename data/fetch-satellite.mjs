@@ -66,6 +66,8 @@ for (let oy = 0; oy < OUT; oy++) {
 }
 const encoded = jpeg.encode({ data: Buffer.from(crop), width: OUT, height: OUT }, 82);
 console.log(`texture ${OUT}x${OUT}, jpeg ${(encoded.data.length / 1024).toFixed(0)} KB`);
+// the colour base that data/bake-ortho.py sharpens with the aerial photographs
+writeFileSync(new URL('./sentinel2020.jpg', import.meta.url), Buffer.from(encoded.data));
 
 // forest mask from the full-res crop region: dark-green pixels
 const MN = 176; // 50 m cells

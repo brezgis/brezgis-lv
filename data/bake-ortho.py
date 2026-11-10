@@ -10,7 +10,7 @@ their own colour bands: colour from the summer mosaic, fine structure
 
 Usage: LIDAR_CACHE=... python3 data/bake-ortho.py [N=4096] [preview.png]
 """
-import base64, glob, io, os, re, subprocess, sys
+import base64, glob, io, os, sys
 import numpy as np
 from PIL import Image
 from scipy import ndimage
@@ -42,8 +42,8 @@ ortho = np.stack([bilinear(p, r, c) for p in pre], -1)
 del mos, pre
 
 # summer colour: the Sentinel-2 drape this project has carried since July 2026
-src = subprocess.run(["git", "show", "master:src/sat2025.js"], capture_output=True, text=True, cwd=HERE).stdout
-sat = np.asarray(Image.open(io.BytesIO(base64.b64decode(re.search(r'SAT_JPEG_B64 = "([^"]+)"', src).group(1)))).convert("RGB"), np.float32)
+# (data/sentinel2020.jpg, the exact map square, written by data/fetch-satellite.mjs)
+sat = np.asarray(Image.open(os.path.join(HERE, "sentinel2020.jpg")).convert("RGB"), np.float32)
 sat = np.stack([ndimage.zoom(sat[..., k], N / sat.shape[0], order=1)[:N, :N] for k in range(3)], -1)
 sat = ndimage.gaussian_filter(sat, (N / 880 * 0.6, N / 880 * 0.6, 0))
 

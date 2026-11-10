@@ -27,8 +27,10 @@ Vidzeme, Latvia — the same spot of earth shown at six moments in time:
   station and the shore and level of eleven lakes are measured from it. The mill
   pond behind the weir below the manor is flooded at its surveyed level in the
   eras that have the weir.
-- **2025**: woodland stands where the survey measured canopy, and buildings rise
-  to their surveyed roof heights.
+- **2025**: woodland stands where the survey measured canopy, trees and buildings
+  take their surveyed heights, and the ground wears Sentinel-2 summer colour
+  sharpened with LĢIA's 25 cm orthophotos (`data/fetch-ortho.py`,
+  `data/bake-ortho.py`).
 - **Places**: the manor houses, granary, byre and brewery, the watermill, the
   old highway through Brežģis, the tavern and the Apšu church stand where the
   maps and the survey put them. See `research/historical-maps-audit.md`.
@@ -56,6 +58,8 @@ python3 data/bake-premodern.py   # take out the pit and the P30 earthworks
 python3 data/bake-hydro.py       # river, lakes, mill pond -> src/geodata.js
 python3 data/bake-terrain.py     # -> src/heightmap.js
 python3 data/bake-modern.py      # canopy and building heights -> src/lidar2025.js
+python3 data/fetch-ortho.py      # 24 orthophoto sheets -> 1 m arrays (7.5 GB of downloads)
+python3 data/bake-ortho.py       # 2025 ground texture -> src/sat2025.js
 node data/bake-animals.mjs       # models -> src/animal-assets.js
 ```
 
@@ -136,6 +140,8 @@ to Vidzeme species:
 node data/shot2.mjs out.png "eraNow=2;view=muiza;time=0.9;wait=900"
 node data/dbg.mjs out.png "era=1;time=0.42;cam=-410,200,-16;tgt=-730,187,715;hide=clouds;probe=1"
 node data/walktest.mjs   # controls regression: arrows must walk
+node data/multishot.mjs outdir "name|era|camx,agl,camz|tgtx,agl,tgtz" ...   # several shots, one boot
+node data/profile.mjs 2 pagalms   # triangles and draw calls per scene branch
 ```
 
 (Headless Chrome throttles requestAnimationFrame, hence the instant-jump hooks

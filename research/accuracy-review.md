@@ -36,3 +36,35 @@ positions, daily weather, lighting and sound are evocative simulation.
 
 The [individual-item and environment audit](../docs/item-audit.md) records the
 additional source links, visual changes and current limits of the procedural assets.
+
+## November 2026 update
+
+Four audits supersede parts of the table above. They are
+[claims-audit.md](claims-audit.md) (1800 to today),
+[prehistory-audit.md](prehistory-audit.md) (the three early eras),
+[historical-maps-audit.md](historical-maps-audit.md) (roads, mills, taverns,
+manor, woodland) and the laser survey itself (see the sixth edition in
+`WRITEUP.md`). What changed in the model as a result:
+
+| Feature | Now |
+| --- | --- |
+| Terrain | LĢIA laser survey of autumn 2019 at 4 m. The DEM is no longer sculpted for channels beyond the bed the laser cannot see. A modern gravel pit and the P30 earthworks are interpolated away. |
+| River and lakes | Width, level and shorelines measured. Depths remain inferred, except the 4.1 m sounded in Taurenes ezers. |
+| Mill and pond | Documented and mapped at the weir 450 m below the bridge. The earlier "mill not documented" row is wrong. The wheel and its side are a reconstruction. |
+| Hillfort | On its registered and surveyed hill. Unexcavated and dated only "Iron Age", so the palisade is conjecture. Alias is Brēdiķu, not Briediņu. |
+| Younger Dryas | About 10,500 BC. Sparse stunted trees, clear water, buried ice, summer coats. Lake outlines are still the modern ones. |
+| AD 50 | A small farm with burn plots and stone-kerbed barrows. Its buildings and exact site are interpretive. |
+| AD 950 | No barrows and no log hives. The flat cemetery is only labelled on the map. |
+| Manor | New house, old house, granary, byre and brewery on mapped footprints. The old house is north of the new one. |
+| Roads | The 1860 and 1935 highway is the old line through Brežģis. The hand-laid south road is removed. |
+| Brežģa krogs | On the old highway at today's Vecbrežģis. Only a tavern is ever mapped there. |
+| Surname | Recorded at Bērzaune in 1826. No record ties it to this parish yet. |
+| Church | The real Apšu (Lodes) log church of 1780, in place of a Dzērbene silhouette. |
+| Storks | None in 1860. A tree nest in 1935. |
+| 2025 | Canopy and building heights from the survey. The pit and the P30 cuttings are absent because every era shares the pre-modern ground. |
+
+Open items: the Nötkenshof revision lists (LVVA fonds 199) have not been read
+for a Breschge household. The 1860 field pattern, the 1860 woodland and the
+founding dates of the two schools on the maps are not established. The Latvian
+texts want a native reader. Reindeer, elk, swans and some ducks use stand-in
+models.

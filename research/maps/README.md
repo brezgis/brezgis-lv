@@ -29,3 +29,13 @@ Reading notes:
   Keizari/Bebri to Brežģa krogs). Caveat: the sim draws the 1935 main road on
   the modern straightened P30 alignment; the 1930s road wound slightly more.
 - **Mill pond at the manor confirmed** (pond drawn at Nēķina mž. complex).
+
+## Corrections (November 2026)
+
+See `../historical-maps-audit.md`. This sheet is the first edition (catalogued
+1922 to 1934) and repeats a Russian survey of about 1900, so "1930s" overstates
+its date. "Aldr." by the river is the brewery. "Dzr." south of the manor is
+the steam mill, not a mill at Dabari. The manor watermill is the cog symbol
+east of the bridge, where a weir still stands, and the wide water above the
+bridge is the north arm of Dabaru ezers. The highway on this sheet runs through
+Brežgakrogs. The model's roads, mill and pond now follow these readings.

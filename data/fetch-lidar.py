@@ -29,7 +29,7 @@ import numpy as np
 BASE = "https://s3.storage.pub.lvdc.gov.lv/lgia-opendata/las"
 CACHE = os.environ.get("LIDAR_CACHE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "lidar-cache")
 
-# scene frame (must match data/fetch-terrain.mjs / src/heightmap.js)
+# scene frame (must match data/lidar_common.py and src/heightmap.js)
 LAT0, LON0 = 57.15944, 25.66472
 OFF_X, OFF_Z, SPAN = 500.0, 1700.0, 8800.0
 MLAT = 111360.0

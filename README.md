@@ -8,33 +8,55 @@ Vidzeme, Latvia — the same spot of earth shown at six moments in time:
 
 | Era | Scene |
 |---|---|
-| ~10,800 BC | Younger Dryas tundra, reindeer and melting dead ice |
-| ~AD 50 | Near-wilderness: aurochs grazing the Gauja terrace, a hunters' camp |
+| ~10,500 BC | Younger Dryas shrub tundra, reindeer and buried dead ice |
+| ~AD 50 | A small Early Iron Age farm with burn plots and stone-ringed graves, aurochs in the forest meadows |
 | ~AD 950 | A Latgalian farmstead, modelled on the Āraiši lake-fortress evidence |
-| 1860 | The Brezgi viensēta under Nēķens manor |
+| 1860 | The Brezgi viensēta under Nēķens manor, the mill pond and the old highway over Brežģa kalns |
 | 1935 | Taurene, independent Latvia — farms after agrarian reform, the old palace a clinic |
-| 2025 | Satellite-mapped land cover, the Brežģa kalns tower and modern parish |
+| 2025 | Surveyed woodland and buildings, the Brežģa kalns tower and modern parish |
 
 ## Real geography
 
-- **Terrain**: real elevation model, 8.8 × 8.8 km covering Taurene and Brezģis
-  (57.15944 N, 25.66472 E), from AWS Open Data terrain tiles → `data/fetch-terrain.mjs`
-- **Water**: the actual mapped course of the Gauja, its brooks (Pīsla, Dzērbe)
-  and five lakes, from OpenStreetMap → `data/bake-geodata.mjs`; levels
-  harmonised so the river runs downhill and through its lakes as one sheet,
-  banks built on 2 m ground along every shore (`src/shore.js`,
-  `data/hydroprobe.mjs`)
-- Buildings, vegetation, animals and sound are generated procedurally. Modern
-  satellite imagery and geographic data are embedded in the offline artifact;
-  the finished scene does not fetch assets while you explore.
+- **Terrain**: bare-earth ground from the national airborne laser survey (LĢIA,
+  flown here in October and November 2019, CC BY 4.0), 8.8 × 8.8 km covering
+  Taurene and Brezģis, on a 4 m grid with a 1 m patch over Lejstupu pilskalns.
+  The gravel pit and the cuttings of the post-war P30 are smoothed out, so every
+  era shares a pre-modern surface.
+- **Water**: the mapped courses of the Gauja and its brooks (OpenStreetMap),
+  corrected against the survey. The river's width (5 to 12 m), its level at every
+  station and the shore and level of eleven lakes are measured from it. The mill
+  pond behind the weir below the manor is flooded at its surveyed level in the
+  eras that have the weir.
+- **2025**: woodland stands where the survey measured canopy, and buildings rise
+  to their surveyed roof heights.
+- **Places**: the manor houses, granary, byre and brewery, the watermill, the
+  old highway through Brežģis, the tavern and the Apšu church stand where the
+  maps and the survey put them. See `research/historical-maps-audit.md`.
+- **Animals**: freely licensed models (`assets-src/animals/SOURCES.md`). The
+  mammals are rigged and walk, graze and run.
+- Buildings, vegetation and sound are generated procedurally. Everything is
+  embedded in the offline artifact, and the finished scene fetches nothing.
 
 ## Build & run
 
 ```bash
 npm install
-node data/fetch-terrain.mjs    # (optional) re-fetch the DEM
-node data/bake-geodata.mjs     # (optional) re-bake river/lake geometry
 node build.mjs                 # bundle -> artifact/brezgi-taurene.html
+```
+
+The baked data is checked in. To rebuild it from the survey (about 30 GB of
+downloads, reduced tile by tile to about 2 GB of rasters, Python with numpy,
+scipy, scikit-image and shapely):
+
+```bash
+export LIDAR_CACHE=/some/big/disk
+python3 data/fetch-lidar.py      # 100 LAS tiles -> 1 m rasters
+python3 data/bake-lidar.py       # mosaic in the scene frame
+python3 data/bake-premodern.py   # take out the pit and the P30 earthworks
+python3 data/bake-hydro.py       # river, lakes, mill pond -> src/geodata.js
+python3 data/bake-terrain.py     # -> src/heightmap.js
+python3 data/bake-modern.py      # canopy and building heights -> src/lidar2025.js
+node data/bake-animals.mjs       # models -> src/animal-assets.js
 ```
 
 Open `artifact/brezgi-taurene.html` straight from disk (everything is inlined
@@ -77,7 +99,7 @@ the system temporary directory, printed by the test runner.
 
 See [the item audit](docs/item-audit.md) for the latest environment/asset changes
 and their remaining limits. The modern era is a 2025 interpretation using mixed
-2020/2026 inputs, not a survey-grade capture of that year.
+2019/2020/2026 inputs, not a survey-grade capture of that year.
 
 ## Graphics pipeline (third edition)
 
@@ -104,9 +126,9 @@ to Vidzeme species:
   light rig; per-pixel fbm cumulus billboards lit toward the sun; cirrus,
   dusk stars with a Milky Way band, and a fog-blended moraine horizon ring
   continuing the upland past the DEM edge.
-- **Terrain** — real DEM with multi-octave albedo detail, micro-relief
-  bump, slope-baring of glacial till, and river margins that read
-  moist-grass → mud → gravel bar.
+- **Terrain** — the surveyed ground on a 1024² mesh, lit per pixel with the
+  survey's own slopes (a relief texture) so ditches, banks and ramparts show,
+  with 2 m ground along every shore and over the hillfort.
 
 ## Verification screenshots
 

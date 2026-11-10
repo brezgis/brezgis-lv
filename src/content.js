@@ -33,8 +33,8 @@ export const ERAS = [
   },
   {
     year: 2025, label: '2025', title: "Taurene today",
-    evidence: "The 2025 view is an interpretation built from 2020 satellite imagery and 2026 map data. Building heights, tree cover, water depths and shelter designs are inferred.",
-    body: "The modern view combines two dated sources, a 2020 Sentinel-2 cloudless mosaic and 2026 OpenStreetMap data.¶ Woodland is estimated from land cover colours [23], and single trees and houses are procedural approximations. Taurene village and the wider parish cover different areas, so their population totals cannot be compared to measure decline [4][3]. The new manor still holds the parish's civic life, and the stork still keeps its nest. On Brežģa kalns stands an observation tower built in 2017. It rises eleven metres above the family hill and looks out over Alauksts, the lake chain and the whole country of this chronicle [7][24]. The Jāņi fire still burns beside it every midsummer. The aurochs have been gone for four hundred years, yet wild grazing has returned. In 2008 the Dutch rewilding foundation ARK released a herd of Konik horses, a hardy Polish breed, onto private meadows in Taurene [28]. The name holds.",
+    evidence: "The 2025 view is built from a laser survey flown in autumn 2019, 2020 satellite imagery and 2026 map data. Building forms and single trees are approximations.",
+    body: "The modern view combines three dated sources. The ground, the woodland canopy and the building heights come from the national laser survey flown in October and November 2019, the colours from a 2020 Sentinel-2 mosaic, and the roads and building outlines from 2026 OpenStreetMap data [18][23][19].¶ Single trees and houses are procedural approximations set where the survey found canopy and roofs. The gravel pit and the road cuttings of the last century are smoothed out of the ground in every era, this one included. Taurene village and the wider parish cover different areas, so their population totals cannot be compared to measure decline [4][3]. The new manor house still holds the parish's civic life, and the weir below it still holds the old mill pond. On Brežģa kalns stands an observation tower opened in 2017. It rises eleven metres above the hill and looks out over Alauksts, the lake chain and the whole country of this chronicle [7][24]. The aurochs have been gone for four hundred years, yet large grazers are back. In 2008 the Dutch foundation ARK released Konik horses, a hardy Polish breed, on private meadows in Taurene [28]. The name holds.",
     facts: [],
   },
 ];
@@ -97,9 +97,9 @@ const ERA_I18N = [
     en: { name: "Today" },
     lv: {
       title: "Taurene šodien", name: "Mūsdienas",
-      evidence: "2025. gada skats ir interpretācija, kas veidota no 2020. gada satelītattēliem un 2026. gada kartes datiem. Ēku augstumi, koku segums, ūdens dziļumi un nojumju izskats ir secināti.",
+      evidence: "2025. gada skats veidots no 2019. gada rudens lāzerskenēšanas, 2020. gada satelītattēliem un 2026. gada kartes datiem. Ēku formas un atsevišķi koki ir tuvinājumi.",
       facts: [],
-      body: "Mūsdienu skats apvieno divus datētus avotus, 2020. gada Sentinel-2 bezmākoņu mozaīku un 2026. gada OpenStreetMap datus.¶ Mežs novērtēts pēc zemes seguma krāsām [23], un atsevišķi koki un mājas ir procedurāli tuvinājumi. Taurenes ciems un plašākais pagasts aptver dažādas teritorijas, tāpēc to iedzīvotāju skaitus nevar salīdzināt, lai mērītu sarukumu [4][3]. Jaunajā pilī joprojām rit pagasta sabiedriskā dzīve, un stārķis vēl tur savu ligzdu. Uz Brežģa kalna stāv 2017. gadā celts skatu tornis. Tas paceļas vienpadsmit metrus virs dzimtas kalna un raugās pāri Alaukstam, ezeru virknei un visai šīs hronikas zemei [7][24]. Jāņu uguns tam blakus deg katros vasaras saulgriežos. Tauri zuduši jau pirms četrsimt gadiem, tomēr savvaļas ganīšanās ir atgriezusies. 2008. gadā nīderlandiešu dabas atjaunošanas fonds ARK izlaida privātās Taurenes pļavās Konik zirgu baru, izturīgu poļu šķirni [28]. Vārds turas.",
+      body: "Mūsdienu skats apvieno trīs datētus avotus. Reljefs, mežu vainagu segums un ēku augstumi nāk no valsts lāzerskenēšanas, kas veikta 2019. gada oktobrī un novembrī, krāsas no 2020. gada Sentinel-2 mozaīkas, bet ceļi un ēku kontūras no 2026. gada OpenStreetMap datiem [18][23][19].¶ Atsevišķi koki un mājas ir procedurāli tuvinājumi, kas novietoti tur, kur skenēšana atrada vainagus un jumtus. Pagājušā gadsimta grants karjers un ceļa ierakumi ir izlīdzināti visos laikmetos, arī šajā. Taurenes ciems un plašākais pagasts aptver dažādas teritorijas, tāpēc to iedzīvotāju skaitus nevar salīdzināt, lai mērītu sarukumu [4][3]. Jaunajā pilī joprojām rit pagasta sabiedriskā dzīve, un aizsprosts zem tās joprojām uztur veco dzirnavu dīķi. Uz Brežģa kalna stāv 2017. gadā atklāts skatu tornis. Tas paceļas vienpadsmit metrus virs kalna un raugās pāri Alaukstam, ezeru virknei un visai šīs hronikas zemei [7][24]. Tauri zuduši jau pirms četrsimt gadiem, tomēr lielie zālēdāji ir atgriezušies. 2008. gadā nīderlandiešu fonds ARK privātās Taurenes pļavās izlaida Konik zirgus, izturīgu poļu šķirni [28]. Vārds turas.",
     },
   },
 ];
@@ -119,7 +119,7 @@ export const INTRO = {
   "lv": {
     "kicker": "Taurenes pagasts, Cēsu novads, Latvija",
     "paras": [
-      "Attēlota 8,8 km plata teritorija ap Taurenes ciemu sešos laikmetos, no aptuveni 10 500. gada p. m. ē. līdz mūsdienām. Reljefa pamatā ir digitālais augstuma modelis, upju un ezeru pamatā ir kartogrāfiskie dati.",
+      "Attēlota 8,8 km plata teritorija ap Taurenes ciemu sešos laikmetos, no aptuveni 10 500. gada p. m. ē. līdz mūsdienām. Reljefa pamatā ir 2019. gada valsts lāzerskenēšana, bet upes un ezeri ir kartētās gultnes, kas pārbaudītas pēc tās.",
       "Katrs laikmets ir rekonstrukcija. Laikmetu aprakstos ir nošķirti dokumentētie, secinātie un iztēlotie elementi, un visi avoti ir uzskaitīti Hronikā."
     ],
     "how": "WASD vai bultiņas kustībai, 1 līdz 6 laikmetiem, M kartei.",
@@ -139,7 +139,7 @@ export const INTRO = {
   "en": {
     "kicker": "Taurene parish, Cēsis Municipality, Latvia",
     "paras": [
-      "The area shown is an 8.8 km square around Taurene, in six eras from about 10,500 BC to the present. The terrain is based on a digital elevation model, and the rivers and lakes on mapped hydrography.",
+      "The area shown is an 8.8 km square around Taurene, in six eras from about 10,500 BC to the present. The ground is the national laser survey of 2019, and the rivers and lakes are mapped courses checked against it.",
       "Each era is a reconstruction. Documented, inferred and imagined elements are distinguished in each era's text, and all sources are listed in the Chronicle."
     ],
     "how": "WASD or arrow keys to move, 1 to 6 for eras, M for the map.",
@@ -202,4 +202,5 @@ export const SOURCES = [
   { n: 38, t: 'White stork in Latvia, Latvian Ornithological Society (1934 census, nests in trees)', u: 'https://www.lob.lv/wp-content/uploads/2016/04/starku_brosura.pdf' },
   { n: 39, t: 'Brežģis, Latvian surname dictionary, Latvian Language Agency (1826 record at Bērzaune, etymology)', u: 'https://uzvardi.lv/surname/608487' },
   { n: 40, t: 'Historic map layers read for the roads, mills, taverns and woodland (Rücker 1839, Russian 3-verst and 1-verst, Latvian Army 1:75,000, Heereskarte 1943, Soviet 1:25,000), via vesture.dodies.lv', u: 'https://vesture.dodies.lv/' },
+  { n: 41, t: 'Animal models: Quaternius (CC0), Saltflower and XaosXV via OpenGameArt (CC0), AssetQuest (CC0), Poly by Google, Gwym Hendawyr and jeremy via Poly Pizza (CC BY 3.0)', u: 'https://quaternius.com/' },
 ];

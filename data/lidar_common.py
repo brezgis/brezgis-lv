@@ -1,6 +1,6 @@
 """Shared helpers for the LiDAR bake: scene frame <-> LKS-92, mosaic loading.
 
-The scene frame is the one every other baked dataset uses (data/bake-geodata.mjs):
+The scene frame is the one every other baked dataset uses (data/bake-roads.mjs):
 origin at Taurene village centre, x east, z south, metres from a local
 equirectangular approximation. That approximation is about 0.24 % short in the
 east-west direction against true ground metres (11 m at the east edge of the

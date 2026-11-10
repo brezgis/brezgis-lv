@@ -352,7 +352,62 @@ water from the hydrology up:
   shoreline distance instead of meeting the 2 m ground triangles in a
   sawtooth.
 
+## Sixth edition: surveyed ground
+
+The ground used to come from 27 m elevation tiles that carry the forest canopy
+as if it were hills. It is now the national airborne laser survey, flown over
+this square on three days in October and November 2019, reduced to bare earth
+on a 4 m grid. Most of what follows is what that survey showed once it could be
+looked at.
+
+- **The river is small.** The model's Gauja was 20 m wide. The survey measures
+  5 to 7 m in the south and 10 to 12 m below the lakes, so the channel, its
+  levels and its inferred depths were rebuilt from the measurements.
+- **The banks are the banks.** The shore law used to model a bank, a bench and
+  a valley side for 30 m either side of the water. The laser sees all of that,
+  so the law now only cuts the bed it cannot see and leads the wet lip onto the
+  surveyed ground.
+- **The lakes are traced.** Eleven lakes take their shore and level from the
+  survey. Taurenes ezers comes out at 31.8 ha against a published 31. The water
+  beside the staged farm turned out to be the north arm of Dabaru ezers, a
+  hundred metres wide, and the bridge the model had laid across it is gone.
+- **The mill pond is real.** A weir with a head of 2.2 m still stands on the
+  Gauja 450 m below the manor bridge. The Russian map of the 1860s, the Latvian
+  Army sheet and photographs of 1980 put the manor's fieldstone watermill there.
+  The dam, the mill and the pond moved to that place and the pond stands in
+  1860, 1935 and 2025.
+- **The hillfort moved 150 m.** Lejstupu (Brēdiķu) pilskalns sits on its
+  registered and surveyed hill, drawn at 1 m, instead of in a field to the
+  north-west.
+- **The manor is on its footprints.** The new house, Vecmuiža, the granary, the
+  byre and the brewery stand where the mapped and surveyed buildings are. In
+  1860 the new house's site is empty.
+- **The highway is the old one.** In 1860 and 1935 the Cēsis to Vecpiebalga
+  road climbs past the trig point on Brežģa kalns and the tavern door, as every
+  sheet from 1839 to the Soviet 1:25,000 draws it. The straight P30 is a
+  post-war bypass whose cuttings, with a modern gravel pit, are smoothed out of
+  the ground for every era.
+- **2025 is measured.** Woodland follows the surveyed canopy and buildings take
+  their surveyed heights.
+
+Three research audits in `research/` drove the other changes. The tundra is set
+at about 10,500 BC with sparse trees and clear water. AD 50 is a small farm,
+because graves of that century are known in the parish. The burial mounds
+belong to that era and not to the Latgalians of AD 950, who buried in flat
+cemeteries. Storks are gone from 1860. The 1935 scene gained its steam mill and
+the tavern at the bridge. The Zālīte lines the first edition quoted are a pun
+on butterflies, and Bormanis's own verse of 1925 replaces them. The surname
+dictionary places Brežģis at Bērzaune in 1826, so the link between the family
+and this hill is now stated as a possibility.
+
+The animals are no longer assembled from boxes and cylinders. They are freely
+licensed low-poly models, the mammals rigged with walk, graze and run cycles.
+
 ## Sources
+
+The current, numbered source list is `SOURCES` in `src/content.js`, shown in
+the app under Chronicle and sources. The list below is the first edition's.
+
 
 1. Kārlis Bormanis — Vikipēdija. <https://lv.wikipedia.org/wiki/K%C4%81rlis_Bormanis>
 2. "Laipni lūdzam Taurenes pagastā!" — Taurenes bibliotēka parish-history presentation. <https://www.slideshare.net/Taurbiblio/laipni-ludzam-taurenes-pagastamd>

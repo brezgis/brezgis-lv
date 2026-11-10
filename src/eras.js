@@ -1,5 +1,5 @@
 // The six moments in time, staged on the same ground:
-//   0  ~10,800 BC — Younger Dryas tundra: reindeer, dead ice, no one yet
+//   0  ~10,500 BC — Younger Dryas tundra: reindeer, dead ice, no one yet
 //   1  ~AD 50     — wilderness: aurochs on the terrace, a hunters' camp
 //   2  ~AD 950    — a Latgalian farmstead (built on the Āraiši evidence)
 //   3  1860       — the Brezgi viensēta under Nēķens (Nötkenshof) manor
@@ -18,14 +18,15 @@ import { MAT, WINDOW_GLOW } from './textures.js';
 import { roadMaterial, buildingMaterial, fieldMaterial } from './surfaces.js';
 import { buildRoadside } from './roadside.js';
 import { heightAt, meshHeightAt } from './terrain.js';
-import { LOC, BUMPS, BRIDGE, BRIDGE2, riverXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W, fieldsForEra, FIELD_COLORS, blobInset } from './landuse.js';
-import { riverAt, streamAt, lakeAt, pondAt, vegExcluded, waterLevelAt, RIVER, STREAM_CHANNELS } from './riverzone.js';
+import { LOC, BUMPS, isLidumEra, BRIDGE2, riverXAt, shoreXAt, riverLevelAt, farmSiteKept, ERA2_FARMS, distToRiver, distToStreams, distToRoadEx, nearStagePOI, osmRoadsForEra, roadJunctionsForEra, ROAD_HALF_W, fieldsForEra, FIELD_COLORS, blobInset } from './landuse.js';
+import { riverAt, streamAt, lakeAt, pondAt, pondEra, vegExcluded, waterLevelAt, RIVER, STREAM_CHANNELS } from './riverzone.js';
 import { registerFootprints, registerTrample, buildingAt, stageFootprint } from './footprints.js';
 import { LAKES, RIVER_PTS } from './geodata.js';
 import { BUILDINGS_OSM, DWELLINGS_OSM } from './geodata-osm.js';
-import { mulberry32, pointInPoly, chaikinPoly } from './util.js';
+import { mulberry32, pointInPoly, chaikinPoly, clamp } from './util.js';
 import { bakeSpeciesGeometry } from './animals.js';
 import { HM_OFF_X, HM_OFF_Z, HM_SPAN } from './heightmap.js';
+import { BUILDING_HEIGHTS } from './lidar2025.js';
 
 const S = LOC.STEAD, C = LOC.CAMP, Mn = LOC.MANOR, P = LOC.POND, B = LOC.BREZGA, K = LOC.KROGS;
 
@@ -889,7 +890,7 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     if (st && st.d < st.hw + 1) return true;
     const lk = lakeAt(x, z);
     if (lk && heightAt(x, z) < lk.level + 0.5) return true;
-    if ((era === 3 || era === 4) && pondAt(x, z)) return true;
+    if (pondEra(era) && pondAt(x, z)) return true;
     return false;
   };
   const waterBlocked = (it) => cornersOf(it).some(([x, z]) => waterBlockedAt(x, z));
@@ -1128,8 +1129,15 @@ function bgSettlement(group, era, smokes, stageItems = []) {
     const y = minH - 0.1;
     const plinth = maxH - minH;
     const levels=it.metadata?.levels;
-    const wallH = (levels ? Math.min(5,levels)*2.8 : it.big ? 4.6 + rng() * 1.4 : Math.min(3.4, Math.max(2.3, Math.min(it.w, it.d) * 0.5))) + plinth;
-    const roofH = it.metadata?.roof==='flat' ? .12 : Math.min(5.5,Math.min(it.w, it.d) * (era === 3 ? 0.52 : it.big ? .20 : .42));
+    let wallH = (levels ? Math.min(5,levels)*2.8 : it.big ? 4.6 + rng() * 1.4 : Math.min(3.4, Math.max(2.3, Math.min(it.w, it.d) * 0.5))) + plinth;
+    let roofH = it.metadata?.roof==='flat' ? .12 : Math.min(5.5,Math.min(it.w, it.d) * (era === 3 ? 0.52 : it.big ? .20 : .42));
+    // today's buildings stand as high as the laser survey measured them
+    const surveyed = era === 5 ? BUILDING_HEIGHTS[it.metadata?.id] : null;
+    if (surveyed) {
+      const [eave, ridge] = surveyed;
+      roofH = it.metadata?.roof === 'flat' ? .12 : clamp(ridge - eave, 0.4, 7);
+      wallH = Math.max(1.9, ridge - roofH) + plinth;
+    }
     wallFinishes[i]=era===5?(i%4===0?1:i%3===0?2:0):2;
     roofFinishes[i]=era===5?i%3===0?1:0:1;
     dummy.position.set(it.x, y, it.z);
@@ -1693,7 +1701,7 @@ function wildSpawns(era, spawns) {
     spawns.push(['fox', 1, { x: S2.x + 500, z: S2.z - 500, r: 130 }, { speed: 1.2, grazeBias: 0.45 }]);
     spawns.push(['hare', 2, wideMeadow, HOP_HARE]);
     spawns.push(['frog', 4, { x: LOC.DAM.x + LOC.DAM.nx * (LOC.DAM.hw + 4) - LOC.DAM.dx * 40, z: LOC.DAM.z + LOC.DAM.nz * (LOC.DAM.hw + 4) - LOC.DAM.dz * 40, r: 12 }, HOP_FROG]);
-    spawns.push(['stork', 2, { x: S2.x - 100, z: S2.z + 150, r: 55 }, { speed: 0.4, grazeBias: 0.55 }]);
+    if (era === 4) spawns.push(['stork', 2, { x: S2.x - 100, z: S2.z + 150, r: 55 }, { speed: 0.4, grazeBias: 0.55 }]);
     spawns.push(['duckM', 2, { x: LOC.DAM.x - LOC.DAM.dx * 60, z: LOC.DAM.z - LOC.DAM.dz * 60, r: 25 }, { medium: 'water', levelFn: (x, z) => waterLevelAt(x, z, era), inWater: (x, z) => !!pondAt(x, z), speed: 0.5 }]);
   } else {
     // the quiet century: the forest fauna is back
@@ -1826,7 +1834,7 @@ function fieldDecals(era) {
     const tint = (0.9 + f.tint * 0.18) * 0.56;
     // ragged border: Iron Age plots are small irregular clearings, later
     // fields still fray into their balks — never a ruled outline
-    const rag = era === 2 ? 3.5 : 3.2;
+    const rag = isLidumEra(era) ? 3.5 : 3.2;
     for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
       const u = -f.hw + (2 * f.hw * i) / nu, v = -f.hh + (2 * f.hh * j) / nv;
       const x = f.cx + u * c - v * s, z = f.cz + u * s + v * c;
@@ -1929,8 +1937,8 @@ export function buildEra(era, ctx) {
   };
   const smokes = [], fires = [];
   const spawns = [];
-  if (era >= 2 && era <= 4) { const fd = fieldDecals(era); if (fd) g.add(fd); }
-  if (era === 2) { const lp = lidumsProps(era); if (lp) g.add(lp); }
+  if (era >= 1 && era <= 4) { const fd = fieldDecals(era); if (fd) g.add(fd); }
+  if (isLidumEra(era)) { const lp = lidumsProps(era); if (lp) g.add(lp); }
   g.userData.fenceGates = {};
   const addStageFence = (kind, pts, label) => {
     refreshFootprints();
@@ -1945,7 +1953,7 @@ export function buildEra(era, ctx) {
     g.userData.fenceGates[label] = { openings: split.gates, droppedSamples: split.dropped };
   };
 
-  // ======================= 0 · ~10,800 BC =================================
+  // ======================= 0 · ~10,500 BC =================================
   if (era === 0) {
     refreshFootprints();
     // dead ice stranded in the future lake basins — the lakes being born
@@ -1963,24 +1971,38 @@ export function buildEra(era, ctx) {
 
   // ======================= 1 · ~AD 50 ======================================
   if (era === 1) {
-    add(leanTo(), C.x, C.z, -0.6);
-    markBuilding(C.x-1.3*Math.sin(-.6), C.z-1.3*Math.cos(-.6), 3.8, 3.2, -0.6);
+    // A small Early Iron Age farm. Stone graves of the 1st century AD are
+    // known in this parish (Gailīši) and pollen from the same upland shows
+    // burning and cereals by this date, so the terrace holds a household
+    // with burn plots and a few animals, not a hunters' camp. The buildings
+    // are an interpretation: no house of this date has been excavated here.
+    add(logCabin({ w: 4.2, d: 5.2, wallH: 1.7, roofH: 2.0, roof: 'barkGable', doorEnd: true, old: true }), C.x - 7, C.z - 6, 0.35);
+    markBuilding(C.x - 7, C.z - 6, 4.2, 5.2, 0.35);
+    smokes.push([C.x - 7, meshHeightAt(C.x - 7, C.z - 6) + 3.6, C.z - 6, { rate: 0.5, gray: 0.76 }]);
+    add(logCabin({ w: 3.4, d: 4.4, wallH: 1.5, roofH: 1.7, roof: 'barkGable', old: true }), C.x + 8, C.z - 7, 1.7);
+    markBuilding(C.x + 8, C.z - 7, 3.4, 4.4, 1.7);
+    add(leanTo(), C.x - 11, C.z + 8, -0.6);
+    markBuilding(C.x - 11 - 1.3 * Math.sin(-.6), C.z + 8 - 1.3 * Math.cos(-.6), 3.8, 3.2, -0.6);
     refreshFootprints();
+    addRaw(barrowMounds(BUMPS, 1));
+    addRaw(barrowStones(BUMPS));
     add(campfire({cooking:false}), C.x + 3.4, C.z + 2.2);
     fires.push([C.x + 3.4, meshHeightAt(C.x + 3.4, C.z + 2.2) + 0.15, C.z + 2.2]);
     smokes.push([C.x + 3.4, meshHeightAt(C.x + 3.4, C.z + 2.2) + 0.9, C.z + 2.2, { rate: 1.1, gray: 0.8 }]);
     add(fishRack(), C.x - 3, C.z + 3.5, 0.4);
-    add(dugoutCanoe(), riverXAt(C.z + 20) + 7, C.z + 20, 1.2);
+    add(dugoutCanoe(), shoreXAt(C.z + 20) + 1.5, C.z + 20, 1.2);
     const meadow = { x: S.x - 20, z: S.z + 30, r: 70 };
     spawns.push(['aurochsBull', 1, meadow]);
     spawns.push(['aurochsCow', 3, meadow]);
     spawns.push(['aurochsCalf', 1, meadow]);
     spawns.push(['elk', 2, { x: S.x + 250, z: S.z + 190, r: 50 }]);
+    spawns.push(['cattleIron', 3, { x: C.x + 40, z: C.z + 95, r: 30 }]);
+    spawns.push(['sheepDark', 3, { x: C.x + 25, z: C.z + 30, r: 18 }]);
+    spawns.push(['pig', 2, { x: C.x + 14, z: C.z + 12, r: 10 }]);
   }
 
   // ======================= 2 · ~AD 950 =====================================
   if (era === 2) {
-    addRaw(barrowMounds(BUMPS, 1));
     const dw = add(logCabin({ w: 5, d: 6, wallH: 2.0, roofH: 2.2, roof: 'barkGable', doorEnd: true }), S.x - 5, S.z - 9, 0.15);
     markBuilding(S.x - 5, S.z - 9, 5, 6, 0.15);
     void dw;
@@ -2007,13 +2029,10 @@ export function buildEra(era, ctx) {
     ], 'stead-wattle');
     add(haystack(2.8), S.x - 24, S.z + 24);
     add(haystack(2.4), S.x - 30, S.z + 18);
-    add(beehiveLog(), S.x + 26, S.z - 20, 0.3);
-    add(beehiveLog(), S.x + 30, S.z - 15, -0.2);
-    add(dugoutCanoe(), riverXAt(S.z + 60) + 6, S.z + 60, 1.45);
-    const logBridge = add(bridge(true), BRIDGE.x, BRIDGE.z, 0);
-    logBridge.position.y = riverLevelAt(BRIDGE.z) + 0.35;
+    // no log hives in the yard: honey in this period came from cavities
+    // cut in living forest trees, and standing log hives are a later form
+    add(dugoutCanoe(), shoreXAt(S.z + 60) + 1.5, S.z + 60, 1.45);
     add(offeringPile(), LOC.OAK.x + 2.5, LOC.OAK.z + 1.5);
-    addRaw(barrowStones(BUMPS));
     // the neighbours: dispersed Latgalian viensētas on the same terrace,
     // each a smoke-dwelling + granary or byre in a small stake-fenced yard
     ERA2_FARMS.forEach((f, i) => {
@@ -2049,7 +2068,6 @@ export function buildEra(era, ctx) {
 
   // ======================= 3 & 4 · 1860 / 1935 =============================
   if (era === 3 || era === 4) {
-    addRaw(barrowMounds(BUMPS, era === 3 ? 0.9 : 0.82));
     const modern = era === 4;
     add(logCabin({
       w: 6.5, d: 12, wallH: 2.5, roofH: 2.9,
@@ -2065,7 +2083,7 @@ export function buildEra(era, ctx) {
     markBuilding(S.x - 21, S.z + 5, 5.5, 13, 0.03);
     add(rija(), S.x + 17, S.z + 36, 0.5);
     markBuilding(S.x + 17, S.z + 36, 8, 13, 0.5);
-    const px = riverXAt(S.z + 85) + 16, pz = S.z + 85;
+    const px = shoreXAt(S.z + 85) + 14, pz = S.z + 85;
     add(logCabin({ w: 3.4, d: 4.2, wallH: 1.7, roofH: 1.9, roof: 'thatchGableOld', old: true, doorEnd: true }), px, pz, -0.4);
     markBuilding(px, pz, 3.4, 4.2, -0.4);
     smokes.push([px, meshHeightAt(px, pz) + 3.6, pz, { rate: 1.25, gray: 0.66 }]);
@@ -2082,28 +2100,30 @@ export function buildEra(era, ctx) {
     if (propOK(era, S.x - 36, S.z + 42, 2.0)) add(haystack(3.4), S.x - 36, S.z + 42);
     if (propOK(era, S.x - 44, S.z + 34, 1.8)) add(haystack(3), S.x - 44, S.z + 34);
     for (let i = 0; i < 3; i++) add(beehiveLog(), S.x - 20 + i * 4, S.z - 36, i);
-    add(rowboat(), riverXAt(S.z + 62) + 6.5, S.z + 62, 1.5);
-    const wb = add(bridge(false), BRIDGE.x, BRIDGE.z, 0);
-    wb.position.y = riverLevelAt(BRIDGE.z) + 0.2;
+    add(rowboat(), shoreXAt(S.z + 62) + 1.5, S.z + 62, 1.5);
     const nb = add(bridge(false), BRIDGE2.x, BRIDGE2.z, Math.PI / 2);
     nb.position.y = BRIDGE2.level + 0.2;
-    add(storkNestPole(), S.x + 30, S.z + 22);
+    if (modern) add(storkNestPole({ tree: true }), S.x + 30, S.z + 22);
 
-    // the manor: old classicist house in 1860; brick new manor from 1888 on
-    const mh = add(modern ? manorNew({ flag: false }) : manorHouse({ flag: false }), Mn.x, Mn.z, 0.35);
-    markBuilding(Mn.x, Mn.z, modern ? 26 : 30, modern ? 14 : 13, 0.35);
-    if (mh.userData.tick) ticks.push(mh.userData.tick);
+    // The manor on its mapped footprints: the old house (Vecmuiža) in both
+    // centuries, the brick new house beside it from 1888 on, the granary
+    // below the old house and the long byre by the road.
+    const MO = LOC.MANOR_OLD, MK = LOC.MANOR_KLETS, MB = LOC.MANOR_KUTS;
+    const oh = add(manorHouse({ flag: false }), MO.x, MO.z, MO.rot);
+    markBuilding(MO.x, MO.z, 30, 13, MO.rot);
+    if (oh.userData.tick) ticks.push(oh.userData.tick);
     if (modern) {
-      add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
-      markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
+      const mh = add(manorNew({ flag: false }), Mn.x, Mn.z, 0.35);
+      markBuilding(Mn.x, Mn.z, 26, 14, 0.35);
+      if (mh.userData.tick) ticks.push(mh.userData.tick);
     }
-    add(manorOutbuilding(22), Mn.x - 52, Mn.z - 14, 0.35 + Math.PI / 2);
-    markBuilding(Mn.x - 52, Mn.z - 14, 22, 8, 0.35 + Math.PI / 2);
-    add(manorOutbuilding(16), Mn.x + 58, Mn.z - 12, 1.56);
-    markBuilding(Mn.x + 58, Mn.z - 12, 16, 8, 1.56);
-    add(brewery(), P.x + 58, P.z + 48, Math.PI * 0.72);
-    markBuilding(P.x + 58, P.z + 48, 16, 7.5, Math.PI * 0.72);
-    smokes.push([Mn.x - 8, meshHeightAt(Mn.x, Mn.z) + 9.6, Mn.z, { rate: 0.4, gray: 0.88 }]);
+    add(manorOutbuilding(34), MK.x, MK.z, MK.rot);
+    markBuilding(MK.x, MK.z, 34, 8, MK.rot);
+    add(manorOutbuilding(46), MB.x, MB.z, MB.rot);
+    markBuilding(MB.x, MB.z, 46, 8, MB.rot);
+    add(brewery(), LOC.BREWERY.x, LOC.BREWERY.z, LOC.BREWERY.rot);
+    markBuilding(LOC.BREWERY.x, LOC.BREWERY.z, 16, 7.5, LOC.BREWERY.rot);
+    smokes.push([MO.x - 8, meshHeightAt(MO.x, MO.z) + 9.6, MO.z, { rate: 0.4, gray: 0.88 }]);
     // The mill weir spans the Gauja; the mill stands in the far bank just
     // below it, its floor half a storey down so the undershot wheel meets
     // the water a plank flume brings it from the pond.
@@ -2132,7 +2152,7 @@ export function buildEra(era, ctx) {
       addRaw(mill);
       markBuilding(Mi.x, Mi.z, 8, 7, Mi.rot);
       // flume: from the pond just above the dam to the wheel's axle
-      const wheel = new THREE.Vector3(-3.2, 1.2, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), Mi.rot).add(mill.position);
+      const wheel = new THREE.Vector3(-3.7, 1.2, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), Mi.rot).add(mill.position);
       const f0 = new THREE.Vector3(D.x + D.nx * (D.hw - 2) - D.dx * 2.5, L - 0.12, D.z + D.nz * (D.hw - 2) - D.dz * 2.5);
       const f1 = new THREE.Vector3(wheel.x, L - 0.12, wheel.z);
       const flen = f0.distanceTo(f1);
@@ -2162,6 +2182,18 @@ export function buildEra(era, ctx) {
     add(krogs(), K.x - 16, K.z + 2, 0.28);
     markBuilding(K.x - 16, K.z + 2, 18, 8.5, 0.28);
     smokes.push([K.x - 19, meshHeightAt(K.x - 16, K.z + 2) + 5.2, K.z + 2, { rate: 0.4, gray: 0.85 }]);
+    // The crossroads tavern on the north bank by the bridge: on the 1905
+    // sheet and in a 1932 photograph. The parish board moved into the
+    // rebuilt building in 1935-36, and the farm there is still called Tožas.
+    add(krogs(), -79, -472, 0.5);
+    markBuilding(-79, -472, 18, 8.5, 0.5);
+    if (modern) {
+      // The steam mill 600 m south of the manor ("Пар. мук." 1905, "D.M."
+      // 1914, "Dzr." in the 1920s). The 1860s sheet does not have it.
+      add(logCabin({ w: 8, d: 14, wallH: 3.4, roofH: 3.0, roof: 'shingleGable', hasChimney: true, windows: 3, windowStyle: 'framed' }), -158, 171, 0.2);
+      markBuilding(-158, 171, 8, 14, 0.2);
+      smokes.push([-158, meshHeightAt(-158, 171) + 8.2, 171, { rate: 0.7, gray: 0.6 }]);
+    }
     // Jāņi fire pyre on Brežģa kalns — the parish's festival hill
     add(pyre(), B.x, B.z, 0.4);
     fires.push([B.x, meshHeightAt(B.x, B.z) + 0.9, B.z, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
@@ -2201,17 +2233,18 @@ export function buildEra(era, ctx) {
     spawns.push(['chicken', modern ? 4 : 5, { x: S.x + 2, z: S.z + 2, r: 12 }]);
     spawns.push(['rooster', 1, { x: S.x + 2, z: S.z + 2, r: 12 }]);
     spawns.push(['goose', modern ? 3 : 4, { x: S.x - 10, z: S.z + 14, r: 14 }]);
-    spawns.push(['storkNest', 1, { x: S.x + 30, z: S.z + 22, r: 0 }]);
-    spawns.push(['stork', 1, { x: S.x - 90, z: S.z + 50, r: 40 }]);
-    // nests scattered on the background farms too — the stork parish
-    spawns.push(['storkNest', 1, { x: 812, z: 452, r: 0 }]);
-    spawns.push(['storkNest', 1, { x: 439, z: -455, r: 0 }]);
+    if (modern) {
+      // White storks only spread across Latvia from the middle of the
+      // nineteenth century, so the 1860 farm has none. The 1934 stork census
+      // found nearly every nest in a tree, which is where this one sits.
+      spawns.push(['storkNest', 1, { x: S.x + 30, z: S.z + 22, r: 0, h: 7.95 }]);
+      spawns.push(['stork', 1, { x: S.x - 90, z: S.z + 50, r: 40 }]);
+    }
     spawns.push(['horseBay', 1, { x: K.x + 14, z: K.z + 16, r: 8 }]); // traveller's horse at the krogs
   }
 
   // ======================= 5 · 2025 ========================================
   if (era === 5) {
-    addRaw(barrowMounds(BUMPS, 0.72));
     // the farmstead site today: renovated house, the old klēts, a car
     add(modernHouse(), S.x, S.z - 14, Math.PI / 2);
     markBuilding(S.x, S.z - 14, 9.5, 7, Math.PI / 2);
@@ -2222,20 +2255,34 @@ export function buildEra(era, ctx) {
     add(storkNestPole(), S.x + 30, S.z + 22);
     add(poemStone(), LOC.STONE.x, LOC.STONE.z, -0.5);
 
-    // the manor ensemble survives: new manor (parish house), old manor, outbuildings
+    // the manor ensemble survives on its mapped footprints
     const mh = add(manorNew({ flag: true }), Mn.x, Mn.z, 0.35);
     markBuilding(Mn.x, Mn.z, 26, 14, 0.35);
     if (mh.userData.tick) ticks.push(mh.userData.tick);
-    add(manorHouse({ flag: false }), Mn.x - 105, Mn.z - 15, 0.9);
-    markBuilding(Mn.x - 105, Mn.z - 15, 30, 13, 0.9);
-    add(manorOutbuilding(22), Mn.x - 52, Mn.z - 14, 0.35 + Math.PI / 2);
-    markBuilding(Mn.x - 52, Mn.z - 14, 22, 8, 0.35 + Math.PI / 2);
-    add(manorOutbuilding(16), Mn.x + 58, Mn.z - 12, 1.56);
-    markBuilding(Mn.x + 58, Mn.z - 12, 16, 8, 1.56);
+    {
+      const MO = LOC.MANOR_OLD, MK = LOC.MANOR_KLETS, MB = LOC.MANOR_KUTS;
+      add(manorHouse({ flag: false }), MO.x, MO.z, MO.rot);
+      markBuilding(MO.x, MO.z, 30, 13, MO.rot);
+      add(manorOutbuilding(34), MK.x, MK.z, MK.rot);
+      markBuilding(MK.x, MK.z, 34, 8, MK.rot);
+      add(manorOutbuilding(46), MB.x, MB.z, MB.rot);
+      markBuilding(MB.x, MB.z, 46, 8, MB.rot);
+    }
     add(churchSilhouette(), LOC.CHURCH.x, LOC.CHURCH.z, 0.8);
     markBuilding(LOC.CHURCH.x, LOC.CHURCH.z, 38, 24, 0.8);
     const nb = add(bridge(false), BRIDGE2.x, BRIDGE2.z, Math.PI / 2);
     nb.position.y = BRIDGE2.level + 0.2;
+    // the weir still holds the pond: a plain concrete sill where the mill dam stood
+    {
+      const D = LOC.DAM, L = ctx.water.pondLevel;
+      const len = 2 * (D.hw + 6), bed = D.level - 1.6, top = L + 0.12;
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(len, top - bed, 1.5), new THREE.MeshLambertMaterial({ color: 0x8f8d86 }));
+      sill.position.set(D.x, (top + bed) / 2, D.z);
+      sill.rotation.y = Math.atan2(-D.nz, D.nx);
+      sill.castShadow = sill.receiveShadow = true;
+      sill.name = 'weir';
+      addRaw(sill);
+    }
 
     // Brezgis today: two quiet houses where the krogs stood
     add(modernHouse(), K.x - 20, K.z + 6, 0.3);
@@ -2300,7 +2347,7 @@ export function applySpawns(mgr, spawns) {
         rec.group.scale.setScalar(0.58);
       } else if (kind === 'storkNest') {
         const rec = mgr.spawn('stork', { ...home, r: 0.1 }, { static: true });
-        rec.group.position.y = meshHeightAt(home.x, home.z) + 5.75;
+        rec.group.position.y = meshHeightAt(home.x, home.z) + (home.h ?? 5.75);
       } else {
         mgr.spawn(kind, home, opts);
       }

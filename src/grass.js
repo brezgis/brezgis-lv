@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { heightAt, meshHeightAt } from './terrain.js';
 import { forestDensity, distToRiver, distToRoad, distToRoadEx, ROAD_HALF_W, fieldAt, PADS, ERA2_FARMS, LOC } from './landuse.js';
-import { vegExcluded, lakeShoreWavyAt, lakeAt, streamAt, pondAt } from './riverzone.js';
+import { vegExcluded, lakeShoreWavyAt, lakeAt, streamAt, pondAt, pondEra } from './riverzone.js';
 import { shoreBodies } from './shore.js';
 import { buildingAt, trampleAt } from './footprints.js';
 import { mulberry32, makeNoise, smoothstep as smoothstepJ } from './util.js';
@@ -330,7 +330,7 @@ export function buildGrass(scene) {
           const y = heightAt(x, z);
           if (forestDensity(era, x, z, y) > 0.3) continue;
           if (buildingAt(era, x, z, 0.3)) continue;
-          if (era >= 2) {
+          if (era >= 1) {
             if (fieldAt(era, x, z)) continue;
             const road = distToRoadEx(era, x, z);
             if (road.d < ROAD_HALF_W[road.c] + 0.3) continue;
@@ -413,11 +413,11 @@ export function buildGrass(scene) {
         if (cellOK && (cDRiv < 45 || dSh < 30 || streamAt(ccx, ccz))) {
           for (const b of shoreBodies(ccx, ccz)) if (b.e < cell + 6 && b.level > cWater) cWater = b.level;
         }
-        if (cellOK && (era === 3 || era === 4) && pondAt(ccx, ccz)) cWater = Math.max(cWater, LOC.POND_LEVEL);
+        if (cellOK && pondEra(era) && pondAt(ccx, ccz)) cWater = Math.max(cWater, LOC.POND_LEVEL);
       }
       if (cellOK) {
         cFd = forestDensity(era, ccx, ccz, cY);
-        if (!band.roadPerBlade && era >= 2 && distToRoad(era, ccx, ccz) < 0.6) cellOK = false;
+        if (!band.roadPerBlade && era >= 1 && distToRoad(era, ccx, ccz) < 0.6) cellOK = false;
       }
       if (cellOK) {
         for (const p of PADS) {
@@ -430,7 +430,7 @@ export function buildGrass(scene) {
           }
         }
         if (!cTrodden && trampleAt(era, ccx, ccz, 0.5)) cTrodden = true;   // paddocks graze bare
-        cFa = era >= 2 ? fieldAt(era, ccx, ccz) : null;
+        cFa = era >= 1 ? fieldAt(era, ccx, ccz) : null;
       }
       if (!cellOK) return;
     }
@@ -459,7 +459,7 @@ export function buildGrass(scene) {
         fd = cFd;
         trodden = cTrodden;
         fa = cFa;
-        if (band.roadPerBlade && era >= 2) {
+        if (band.roadPerBlade && era >= 1) {
           // grass runs into the frayed verge; a cart track keeps its strip
           // of grass between the ruts
           const rd = distToRoadEx(era, x, z);
@@ -470,13 +470,13 @@ export function buildGrass(scene) {
         dRiv = distToRiver(x, z);
         if (vegExcluded(x, z, y, era, 2)) continue;
         fd = forestDensity(era, x, z, y);
-        if (era >= 2 && distToRoad(era, x, z) < 0.5) continue;
+        if (era >= 1 && distToRoad(era, x, z) < 0.5) continue;
         trodden = false;
         for (const p of PADS) {
           if (era === 1 && p !== PADS[2]) continue;
           if (Math.hypot(x - p.x, z - p.z) < p.r * 0.8) { trodden = true; break; }
         }
-        fa = era >= 2 ? fieldAt(era, x, z) : null;
+        fa = era >= 1 ? fieldAt(era, x, z) : null;
       }
       // the carpet creeps into the forest as a thin moss-grass floor
       if (fd > 0.62 && (!carpet || cJ1 < 0.5)) continue;

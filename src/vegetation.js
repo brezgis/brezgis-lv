@@ -691,7 +691,7 @@ export function* buildVegetationJob(scene, renderer) {
     const okMicro = (px, pz) => {
       const py = heightAt(px, pz);
       if (forestDensity(era, px, pz, py) < 0.35) return false;
-      if (era >= 2 && fieldAt(era, px, pz)) return false;
+      if (era >= 1 && fieldAt(era, px, pz)) return false;
       if (vegExcluded(px, pz, py, era, 3)) return false;
       if (buildingAt(era, px, pz, 0.8)) return false;
       return true;
@@ -724,8 +724,18 @@ export function* buildVegetationJob(scene, renderer) {
         if (tier === 'full' && rng() < 0.38) continue;
         if (tier === 'far' && dp < FULL_R + 70 && rng() < 0.38 * (1 - (dp - FULL_R) / 70)) continue;
         if (era === 0) {
-          // tundra: knee-high dwarf birch / juniper heath
-          lists.shrub[tier].push([x, y, z, 0.8 + rng() * 1.1, rng() * 6.3, 0.9 + rng() * 0.25]);
+          // Shrub tundra: knee-high dwarf birch and juniper heath. Pollen from
+          // the same upland still holds a little pine, spruce and tree birch
+          // through the cold stage, so a few stunted trees stand where a
+          // slope shelters them (well under one in twenty stems).
+          const sheltered = y < 205 && distToRiver(x, z) > 30;
+          const tr = rng();
+          if (sheltered && tr < 0.035) {
+            const kind = tr < 0.014 ? 'pine' : tr < 0.024 ? 'birch' : 'spruce';
+            lists[kind][tier].push([x, y, z, 2.6 + rng() * 2.6, rng() * 6.3, 0.9 + rng() * 0.2]);
+          } else {
+            lists.shrub[tier].push([x, y, z, 0.45 + rng() * 0.4, rng() * 6.3, 0.9 + rng() * 0.25]);
+          }
           continue;
         }
         // alder carr reaches well past the immediate bank — a 40m band left
@@ -735,7 +745,17 @@ export function* buildVegetationJob(scene, renderer) {
         const r = rng();
         let kind;
         if (wet) kind = r < 0.55 ? 'alder' : r < 0.85 ? 'birch' : 'spruce';
-        else if (high) kind = r < 0.5 ? 'spruce' : r < 0.85 ? 'pine' : 'birch';
+        else if (era === 1) {
+          // AD 50: pollen from Lake Ķūži in this upland has spruce leading,
+          // with lime and a little oak among it and birch on old burns
+          if (high) kind = r < 0.6 ? 'spruce' : r < 0.85 ? 'pine' : 'birch';
+          else kind = r < 0.48 ? 'spruce' : r < 0.68 ? 'birch' : r < 0.82 ? 'pine' : r < 0.92 ? 'linden' : r < 0.96 ? 'oak' : 'alder';
+        } else if (era === 2) {
+          // AD 950: a thousand years of burn plots later, birch, pine and
+          // alder regrowth have gained on the spruce
+          if (high) kind = r < 0.45 ? 'spruce' : r < 0.8 ? 'pine' : 'birch';
+          else kind = r < 0.34 ? 'spruce' : r < 0.64 ? 'birch' : r < 0.82 ? 'pine' : r < 0.9 ? 'alder' : r < 0.96 ? 'linden' : 'oak';
+        } else if (high) kind = r < 0.5 ? 'spruce' : r < 0.85 ? 'pine' : 'birch';
         else kind = r < 0.34 ? 'birch' : r < 0.6 ? 'spruce' : r < 0.82 ? 'pine' : 'oak';
         // old-growth snags in the primeval eras (near only — no far impostor)
         if ((era === 1 || era === 2) && tier === 'full' && d > 0.5 && rng() < 0.045) kind = 'snag';
@@ -761,7 +781,7 @@ export function* buildVegetationJob(scene, renderer) {
         if (treeOK) lists[kind][tier].push([x, y, z, h, rot, tint, leanX, leanZ]);
 
         // understory in closed forest, near tiers only: ferns, hazel-like
-        // underbrush and bramble tangles — an old-growth floor is BUSY
+        // underbrush and raspberry tangles — an old-growth floor is BUSY
         //
         // Every item below is scattered 4.5-6 m off its parent sample, so it
         // must be gated at its FINAL position — the same lesson the micro
@@ -775,7 +795,7 @@ export function* buildVegetationJob(scene, renderer) {
             const ux = x + (rng() - 0.5) * 9, uz = z + (rng() - 0.5) * 9;
             const uy = heightAt(ux, uz);
             if (okUnder(ux, uz, uy, 2.5, 1.1)) {
-              // low dark tangle (bramble) or a taller hazel-ish bush.
+              // low dark tangle (raspberry) or a taller hazel bush.
               // hazel capped at ~1.9m and WIDENED: the shrub species is
               // grown for 0.7-1.3m — stretched to 2.8m it was all trunk
               // tube with a wisp of cards, "a thick green stick"
@@ -891,7 +911,7 @@ export function* buildVegetationJob(scene, renderer) {
               const z = sz + tx * off * side + tz * jitter;
               const y = heightAt(x, z);
               // a willow standing in a ploughed field is worse than a bare bank
-              if (era >= 2 && fieldAt(era, x, z)) continue;
+              if (era >= 1 && fieldAt(era, x, z)) continue;
               if (forestDensity(era, x, z, y) > 0.55) continue;   // real forest already handles it
               // willow takes the front rank nearest the water, alder behind it
               const willowy = off < hw + inset + reach * 0.5 && rng() < 0.72;
@@ -925,7 +945,7 @@ export function* buildVegetationJob(scene, renderer) {
         const y = heightAt(x, z);
         if (forestDensity(era, x, z, y) > 0.12) continue;      // meadow only
         if (vegExcluded(x, z, y, era, 4)) continue;
-        if (era >= 2 && fieldAt(era, x, z)) continue;          // ploughing destroys them
+        if (era >= 1 && fieldAt(era, x, z)) continue;          // ploughing destroys them
         const n2 = 2 + (rng() * 4) | 0;
         for (let k = 0; k < n2; k++) {
           const ox = x + (rng() - 0.5) * 6, oz = z + (rng() - 0.5) * 6;
@@ -934,7 +954,7 @@ export function* buildVegetationJob(scene, renderer) {
           // lake shores and the river bank from a valid seed
           if (forestDensity(era, ox, oz, oy) > 0.12) continue;
           if (vegExcluded(ox, oz, oy, era, 4) || buildingAt(era, ox, oz, 0.8)) continue;
-          if (era >= 2 && fieldAt(era, ox, oz)) continue;
+          if (era >= 1 && fieldAt(era, ox, oz)) continue;
           const sc = 0.7 + rng() * 0.6, rot = rng() * 6.3;
           if (!roadClear(era, ox, oz, 0.3)) continue;
           lists.molehill.push([ox, oy, oz, sc, rot]);

@@ -33,8 +33,8 @@ for (const ch of [RIVER, ...STREAM_CHANNELS]) {
     let tx = a[0] - x, tz = a[1] - z; const L = Math.hypot(tx, tz); tx /= L; tz /= L;
     sections++;
     const centre = heightAt(x, z);
-    // the thalweg sits under the water (brooks at least 0.25 m, the Gauja 1 m)
-    check(centre < level - (ch === RIVER ? 1.0 : 0.25), `${ch.name} bed ${(centre - level).toFixed(2)} at s=${ch.sampleS[i].toFixed(0)}`);
+    // the thalweg sits under the water (brooks at least 0.15 m, the Gauja 0.35 m: it is a seven metre river here)
+    check(centre < level - (ch === RIVER ? 0.35 : 0.15), `${ch.name} bed ${(centre - level).toFixed(2)} at s=${ch.sampleS[i].toFixed(0)}`);
     for (const side of [-1, 1]) {
       for (let off = hw + 4; off <= hw + 16; off += 2) {
         const px = x - tz * off * side, pz = z + tx * off * side;

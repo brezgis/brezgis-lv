@@ -3,7 +3,7 @@ import { ERAS } from '../src/content.js';
 import { stageFootprint,registerFootprints,buildingAt } from '../src/footprints.js';
 
 // Prevent BP offsets from being used as calendar years in the transition UI.
-assert.deepEqual(ERAS.map((e) => e.year), [-10800, 50, 950, 1860, 1935, 2025]);
+assert.deepEqual(ERAS.map((e) => e.year), [-10500, 50, 950, 1860, 1935, 2025]);
 assert(ERAS.every((e) => e.evidence && e.body));
 assert(!ERAS[0].body.includes('No human has stood here yet'));
 assert(!ERAS[5].body.includes('down from'));

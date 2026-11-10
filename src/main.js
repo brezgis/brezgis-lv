@@ -410,7 +410,7 @@ async function boot() {
     effects.clearDynamic();
     for (const [x, y, z, o] of built.smokes) effects.addSmoke(x, y, z, o);
     for (const [x, y, z, o] of built.fires) effects.addFire(x, y, z, o);
-    water.pond.visible = era === 3 || era === 4;
+    water.pond.visible = era >= 3;
     water.setEra(era);
     renderer.shadowMap.needsUpdate = true;
     envAge = 1e9;
@@ -641,9 +641,9 @@ async function boot() {
     [{ lv: 'Ziemeļbriežu bars', en: 'The reindeer band', at: [S.x - 60, S.z + 120, 30] },
      { lv: 'Kūstošais ledus ezera ieplakā', en: 'Dead ice melting in a lake hollow', at: [1780, -280, 160] },
      { lv: 'Ziemeļblāzma', en: 'The northern lights', at: [S.x, S.z + 200, 60], t: 0.0 }],
-    [{ lv: 'Mednieku nometne', en: 'The hunters’ camp', at: [LOC.CAMP.x, LOC.CAMP.z, 16] },
-     { lv: 'Tauru bars', en: 'The aurochs herd', at: [S.x - 20, S.z + 30, 30] },
-     { lv: 'Gauja', en: 'The Gauja', preset: 'upe' }],
+    [{ lv: 'Dzelzs laikmeta sēta', en: 'The Iron Age farm', at: [LOC.CAMP.x, LOC.CAMP.z, 22] },
+     { lv: 'Akmeņiem aplikti kapu uzkalniņi', en: 'The stone-ringed grave mounds', at: [LOC.BARROWS.x, LOC.BARROWS.z, 26] },
+     { lv: 'Tauru bars', en: 'The aurochs herd', at: [S.x - 20, S.z + 30, 30] }],
     [{ lv: 'Sēta', en: 'The farmstead', preset: 'pagalms' },
      { lv: 'Līdums', en: 'A burn-cleared field', at: [-89, -15, 40] },
      { lv: 'Lejstupu pilskalns', en: 'Lejstupu hillfort', at: [LOC.HILLFORT.x, LOC.HILLFORT.z, 70] }],

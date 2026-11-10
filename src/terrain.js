@@ -2,8 +2,8 @@
 // The height field is shared by every era (the land itself is the constant);
 // only the vertex colours (land use) change with time.
 import * as THREE from 'three';
-import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap } from './heightmap.js';
-import { RIVER_PTS, STREAMS, LAKES, CELL } from './geodata.js';
+import { HM_GRID, HM_SPAN, HM_OFF_X, HM_OFF_Z, decodeHeightmap, decodePatches } from './heightmap.js';
+import { RIVER_PTS, STREAMS, LAKES } from './geodata.js';
 import { PADS, distToRoad, distToRoadEx, forestDensity, distToRiver, distToStreams, LOC } from './landuse.js';
 import { RIVER, STREAM_CHANNELS, LAKE_SHORES, riverAt, streamAt, lakeAt, lakeShoreWavyAt, bankCharAt, bankCharFromQuery, confluenceAt, lakeShoreSignedDistAt, bedDropAt } from './riverzone.js';
 import { makeNoise, clamp, lerp, smoothstep, pointInPoly, MAX_ANISO } from './util.js';
@@ -12,97 +12,60 @@ import { SAT_JPEG_B64 } from './sat2025.js';
 
 const noise = makeNoise(1907);
 const G = HM_GRID, SPAN = HM_SPAN, OX = HM_OFF_X, OZ = HM_OFF_Z;
+const CELL = SPAN / (G - 1);
 const field = decodeHeightmap(); // Float32, row-major, north = row 0
+// 1 m LiDAR ground over the sites where the earthwork itself is the evidence
+const patches = decodePatches();
 
 // ---- one-time sculpt of the base field ----------------------------------
+// The field is measured bare earth (LiDAR), so very little is done to it:
+// the beds the laser cannot see are cut under the lakes, the land beside a
+// channel is kept from sitting below its water, and the yards of the staged
+// farm buildings are levelled.
 function cellToWorld(gx, gy) {
   return [((gx / (G - 1)) - 0.5) * SPAN + OX, ((gy / (G - 1)) - 0.5) * SPAN + OZ];
 }
+const cellX = (x) => (((x - OX) / SPAN) + 0.5) * (G - 1);
+const cellZ = (z) => (((z - OZ) / SPAN) + 0.5) * (G - 1);
 (function sculpt() {
-  // channel carving by POINT STAMPING (exact + fast at any map size):
-  // each water point lowers the cells inside its radius; candidates are
-  // computed from the pristine field so overlapping stamps stay idempotent.
-  const field0 = new Float32Array(field);
-  const worldToCell = (x, z) => [
-    (((x - OX) / SPAN) + 0.5) * (G - 1),
-    (((z - OZ) / SPAN) + 0.5) * (G - 1),
-  ];
-  function stamp(px, pz, radius, inner, target) {
-    const [cx, cy] = worldToCell(px, pz);
-    const cr = Math.ceil(radius / CELL) + 1;
-    for (let dy = -cr; dy <= cr; dy++) for (let dx = -cr; dx <= cr; dx++) {
-      const gx = Math.round(cx) + dx, gy = Math.round(cy) + dy;
-      if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
-      const [x, z] = cellToWorld(gx, gy);
-      const d = Math.hypot(x - px, z - pz);
-      if (d > radius) continue;
-      const i = gy * G + gx;
-      const cand = lerp(field0[i], Math.min(field0[i], target), smoothstep(radius, inner, d));
-      if (cand < field[i]) field[i] = cand;
-    }
-  }
-  function pin(px, pz, target) {
-    const [cx, cy] = worldToCell(px, pz);
-    const gx0 = Math.floor(cx), gy0 = Math.floor(cy);
-    for (let dy = 0; dy <= 1; dy++) for (let dx = 0; dx <= 1; dx++) {
-      const gx = Math.min(G - 1, Math.max(0, gx0 + dx));
-      const gy = Math.min(G - 1, Math.max(0, gy0 + dy));
-      const i = gy * G + gx;
-      if (target < field[i]) field[i] = target;
-    }
-  }
-  function normalAt(samples, i) {
-    const a = samples[Math.max(0, i - 1)], b = samples[Math.min(samples.length - 1, i + 1)];
-    let dx = b[0] - a[0], dz = b[1] - a[1];
-    const len = Math.hypot(dx, dz) || 1;
-    dx /= len; dz /= len;
-    return [-dz, dx];
-  }
   // The channels themselves are cut by the shore law at query time
-  // (shore.js) — the 27 m field only needs the floodplain floor below.
-  const waterSamples = [];   // [x, z, level, halfWidth] along every channel
-  for (const chan of [RIVER, ...STREAM_CHANNELS]) {
-    chan.samples.forEach((p, i) => { if (!chan.lakeRun[i]) waterSamples.push(p); });
-  }
+  // (shore.js); the field only needs the floodplain floor below.
   // FLOOR CLAMP: land beyond the shore shelf can never sit below its local
-  // waterline — a river keeps its floodplain flooded, not sunken. Overlapping
-  // meander stamps compounded into pans carved ~1.9m below river level (the
-  // Dzērbe confluence loop hung the water ribbon in mid-air over one).
+  // waterline. Each channel sample claims the cells nearest to it.
   {
-    const BK = 28, key = (bx, bz) => bx * 4096 + bz;
-    const buckets = new Map();
-    for (const s of waterSamples) {
-      const k = key(Math.floor(s[0] / BK), Math.floor(s[1] / BK));
-      if (!buckets.has(k)) buckets.set(k, []);
-      buckets.get(k).push(s);
-    }
-    const R = 84;
-    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
-      const [x, z] = cellToWorld(gx, gy);
-      let dmin = 1e9, lvl = 0, hwN = 0;
-      const bx = Math.floor(x / BK), bz = Math.floor(z / BK);
-      // ±4 buckets: ±3 only guaranteed ~56m of the 84m clamp radius, leaving
-      // unclamped sunken pans in the 56-84m ring
-      for (let by = bz - 4; by <= bz + 4; by++) for (let bxx = bx - 4; bxx <= bx + 4; bxx++) {
-        const arr = buckets.get(key(bxx, by));
-        if (!arr) continue;
-        for (const s of arr) {
-          const d = Math.hypot(x - s[0], z - s[1]);
-          if (d < dmin) { dmin = d; lvl = s[2]; hwN = s[3]; }
+    const R = 84, cr = Math.ceil(R / CELL);
+    const dArr = new Float32Array(G * G).fill(1e9), lArr = new Float32Array(G * G), wArr = new Float32Array(G * G);
+    const touched = [];
+    for (const chan of [RIVER, ...STREAM_CHANNELS]) {
+      chan.samples.forEach((s, si) => {
+        if (chan.lakeRun[si]) return;
+        const cx = Math.round(cellX(s[0])), cy = Math.round(cellZ(s[1]));
+        for (let dy = -cr; dy <= cr; dy++) for (let dx = -cr; dx <= cr; dx++) {
+          const gx = cx + dx, gy = cy + dy;
+          if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
+          const d = Math.hypot(dx * CELL + (cx - cellX(s[0])) * CELL, dy * CELL + (cy - cellZ(s[1])) * CELL);
+          if (d > R) continue;
+          const i = gy * G + gx;
+          if (dArr[i] > 1e8) touched.push(i);
+          if (d < dArr[i]) { dArr[i] = d; lArr[i] = s[2]; wArr[i] = s[3]; }
         }
-      }
-      if (dmin > R || dmin <= hwN + 4.2) continue;             // bed+shelf stay carved
+      });
+    }
+    for (const i of touched) {
+      const d = dArr[i], lvl = lArr[i], hwN = wArr[i];
+      if (d <= hwN + 4.2) continue;                              // bed + shelf stay carved
+      const gx = i % G, gy = (i - gx) / G;
+      const [x, z] = cellToWorld(gx, gy);
       if (lakeAt(x, z)) continue;
-      const minH = lvl - 0.5 + 0.75 * smoothstep(hwN + 4.2, hwN + 15, dmin); // → lvl+0.25 past outer ring
-      const i = gy * G + gx;
+      const minH = lvl - 0.5 + 0.75 * smoothstep(hwN + 4.2, hwN + 15, d); // → lvl+0.25 past outer ring
       if (field[i] < minH) field[i] = minH;
     }
   }
-  // pads (farmyards) flatten
+  // pads (yards of the staged buildings) flatten
   for (const p of PADS) {
-    const cgx = Math.round((((p.x - OX) / SPAN) + 0.5) * (G - 1));
-    const cgy = Math.round((((p.z - OZ) / SPAN) + 0.5) * (G - 1));
+    const cgx = Math.round(cellX(p.x)), cgy = Math.round(cellZ(p.z));
     if (p.y === undefined) p.y = field[cgy * G + cgx];
+    if (p.keepGround) continue;                                  // real earthwork: leave it alone
     const cr = Math.ceil((p.r + 24) / CELL) + 1;
     for (let dy = -cr; dy <= cr; dy++) for (let dx = -cr; dx <= cr; dx++) {
       const gx = cgx + dx, gy = cgy + dy;
@@ -116,20 +79,17 @@ function cellToWorld(gx, gy) {
     }
   }
   // lake beds: carve inside the SAME Chaikin-smoothed shoreline the water
-  // mesh renders — carving the raw OSM polygon left a sunken bare strip
-  // between the smoothed water edge and the coarse poly (the "pan" where
-  // the Gauja meets Taurenes ezers)
+  // mesh renders
   for (const lake of LAKE_SHORES) {
-    const shore = lake.poly;
-    const { minX, maxX, minZ, maxZ } = lake;
-    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+    const gx0 = Math.max(0, Math.floor(cellX(lake.minX)) - 1), gx1 = Math.min(G - 1, Math.ceil(cellX(lake.maxX)) + 1);
+    const gy0 = Math.max(0, Math.floor(cellZ(lake.minZ)) - 1), gy1 = Math.min(G - 1, Math.ceil(cellZ(lake.maxZ)) + 1);
+    for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) {
       const [x, z] = cellToWorld(gx, gy);
-      if (x < minX - CELL || x > maxX + CELL || z < minZ - CELL || z > maxZ + CELL) continue;
       const i = gy * G + gx;
       const dSh = lakeShoreWavyAt(x, z);
-      if (pointInPoly(x, z, shore)) {
+      if (lakeAt(x, z) === lake) {
         // Inferred littoral shelf and basin, not surveyed bathymetry.
-        const bed = lake.level - lerp(0.18, 4.8, smoothstep(0, 90, dSh));
+        const bed = lake.level - lerp(0.18, lake.depth, smoothstep(0, 90, dSh));
         field[i] = Math.min(field[i], bed);
       } else if (dSh < 9 && field[i] > lake.level && !lakeAt(x, z)) {
         const rv = riverAt(x, z);
@@ -153,29 +113,40 @@ for (const lake of LAKES) {
 }
 
 // ---- height queries -------------------------------------------------------
-function baseHeight(x, z) {
-  const fx = clamp((((x - OX) / SPAN) + 0.5) * (G - 1), 0, G - 1.001);
-  const fz = clamp((((z - OZ) / SPAN) + 0.5) * (G - 1), 0, G - 1.001);
+function gridHeight(x, z) {
+  const fx = clamp(cellX(x), 0, G - 1.001);
+  const fz = clamp(cellZ(z), 0, G - 1.001);
   const x0 = Math.floor(fx), z0 = Math.floor(fz);
   const u = fx - x0, v = fz - z0;
-  const h = (xx, zz) => field[Math.min(zz, G - 1) * G + Math.min(xx, G - 1)];
-  return lerp(lerp(h(x0, z0), h(x0 + 1, z0), u), lerp(h(x0, z0 + 1), h(x0 + 1, z0 + 1), u), v);
+  const i = z0 * G + x0;
+  return lerp(lerp(field[i], field[i + 1], u), lerp(field[i + G], field[i + G + 1], u), v);
 }
-function microDamp(x, z) {
-  let damp = 1;
-  for (const p of PADS) damp = Math.min(damp, smoothstep(p.r * 0.6, p.r + 10, Math.hypot(x - p.x, z - p.z)));
-  // main-road corridors ride a draped ribbon: micro bumps bigger than its
-  // crown swallowed the carriageway in stretches
-  const ri = distToRoadEx(5, x, z);
-  if (ri.c <= 1 && ri.d < 14) damp = Math.min(damp, smoothstep(4, 14, ri.d));
-  return damp;
+function baseHeight(x, z) {
+  let h = gridHeight(x, z);
+  for (const p of patches) {
+    const fx = (x - p.x0) / p.step, fz = (z - p.z0) / p.step, m = p.n - 1;
+    if (fx < 0 || fz < 0 || fx > m || fz > m) continue;
+    const x0 = Math.min(Math.floor(fx), m - 1), z0 = Math.min(Math.floor(fz), m - 1);
+    const u = fx - x0, v = fz - z0, i = z0 * p.n + x0, H = p.h;
+    const hp = lerp(lerp(H[i], H[i + 1], u), lerp(H[i + p.n], H[i + p.n + 1], u), v);
+    const edge = Math.min(fx, fz, m - fx, m - fz) * p.step;
+    h = lerp(h, hp, smoothstep(0, p.feather, edge));
+  }
+  return h;
+}
+// 1 where a 1 m site patch owns the ground (the fine mesh is built there)
+export function sitePatchK(x, z) {
+  let k = 0;
+  for (const p of patches) {
+    const m = (p.n - 1) * p.step;
+    const edge = Math.min(x - p.x0, z - p.z0, p.x0 + m - x, p.z0 + m - z);
+    if (edge > 0) k = Math.max(k, smoothstep(0, p.feather, edge));
+  }
+  return k;
 }
 export function heightAt(x, z) { return heightAtWith(x, z, shoreBodies(x, z)); }
 function heightAtWith(x, z, bodies) {
-  let damp = microDamp(x, z);
-  for (const b of bodies) damp = Math.min(damp, smoothstep(2, 12, b.e));
-  const micro = (noise.fbm(x * 0.045, z * 0.045, 2) - 0.5) * 0.7 * damp;
-  return shoreHeight(baseHeight(x, z) + micro, x, z, bodies);
+  return shoreHeight(baseHeight(x, z), x, z, bodies);
 }
 export function slopeAt(x, z) {
   const e = 2;
@@ -183,8 +154,48 @@ export function slopeAt(x, z) {
 }
 
 // ---- mesh -----------------------------------------------------------------
-const RES = 512;
+const RES = 1024;
 let terrainMesh = null;
+
+// RELIEF TEXTURE. The LiDAR field is a 4 m grid and the ground mesh an 8.6 m
+// one, so the mesh alone would iron out exactly what the survey is good at:
+// ditches, field banks, hollow ways, ramparts. The field's own slopes are
+// therefore written into a texture and the ground is lit with them, per
+// pixel. Slopes are stored through a square root so that the gentle fields,
+// where 8 bits of a linear slope would band under a low sun, get most of the
+// code values.
+const RELIEF_N = 2048, RELIEF_MAX = 2.0;
+let reliefTex = null;
+function makeReliefTex() {
+  const N = RELIEF_N, data = new Uint8Array(N * N * 4);
+  const e = SPAN / N;                       // sample the field a texel apart
+  const enc = (g) => {
+    const s = Math.sqrt(Math.min(Math.abs(g), RELIEF_MAX) / RELIEF_MAX);
+    return Math.round(127.5 + (g < 0 ? -s : s) * 127);
+  };
+  let prevRow = new Float32Array(N + 2), row = new Float32Array(N + 2), nextRow = new Float32Array(N + 2);
+  const fill = (tz, out) => {
+    const z = ((tz + 0.5) / N - 0.5) * SPAN + OZ;
+    for (let tx = -1; tx <= N; tx++) out[tx + 1] = baseHeight(((tx + 0.5) / N - 0.5) * SPAN + OX, z);
+  };
+  fill(-1, prevRow); fill(0, row);
+  for (let tz = 0; tz < N; tz++) {
+    fill(tz + 1, nextRow);
+    for (let tx = 0; tx < N; tx++) {
+      const i = (tz * N + tx) * 4;
+      data[i] = enc((row[tx + 2] - row[tx]) / (2 * e));          // dh/dx
+      data[i + 1] = enc((nextRow[tx + 1] - prevRow[tx + 1]) / (2 * e)); // dh/dz
+      data[i + 2] = 0; data[i + 3] = 255;
+    }
+    const t = prevRow; prevRow = row; row = nextRow; nextRow = t;
+  }
+  const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true; tex.anisotropy = Math.max(4, MAX_ANISO);
+  tex.needsUpdate = true;
+  return tex;
+}
 
 // the coarse grid discards itself wherever the shore mesh covers the ground
 const MASK_N = 2048;
@@ -218,18 +229,34 @@ function makeDetailTex() {
 }
 function detailify(material, strength) {
   if (!detailTex) detailTex = makeDetailTex();
+  if (!reliefTex) reliefTex = makeReliefTex();
   material.onBeforeCompile = (sh) => {
     sh.uniforms.uDetail = { value: detailTex };
     sh.uniforms.uDetailK = { value: strength };
-    sh.vertexShader = 'varying vec3 vWp; varying float vSlope;\n' + sh.vertexShader.replace(
+    sh.vertexShader = 'attribute float aKeep; varying vec3 vWp; varying vec3 vWn; varying float vKeep;\n' + sh.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
        vWp = (modelMatrix * vec4(transformed, 1.0)).xyz;
-       vSlope = 1.0 - normalize(normal).y;`
+       vWn = normalize(normal);
+       #ifdef COARSE_TERRAIN
+         vKeep = 0.0;
+       #else
+         vKeep = aKeep;
+       #endif`
     );
     sh.uniforms.uShoreMask = { value: shoreMaskTex };
-    sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; uniform sampler2D uShoreMask; varying vec3 vWp; varying float vSlope;\n' +
+    sh.uniforms.uRelief = { value: reliefTex };
+    sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; uniform sampler2D uShoreMask; uniform sampler2D uRelief; varying vec3 vWp; varying vec3 vWn; varying float vKeep; vec3 gWn; float vSlope;\n' +
       sh.fragmentShader.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        {
+          // world normal: the surveyed relief, handing over to the mesh's own
+          // normals where the 2 m shore and site ground is built (vKeep)
+          vec2 ruv = vec2((vWp.x - ${OX.toFixed(1)}) / ${SPAN.toFixed(1)} + 0.5, (vWp.z - ${OZ.toFixed(1)}) / ${SPAN.toFixed(1)} + 0.5);
+          vec2 s = texture2D(uRelief, ruv).rg * 2.0 - 1.0;
+          vec2 g = sign(s) * s * s * ${RELIEF_MAX.toFixed(1)};
+          gWn = normalize(mix(normalize(vec3(-g.x, 1.0, -g.y)), normalize(vWn), vKeep));
+          vSlope = 1.0 - gWn.y;
+        }
         #ifdef COARSE_TERRAIN
           // the 2 m shore mesh owns this ground — the 17 m grid steps aside
           if (texture2D(uShoreMask, vec2((vWp.x - ${OX.toFixed(1)}) / ${SPAN.toFixed(1)} + 0.5,
@@ -261,7 +288,10 @@ function detailify(material, strength) {
           diffuseColor.rgb = mix(diffuseColor.rgb,
             vec3(0.40, 0.345, 0.26) * (0.7 + 0.5 * d0), bare * 0.75 * uDetailK);
         }`
-      );
+      ).replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+        normal = normalize(mat3(viewMatrix) * gWn);
+        nonPerturbedNormal = normal;`);
+    if (!sh.fragmentShader.includes('mat3(viewMatrix) * gWn')) throw new Error('terrain relief normal patch did not apply');
   };
   return material;
 }
@@ -302,8 +332,8 @@ export function meshHeightAt(x, z) {
 const SC = 2, CH = 32, CV = CH + 1;          // cell m, cells per chunk, verts per chunk side
 const chunks = new Map();
 const ckey = (cx, cz) => (cx + 4096) * 8192 + (cz + 4096);
-function corridorKeep(bodies) {
-  let keep = 0;
+function corridorKeep(bodies, x, z) {
+  let keep = sitePatchK(x, z);
   for (const b of bodies) {
     let k;
     if (b.kind === 'river') k = 1 - smoothstep(13, 19, b.e);
@@ -370,6 +400,10 @@ function* buildShoreMesh() {
       for (let k = 0; k < n; k++) touch(lerp(a[0], b[0], k / n), lerp(a[1], b[1], k / n), 20);
     }
   }
+  for (const p of patches) {
+    const m = (p.n - 1) * p.step;
+    for (let x = p.x0; x <= p.x0 + m; x += CH * SC * 0.5) for (let z = p.z0; z <= p.z0 + m; z += CH * SC * 0.5) touch(x, z, 0);
+  }
   // 2 · vertices: shore-law height feathered to the coarse surface by keep
   for (const key of want) {
     yield;
@@ -379,7 +413,7 @@ function* buildShoreMesh() {
     for (let lz = 0; lz < CV; lz++) for (let lx = 0; lx < CV; lx++) {
       const x = (cx * CH + lx) * SC, z = (cz * CH + lz) * SC;
       const bodies = shoreBodies(x, z);
-      const keep = bodies.length ? corridorKeep(bodies) : 0;
+      const keep = corridorKeep(bodies, x, z);
       const i = lz * CV + lx;
       k[i] = keep;
       ws[i] = bodies.length ? waterSampleOf(bodies) : null;
@@ -446,7 +480,7 @@ function* buildShoreMesh() {
   const meshes = [];
   for (const list of tiles.values()) {
     yield;
-    const pos = [], nrm = [], uv = [], idx = [], rec = [];
+    const pos = [], nrm = [], uv = [], idx = [], rec = [], kp = [];
     for (const ch of list) {
       const vi = new Int32Array(CV * CV).fill(-1);
       const vert = (lx, lz) => {
@@ -462,6 +496,7 @@ function* buildShoreMesh() {
         const nl = Math.hypot(hx, 2 * SC, hz);
         nrm.push(-hx / nl, 2 * SC / nl, -hz / nl);
         uv.push((x - OX) / SPAN + 0.5, 0.5 - (z - OZ) / SPAN);
+        kp.push(ch.k[i]);
         for (let t = 0; t < TREC; t++) rec.push(ch.tr[i * TREC + t]);
         return vi[i];
       };
@@ -476,6 +511,7 @@ function* buildShoreMesh() {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setAttribute('aKeep', new THREE.Float32BufferAttribute(kp, 1));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(pos.length), 3));
     geo.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
     geo.computeBoundingSphere();

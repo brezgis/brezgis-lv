@@ -10,7 +10,7 @@ import { LOC } from './landuse.js';
 
 // stage structures outside any PADS clearing — generous rects, world coords
 const STATIC_RECTS = [
-  // Dzērbene church silhouette (nave + tower), eras 3-5
+  // Apšu church (nave + tower), eras 3-5
   { x: LOC.CHURCH.x, z: LOC.CHURCH.z, w: 38, d: 24, rot: -0.8, eras: [3, 4, 5] },
   // the watermill beside the Gauja dam, eras 3-4 (house + wheel + flume)
   { x: LOC.MILL.x, z: LOC.MILL.z, w: 12, d: 10, rot: -LOC.MILL.rot, eras: [3, 4] },

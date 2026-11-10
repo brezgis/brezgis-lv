@@ -2,18 +2,18 @@
 // forests are. All modules (terrain painting, vegetation, era content) read
 // from here so the world stays coherent across time.
 //
-// Eras: 0 = ~10,800 BC (Younger Dryas tundra, pre-human)
+// Eras: 0 = ~10,500 BC (Younger Dryas tundra, pre-human)
 //       1 = ~AD 50   (Early Iron Age wilderness, aurochs)
 //       2 = ~AD 950  (Latgalian farmstead)
 //       3 = 1860     (Nēķens manor era)
 //       4 = 1935     (Taurene, independent Latvia)
 //       5 = 2025     (today — terrain draped in Sentinel-2 imagery)
-import { RIVER_PTS, STREAMS, LAKES, BREZGA } from './geodata.js';
+import { RIVER_PTS, STREAMS, LAKES, BREZGA, POND } from './geodata.js';
 import { ROADS_OSM, DWELLINGS_OSM, BUILDINGS_OSM } from './geodata-osm.js';
 import { HM_SPAN, HM_OFF_X, HM_OFF_Z } from './heightmap.js';
-import { forestMaskAt } from './sat2025.js';
+import { canopyCoverAt } from './lidar2025.js';
 import { forest1935At } from './forest1935.js';
-import { RIVER, STREAM_CHANNELS, riverAt, streamAt, inAnyLake } from './riverzone.js';
+import { RIVER, STREAM_CHANNELS, riverAt, streamAt, inAnyLake, lakeAt } from './riverzone.js';
 import { makeNoise, mulberry32, clamp, lerp, smoothstep, distToPolyline, pointInPoly, chaikinOpen } from './util.js';
 
 const noise = makeNoise(4217);
@@ -157,32 +157,57 @@ function riverPointNearest(x, z) {
   return best;
 }
 
+// The east shore of the water west of the farm terrace at latitude z. The
+// laser survey shows that the "river" beside the staged farm is the north
+// arm of Dabaru ezers, a hundred metres wide, so things that belong at the
+// water's edge are placed from the surveyed shore and not from a centreline.
+export function shoreXAt(z, fromX = -150) {
+  for (let x = fromX; x > fromX - 600; x -= 1) {
+    if (lakeAt(x, z)) return x;
+    const rv = riverAt(x, z);
+    if (rv && rv.d < rv.hw) return x;
+  }
+  return riverXAt(z);
+}
+
 // --- Anchor locations (scene metres; origin = modern village centre).
 const rvx = riverXAt(40);
-const pondPt = riverPointNearest(-200, -380);
+// the mill weir: where the surveyed weir stands today (geodata POND)
+const pondPt = POND ? riverPointNearest(POND.x, POND.z) : riverPointNearest(-200, -380);
 export const LOC = {
   STEAD: { x: rvx + 210, z: 40 },            // Brezgi farmstead anchor (all eras)
-  CAMP: { x: rvx + 90, z: 130 },             // era-1 hunters' camp on the riverside terrace
-  MANOR: { x: -40, z: -180 },                // Nēķena muiža ensemble (eras 3-5), village core
-  POND: { x: pondPt[0], z: pondPt[1] },      // mill pond on the Gauja bend below the manor
+  CAMP: { x: shoreXAt(130) + 70, z: 130 },             // era-1 Early Iron Age farm on the riverside terrace
+  // Nēķena muiža. The buildings stand on their mapped footprints (OSM ways
+  // 201682672 "Nēķena muiža", 201683332 "Vecmuiža", 201683328 "Muižas klēts",
+  // 201672703 "Nēķina muižas kūts", 1394790860 "Pagrabi"), which the laser
+  // survey confirms as standing roofs.
+  MANOR: { x: -128, z: -197 },               // the new manor house of 1888 (eras 4-5)
+  MANOR_OLD: { x: -71, z: -316, rot: 0.32 }, // Vecmuiža, the old manor house (eras 3-5)
+  MANOR_KLETS: { x: -67, z: -344, rot: 0.40 },
+  MANOR_KUTS: { x: -46, z: -45, rot: 0.06 },
+  POND: { x: pondPt[0], z: pondPt[1] },      // the mill weir on the Gauja below the manor
+  BREWERY: { x: -150, z: -275, rot: 2.16 },  // manor brewery on the Gauja bank below its cellars ("Pagrabi", today a museum); "Br." on the 1914 sheet, "Aldr." in the 1920s
   OAK: { x: rvx + 130, z: -90 },             // the old oak (sacred in era 2, still there in 4)
-  BARROWS: { x: rvx + 330, z: 300 },         // Latgalian barrow cemetery (eras 2+, as mounds)
+  BARROWS: { x: rvx + 330, z: 300 },         // stone-kerbed barrows of the Early Iron Age farm (era 1)
   STONE: { x: rvx + 245, z: -25 },           // poem stone by the road (eras 4-5)
-  CHURCH: { x: -1450, z: -2050 },            // distant church silhouette NW (Dzērbene direction)
+  CHURCH: { x: -3424, z: 2238 },             // Apšu (Lodes) Lutheran church, a log church of 1780, monument no. 6279
   LAKE_VIEW: { x: 1500, z: -350 },           // Taurenes ezers overlook
-  HILLFORT: { x: -1080, z: 820 },            // Lejstupu (Briediņu) pilskalns, west of Dabaru ezers
+  // Lejstupu (Brēdiķu) pilskalns, monument no. 585: register centre
+  // 57.150747 N 25.647753 E; the laser survey puts the 200.3 m crown of its
+  // 12 m hill here, 80 m from the west shore of Dabaru ezers
+  HILLFORT: { x: -1040, z: 968 },
   BREZGA: { x: BREZGA.x, z: BREZGA.z },      // Brežģa kalns summit (255 m) — the family hill
-  KROGS: { x: 2320, z: 5270 },               // Brežģa krogs / Brezgis settlement, on the old road
+  // Brežģa krogs: "Bregsche" on Rücker's 1839 map, a tavern of Nötkenshof on
+  // the south side of the old highway, where the farm Vecbrežģis stands now
+  KROGS: { x: 2215, z: 5222 },
 };
-// The manor's mill weir (eras 3-4). The 1930s Latvian Army 1:75k sheet
-// (research/maps/topo75_1930s.png) shows the Gauja broadened into a ~40-50 m
-// wide pond for ~600 m above the road crossing by Nēķena muiža; the weir sits
-// at that crossing (the river point nearest the old pond anchor). Its 0.8 m
-// head — modest, as a lowland river of this size allows an undershot wheel —
-// floods ~2.7 ha of real ground to that extent (water.js floods it). The mill
-// itself is not documented for Nēķene (research/manor-and-interwar.md); it
-// stands in the far bank just below the weir, dug in so the flume-fed wheel
-// meets the tailrace.
+// The manor's mill weir. A weir stands on the Gauja 450 m east of the manor
+// bridge today, and the laser survey shows the river held back behind it
+// through the whole village as a pond 20-40 m wide, the same pond the 1930s
+// Latvian Army 1:75k sheet draws (research/maps/topo75_1930s.png). The pond
+// is flooded at its surveyed level in every era that has the weir (water.js).
+// A mill owner at Nēķene is named in the 1920 reform papers, but the mill
+// building is not described anywhere, so its form here is an interpretation.
 {
   const q = riverAt(pondPt[0], pondPt[1]);
   const dam = { x: q.x, z: q.z, dx: q.dx, dz: q.dz, hw: q.hw, level: q.level };
@@ -192,7 +217,8 @@ export const LOC = {
   if ((LOC.MANOR.x - q.x) * nx + (LOC.MANOR.z - q.z) * nz > 0) { nx = -nx; nz = -nz; }
   dam.nx = nx; dam.nz = nz;                          // toward the mill bank
   LOC.DAM = dam;
-  LOC.POND_LEVEL = q.level + 0.8;
+  // the pond stands at its surveyed level; without a survey, a 0.8 m head
+  LOC.POND_LEVEL = POND ? POND.level : q.level + 0.8;
   const mx = q.x + nx * (q.hw + 4.6) + q.dx * 7, mz = q.z + nz * (q.hw + 4.6) + q.dz * 7;
   // the house's local −x (wheel side) faces the channel; its floor is a
   // half-storey below the terrace the bank is cut back to (shore.js)
@@ -209,7 +235,7 @@ export const ERA2_FARMS = [
   { x: LOC.STEAD.x + 420, z: LOC.STEAD.z + 460 },
   { x: LOC.STEAD.x + 640, z: LOC.STEAD.z - 180 },
   { x: LOC.STEAD.x + 130, z: LOC.STEAD.z + 890 },
-  { x: LOC.STEAD.x + 520, z: LOC.STEAD.z - 420 },
+  { x: LOC.STEAD.x + 470, z: LOC.STEAD.z - 300 },
   { x: LOC.STEAD.x - 60,  z: LOC.STEAD.z - 700 },
   { x: LOC.STEAD.x + 980, z: LOC.STEAD.z + 240 },
   { x: LOC.STEAD.x + 420, z: LOC.STEAD.z + 1240 },
@@ -217,15 +243,16 @@ export const ERA2_FARMS = [
 
 export const PADS = [
   { x: LOC.STEAD.x, z: LOC.STEAD.z, r: 55 },
-  { x: LOC.MANOR.x, z: LOC.MANOR.z, r: 62 },
+  { x: LOC.MANOR.x, z: LOC.MANOR.z, r: 30 },
   { x: LOC.CAMP.x, z: LOC.CAMP.z, r: 18 },
   { x: LOC.OAK.x, z: LOC.OAK.z, r: 12 },
-  { x: LOC.HILLFORT.x, z: LOC.HILLFORT.z, r: 22 },
-  { x: LOC.BREZGA.x, z: LOC.BREZGA.z, r: 15 },
+  // surveyed earthworks and summits keep their measured ground
+  { x: LOC.HILLFORT.x, z: LOC.HILLFORT.z, r: 22, keepGround: true },
+  { x: LOC.BREZGA.x, z: LOC.BREZGA.z, r: 15, keepGround: true },
   { x: LOC.KROGS.x, z: LOC.KROGS.z, r: 26 },
 ];
-// Terrain bumps to add (burial barrows: hemispherical, 4-7 m across per
-// Latgalian practice — they persist as landscape once raised)
+// Burial barrows of the Early Iron Age (era 1): low round mounds with a
+// stone kerb, 4-7 m across
 export const BUMPS = [];
 {
   const r = makeNoise(99).rng;
@@ -243,48 +270,39 @@ export const BUMPS = [];
 const S = LOC.STEAD, M = LOC.MANOR, P = LOC.POND, B = LOC.BREZGA, K = LOC.KROGS;
 const bridgeZ = 120;
 const bx = riverXAt(bridgeZ);
-const b2 = riverPointNearest(M.x + 40, M.z - 220);
+const b2 = riverPointNearest(-20, -431);   // the bridge on the highway, where OSM and the survey have it
 export const BRIDGE = { x: bx, z: bridgeZ };
 export const BRIDGE2 = { x: b2[0], z: b2[1], level: b2[2] };
 
-// the old Cēsis–Vecpiebalga road: village -> south over Brežģa kalns' flank ->
-// Brežģa krogs (Brezgis) -> off the map south
-const SOUTH_ROAD = [
-  [S.x + 60, 1900], [700, 2300], [1150, 3300], [1480, 4180],
-  [B.x + 110, B.z - 150], [1960, 5180], [K.x + 20, K.z + 8], [2460, 6060],
-];
+// eras whose fields are burn-cleared plots (līdumi), not ploughed parcels
+export const isLidumEra = (era) => era === 1 || era === 2;
 
 export function roadsForEra(era) {
-  if (era <= 1) return [];
-  if (era === 2) {
-    // footpaths: stead->river, stead->barrows, stead->oak
+  if (era === 0) return [];
+  if (era === 1) {
+    // footpaths: farm -> river landing, farm -> the stone graves on the rise
+    const C = LOC.CAMP;
     return [
-      { pts: [[S.x, S.z], [S.x - 90, S.z + 40], [bx + 8, bridgeZ]], w: 2 },
-      { pts: [[S.x, S.z], [S.x + 80, S.z + 120], [LOC.BARROWS.x, LOC.BARROWS.z]], w: 1.6 },
+      { pts: [[C.x - 4, C.z + 4], [C.x - 40, C.z + 12], [shoreXAt(C.z + 20) + 3, C.z + 20]], w: 1.4 },
+      { pts: [[C.x + 6, C.z + 6], [C.x + 120, C.z + 90], [LOC.BARROWS.x, LOC.BARROWS.z]], w: 1.3 },
+    ].map((r) => ({ ...r, pts: chaikinOpen(r.pts, null, 1.75) }));
+  }
+  if (era === 2) {
+    // footpaths: stead->river, stead->oak
+    return [
+      { pts: [[S.x, S.z], [S.x - 50, S.z + 40], [shoreXAt(S.z + 60) + 4, S.z + 60]], w: 2 },
       { pts: [[S.x, S.z], [LOC.OAK.x + 6, LOC.OAK.z + 6]], w: 1.4 },
     ].map((r) => ({ ...r, pts: chaikinOpen(r.pts, null, 1.75) }));
   }
   // 1860 / 1935 / 2025: the parish road, manor drive, bridges, the south road
-  const main = { pts: [[S.x + 45, -60], [M.x - 70, M.z + 70], [M.x + 10, M.z - 60], [BRIDGE2.x, BRIDGE2.z + 40], [BRIDGE2.x, BRIDGE2.z - 40], [BRIDGE2.x + 150, -1100], [350, -2350]], w: era === 5 ? 7 : 5.5 };
+  const main = { pts: [[S.x + 45, -60], [M.x + 68, M.z + 77], [M.x + 98, M.z - 103], [BRIDGE2.x, BRIDGE2.z + 40], [BRIDGE2.x, BRIDGE2.z - 40], [BRIDGE2.x + 150, -1100], [350, -2350]], w: era === 5 ? 7 : 5.5 };
   const south = { pts: [[S.x + 35, S.z + 60], [S.x + 45, -60]], w: era === 5 ? 7 : 5.5 };
   const roads = [
     main,
     south,
     { pts: [[S.x + 38, S.z + 12], [S.x + 6, S.z + 4]], w: 3 },                    // farm lane
-    { pts: [[M.x - 70, M.z + 70], [M.x - 8, M.z + 14]], w: 4 },                   // manor drive
-    { pts: [[S.x + 42, S.z - 4], [bx + 30, bridgeZ - 30], [bx - 40, bridgeZ + 10], [-1500, 500]], w: 4.5 },
+    { pts: [[M.x + 68, M.z + 77], [M.x + 16, M.z + 12]], w: 4 },                  // manor drive
   ];
-  if (era < 5) roads.push({ pts: [[M.x - 40, M.z + 30], [P.x + 45, P.z + 20], [P.x + 20, P.z + 6]], w: 3 }); // mill lane
-  if (era === 3) {
-    // the OLD south road over Brežģa kalns to the krogs — the 1860 route the
-    // chronicle anchors the tavern to (Nēķina ale sold at "Brezgi"). The 1935
-    // Army sheet shows no such parallel road: by then the improved highway
-    // (P30's predecessor) carried everything, so eras 4-5 must not have it.
-    // Joined in its forward direction — the old intermediate (-125,1200)
-    // point doubled back from z=1900 before reversing south.
-    roads.push({ pts: SOUTH_ROAD, w: 5 });
-    roads.push({ pts: [[S.x + 35, S.z + 60], [S.x + 60, 1900]], w: 5.5 });
-  }
   return roads.map((r) => ({ ...r, pts: chaikinOpen(r.pts, null, 1.75) }));
 }
 
@@ -357,7 +375,7 @@ function parcelsOf(fl, era, seed) {
   const K = 0.886;                                   // ellipse → rectangle of equal area
   let hw = fl.rx * K, hh = fl.rz * K, rot = fl.rot;
   if (hh > hw) { [hw, hh] = [hh, hw]; rot += Math.PI / 2; }   // hw = the long half-axis
-  const BALK = era === 2 ? 0 : 2.4;
+  const BALK = isLidumEra(era) ? 0 : 2.4;
   let n = 1;
   if (era === 3) n = Math.max(2, Math.round((2 * hh) / (16 + r() * 8)));
   else if (era === 4) n = 2 + (r() < 0.4 ? 1 : 0);
@@ -382,7 +400,7 @@ function parcelsOf(fl, era, seed) {
       pcx += du * c; pcz += du * s;
     }
     out.push({ cx: pcx, cz: pcz, hw: phw, hh: stripH / 2, rot, type, rx: phw, rz: stripH / 2, tint: r(),
-      blob: era === 2 ? seed * 13 + k : null });
+      blob: isLidumEra(era) ? seed * 13 + k : null });
   }
   return out;
 }
@@ -459,7 +477,16 @@ export function fieldsForEra(era) {
 }
 
 function rawFieldsForEra(era) {
-  if (era <= 1 || era === 5) return [];
+  if (era === 0 || era === 5) return [];
+  if (era === 1) {
+    // two burn plots beside the Early Iron Age farm: barley, and last
+    // year's plot going back to weeds and birch
+    const C = LOC.CAMP;
+    return [
+      { cx: C.x + 62, cz: C.z - 34, rx: 34, rz: 24, rot: 0.5, type: 'barley' },
+      { cx: C.x + 78, cz: C.z + 48, rx: 26, rz: 19, rot: -0.4, type: 'fallow' },
+    ];
+  }
   if (era === 2) {
     const out = [
       { cx: S.x + 95, cz: S.z - 55, rx: 55, rz: 38, rot: 0.4, type: 'barley' },
@@ -535,6 +562,27 @@ export const ROAD_HALF_W = [3.5, 2.4, 2.2, 1.45];
 export const ROAD_MAX_OFFSET = [3.0, 2.5, 1.75, 1.25];
 const roadKey = (p) => `${p[0]},${p[1]}`;
 const roadSource = ROADS_OSM.map((r) => ({ ...r, pts: r.pts.map((p) => p.slice()) }));
+// THE OLD HIGHWAY. Every sheet from Rücker's 1839 map to the Soviet 1:25k
+// carries the Cēsis–Vecpiebalga road over the north flank of Brežģa kalns,
+// past the trig point and the tavern door at Brežģis
+// (research/historical-maps-audit.md). The straight P30 between Bebri and
+// Gailīši is a post-war bypass up to 260 m to the south-west, and the laser
+// survey shows its cuttings. The old line survives as three minor OSM ways.
+// In 1860 and 1935 they are joined to the P30's northern part as the highway
+// and the bypass is left out. Today each keeps its own class.
+{
+  const byId = (id) => roadSource.find((r) => r.id === id);
+  const p30 = byId(1092986374), bypass = byId(207312999);
+  const link = byId(812776431), hill = byId(447147093), east = byId(812776432);
+  if (p30 && bypass && link && hill && east) {
+    const leave = p30.pts.findIndex((p) => p[1] > 4840);          // where the old road left today's line
+    const tail = east.pts.slice().reverse();                      // Brežģis -> Vīdokšas -> Gailīši
+    const pts = [...p30.pts.slice(0, leave + 1), [1432, 4858], ...link.pts, ...hill.pts.slice(1), ...tail.slice(1)]
+      .map((p) => p.slice());
+    roadSource.push({ ...p30, id: 'old-highway', ref: 'old', surface: 'gravel', pts, maxEra: 4 });
+    for (const r of [p30, bypass, link, hill, east]) r.minEra = 5;
+  }
+}
 
 function segmentIntersection(a, b, c, d) {
   const rx = b[0] - a[0], rz = b[1] - a[1];
@@ -668,6 +716,7 @@ export function osmRoadsForEra(era) {
   const out = [];
   for (const r of ROADS_OSM_SMOOTH) {
     if (era < (r.minEra ?? 3)) continue;
+    if (r.maxEra !== undefined && era > r.maxEra) continue;
     if (era === 3 && r.c === 2) continue;
     out.push(r);
   }
@@ -744,12 +793,12 @@ export function farmSiteKept(i, era) {
 // fully exists (house+orchard+fields) or fully doesn't.
 export function nearStagePOI(x, z) {
   const n = (p, r) => Math.hypot(x - p.x, z - p.z) < r;
-  return n(LOC.STEAD, 100) || n(LOC.MANOR, 140) || n(LOC.KROGS, 70) ||
+  return n(LOC.STEAD, 100) || n(LOC.MANOR, 90) || n(LOC.MANOR_OLD, 60) || n(LOC.MANOR_KUTS, 45) || n(LOC.KROGS, 70) ||
          n(LOC.BREZGA, 70) || n(LOC.POND, 80) || n(LOC.CAMP, 60);
 }
 
 export function distToRoadEx(era, x, z) {
-  if (era <= 1) return { d: Infinity, c: 2 };
+  if (era === 0) return { d: Infinity, c: 2 };
   const { segs, map } = roadGridFor(era);
   const cix = Math.floor(x / ROAD_CELL), ciz = Math.floor(z / ROAD_CELL);
   let bd = Infinity, bc = 2;
@@ -830,43 +879,40 @@ export function forestDensity(era, x, z, y) {
     d = 0.68 + n * 0.4;                                     // primeval forest
     d *= smoothstep(35, 120, dRiver) * 0.92 + 0.08;         // open floodplain meadows
     d *= smoothstep(55, 135, dStead) * 0.94 + 0.06;         // the terrace opening where the aurochs graze
-    d *= smoothstep(12, 40, dCamp);                         // small camp clearing
+    d *= smoothstep(30, 115, dCamp);                        // the farm's clearing
+    d *= smoothstep(25, 80, Math.hypot(x - LOC.BARROWS.x, z - LOC.BARROWS.z));
   } else if (era === 2) {
     d = 0.56 + n * 0.46;
     d *= smoothstep(15, 70, dRiver) * 0.9 + 0.1;
     d *= smoothstep(42, 145, dStead);                       // farmstead clearing
-    d *= smoothstep(25, 80, Math.hypot(x - LOC.BARROWS.x, z - LOC.BARROWS.z));
     for (const f of ERA2_FARMS) d *= smoothstep(18, 60, Math.hypot(x - f.x, z - f.z));
   } else if (era === 5) {
-    // today: the real forest pattern from Sentinel-2. Where the satellite
-    // says forest, it IS forest — near-certain keep, or the Bernoulli thinning
-    // reads as savanna (clumps of 2-4 stems, then 40m gaps)
-    // Anti-alias the 50 m classification boundary, retaining mapped forest
-    // interiors. A binary nearest-cell mask made square-edged plantations.
-    const fx=(x-500+4400)/50-.5,fz=(z-1700+4400)/50-.5;
-    const ix=Math.floor(fx),iz=Math.floor(fz),u=fx-ix,v=fz-iz;
-    const sample=(dx,dz)=>forestMaskAt(-3900+(ix+dx+.5)*50,-2700+(iz+dz+.5)*50);
-    const coverage=lerp(lerp(sample(0,0),sample(1,0),u),lerp(sample(0,1),sample(1,1),u),v);
-    d = smoothstep(.15,.85,coverage) * (0.97+n*.03);
-    d *= 1 - settlementK(x, z) * 0.9;   // town yards: cap at ~10% of mask density
+    // Today: the woodland the laser survey measured in autumn 2019, as the
+    // share of ground under canopy taller than five metres. Yard and garden
+    // trees are in it too, so the villages keep theirs.
+    d = smoothstep(0.18, 0.7, canopyCoverAt(x, z)) * (0.97 + n * 0.03);
     d *= smoothstep(20, 55, dStead) * 0.94 + 0.06;
     d *= smoothstep(25, 65, dManor) * 0.94 + 0.06;
     // the 2017 tower crowns an open summit — 19m trees right up to an 11m
     // tower buried it (its whole point is the view)
     d *= smoothstep(15, 36, Math.hypot(x - B.x, z - B.z));
   } else {
-    // agrarian mosaic, anchored to the 1935 Army-sheet mask (map audit: the
-    // old elevation rule forested open farmed hills and missed real woods).
-    // Era 4 IS the sheet; era 3 adds modest pre-reform woodland back on the
-    // high noise-patches — 1860 was somewhat more wooded on marginal ground,
-    // and the exact 1860 pattern is conjecture the sheet can only bound.
+    // Agrarian mosaic, anchored to the Latvian Army sheet's woodland mask
+    // (1st edition, surveyed around 1900). Era 4 is that sheet. For 1860 the
+    // Russian 3-verst map shows more wood only in the east and south-east,
+    // where farms such as Mežandrēni were later cut out of it, and open
+    // country west of the highway. The exact 1860 pattern is conjecture that
+    // the small-scale sheet can only bound.
     const m35 = smoothstep(0.25, 0.6, forest1935At(x, z));
     d = m35 * (0.8 + n * 0.25);
     if (era === 3) {
-      const high = smoothstep(208, 224, y);
-      const patch = smoothstep(0.6, 0.74, n);
-      d = Math.max(d, Math.min(high, patch) * 0.75);
+      const east = smoothstep(1500, 2700, x + Math.max(0, z - 2500) * 0.25);
+      const patch = smoothstep(0.42, 0.6, n);
+      d = Math.max(d, east * patch * 0.8);
     }
+    // The summit of Brežģa kalns was open ground with a trig point on every
+    // sheet from 1905 to 1943, which suits a festival hill with a view.
+    d *= smoothstep(90, 210, Math.hypot(x - B.x, z - B.z));
     d *= smoothstep(70, 200, dStead) * 0.92 + 0.08;
     d *= smoothstep(80, 220, dManor) * 0.92 + 0.08;
     if (dRiver < 26 && dRiver > 12) d = Math.max(d, 0.35);
@@ -874,7 +920,7 @@ export function forestDensity(era, x, z, y) {
   }
   // universal exclusions
   if (fieldAt(era, x, z)) return 0;
-  if (era >= 2 && distToRoad(era, x, z) < 3.5) return 0;
+  if (era >= 1 && distToRoad(era, x, z) < (era === 1 ? 2 : 3.5)) return 0;
   for (const p of PADS) if (Math.hypot(x - p.x, z - p.z) < p.r + 6) return 0;
   // edge-relative water exclusion: the rugged shoreline decides, not a
   // fixed centerline radius (a wide pool used to drown trees on its bulges)

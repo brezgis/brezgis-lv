@@ -709,13 +709,15 @@ export const SPECIES = {
   }),
   arcticFox: () => quadruped({
     family: 'canine',
-    shoulder: 0.32, length: 0.55, width: 0.19, legR: 0.017, color: 0xeceae4,
-    neckLen: 0.16, headSize: 0.13, tail: 0.34, tailR: 0.048, tasselColor: 0xffffff,
+    shoulder: 0.32, length: 0.55, width: 0.19, legR: 0.017, color: 0x6e6256,   // summer coat: brown-grey above
+    belly: 0xd8cfbf, neckLen: 0.16, headSize: 0.13, tail: 0.34, tailR: 0.048, tasselColor: 0xbdb3a2,
   }),
   hare: () => hare(),
-  arcticHare: () => hare(0xf0efe8, 0xffffff),
+  // mountain hare (Lepus timidus) in its grey-brown summer coat
+  arcticHare: () => hare(0x84766a, 0xd9d2c6),
   squirrel: () => squirrel(),
-  ptarmigan: () => fowl({ size: 0.14, color: 0xf2f2ee }),
+  // willow ptarmigan in mottled summer plumage
+  ptarmigan: () => fowl({ size: 0.14, color: 0x8d6f4c }),
   // water
   fishPerch: () => fish({ len: 0.34, color: 0x4a5a3c }),
   fishPike: () => fish({ len: 0.72, color: 0x39503c, belly: 0xa8b49a, pike:true }),

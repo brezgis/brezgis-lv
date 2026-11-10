@@ -1,21 +1,11 @@
 // SHORE — the one cross-section law for every bank in the parish.
 //
-// Rivers, brooks and lakes all meet the land the same way: a bed that
-// shelves down from the waterline, a bank that climbs out of it, and a
-// floodplain that the water keeps near its own level. Each body contributes
-// two envelopes, and heightAt applies them in a fixed order:
+// The ground is a laser survey, which measures the banks but cannot see
+// under water. So each body only does three things: it keeps the land beside
+// it a hand above the waterline, it cuts a bed below the waterline, and it
+// leads the first couple of metres of wet lip up onto the surveyed bank.
 //
-//   U  (carve)  — terrain may not rise above it: bed in the water, the bank
-//                 face on land, then a steep wall so higher DEM valley sides
-//                 come down to the bank top instead of burying the channel;
-//   L  (fill)   — terrain may not sink below it: the same bed and bank, then
-//                 a floodplain held a little above the water. The DEM is a
-//                 27 m grid and happily dips below the river beside it.
-//
-// All carves (min) first, then the fills (max). A body's fill is switched
-// off inside another body's water and bank face — otherwise a lake shore
-// would dam the river flowing into it, or a brook's banks would wall off
-// its own mouth. Everything is a function of the SIGNED distance to the
+// Everything is a function of the SIGNED distance to the
 // rugged waterline (e < 0 in the water), so the terrain, the ground paint,
 // the high-resolution shore mesh and the water surface all agree on the
 // line where land stops.
@@ -30,30 +20,21 @@ function channelBody(q, x, z, river) {
   const ch = bankCharFromQuery(q, x, z);
   const n = bn.fbm(x * 0.021, z * 0.021, 2);
   const e = q.d - q.hw;
-  let H, W, D, fadeA, fadeB, flood;
+  let H, W, D, fadeA, fadeB;
   if (river) {
-    // Upper Gauja: grassy banks ~1 m above summer level, cut faces up to
-    // ~2 m on the outer bends, long low sand/gravel point bars inside them
-    H = clamp(0.62 + 1.05 * ch.outer + (n - 0.5) * 0.9 - 0.32 * ch.inner, 0.32, 2.0);
-    W = lerp(2.8, 1.25, ch.outer) + ch.inner * 9.5 + ch.bar * 2.2 + n * 1.6;
-    D = bedDropAt(q.curvature);
-    fadeA = 28; fadeB = 38; flood = 34;
+    // H and W only describe the wet lip for the paint and the bank props.
+    // The bank itself is the surveyed ground (see shoreHeight).
+    H = clamp(0.5 + 0.5 * ch.outer + (n - 0.5) * 0.5 - 0.25 * ch.inner, 0.3, 1.2);
+    W = lerp(2.4, 1.3, ch.outer) + n * 0.9;
+    D = bedDropAt(q.curvature, q.hw);
+    fadeA = 28; fadeB = 38;
   } else {
-    H = clamp(0.34 + 0.42 * ch.outer + (n - 0.5) * 0.4, 0.18, 0.95);
-    W = 1.3 + ch.inner * 2.6 + n * 1.1;
-    D = clamp(0.3 + q.hw * 0.17, 0.38, 0.9);
-    fadeA = 16; fadeB = 24; flood = 12;
+    H = clamp(0.3 + 0.3 * ch.outer + (n - 0.5) * 0.3, 0.18, 0.7);
+    W = 1.0 + n * 0.7;
+    D = clamp(0.22 + q.hw * 0.14, 0.25, 0.7);
+    fadeA = 16; fadeB = 24;
   }
-  // Past the bank top the valley side climbs to whatever the DEM holds —
-  // but over a floodplain bench first (wide inside a bend, where the river
-  // builds land; nearly nothing on the cut side) and at a slope that runs
-  // from a steep scarp on outer bends to a long grassy rise on inner ones.
-  // (bench + bank capped so the wall always has room to climb before the
-  // carve fades — else the DEM returned as a cliff at the fade)
-  const bench = river ? Math.min(1.5 + ch.inner * 12 + n * 7, 15 - W) : Math.min(0.8 + ch.inner * 3 + n * 2, 7 - W);
-  const wall = river ? lerp(0.32, 0.85, clamp(ch.outer * 0.8 + (1 - n) * 0.45, 0, 1))
-    : lerp(0.35, 0.8, clamp(ch.outer + (1 - n) * 0.3, 0, 1));
-  return { kind: river ? 'river' : 'stream', q, ch, e, level: q.level, H, W, D, hw: q.hw, fadeA, fadeB, flood, n, bench, wall };
+  return { kind: river ? 'river' : 'stream', q, ch, e, level: q.level, H, W, D, hw: q.hw, fadeA, fadeB, n };
 }
 
 function lakeBody(x, z) {
@@ -72,12 +53,9 @@ function lakeBody(x, z) {
 function mkLake(lake, x, z, e) {
   const ch = bankCharAt(x, z);
   const n = bn.fbm(x * 0.017 + 40, z * 0.017, 2);
-  // low shores; reedy mud flats (wide, barely rising) alternate with firmer
-  // sandy/till shores that climb within a couple of metres
-  const H = clamp(0.3 + n * 0.75 + ch.bar * 0.2, 0.25, 1.2);
-  const W = 1.4 + ch.mud * 7 + (1 - n) * 3;
-  return { kind: 'lake', lake, ch, e, level: lake.level, H, W, D: 0, hw: 0, fadeA: 22, fadeB: 34, flood: 20, n,
-    bench: Math.max(0, Math.min(2 + ch.mud * 8 + n * 4, 11 - W)), wall: lerp(0.3, 0.75, 1 - n) };
+  const H = clamp(0.3 + n * 0.5 + ch.bar * 0.2, 0.25, 0.9);
+  const W = 1.6 + ch.mud * 2.5;
+  return { kind: 'lake', lake, ch, e, level: lake.level, H, W, D: 0, hw: 0, fadeA: 22, fadeB: 34, n };
 }
 
 // every water body whose shore law reaches (x, z)
@@ -94,51 +72,41 @@ function bedAt(b) {
   const u = -b.e;                       // metres in from the waterline
   if (b.kind === 'lake') {
     // inferred littoral shelf then basin — not surveyed bathymetry
-    return b.level - lerp(0.1, 1.25, smoothstep(0, 14, u)) - 3.55 * smoothstep(14, 95, u);
+    return b.level - lerp(0.1, 1.25, smoothstep(0, 14, u)) - (b.lake.depth - 1.25) * smoothstep(14, 95, u);
   }
   // inner (point-bar) side shelves gently, outer side drops to the scour
   const slopeW = b.hw * (0.28 + 0.62 * b.ch.inner);
   return b.level - lerp(0.1, b.D, smoothstep(0, slopeW, u));
 }
-function bankAt(b) {
-  const t = clamp(b.e / b.W, 0, 1);
-  return b.level - 0.1 + (b.H + 0.1) * ease(t);
-}
-// carve envelope (terrain ≤ this)
-function carve(b) {
-  if (b.e < 0) return bedAt(b);
-  if (b.e <= b.W) return bankAt(b);
-  const r = b.e - b.W - b.bench;
-  // eased into the slope so the bench edge is a shoulder, not a crease
-  // …and steepening with distance, as valley sides do toward the plateau
-  return b.level + b.H + (r <= 0 ? 0 : (r < 3 ? r * r / 6 * b.wall : (r - 1.5) * b.wall) + 0.022 * r * r);
-}
-// fill envelope (terrain ≥ this)
-function fill(b) {
-  if (b.e < 0) return bedAt(b);
-  if (b.e <= b.W) return bankAt(b);
-  return b.level + lerp(b.H, 0.25, smoothstep(b.W + 4, b.W + b.flood, b.e));
+// freeboard: the least height land may have beside this water
+function freeboard(b) {
+  return b.level + lerp(0.1, 0.25, smoothstep(0, b.W + 3, b.e));
 }
 // 0 inside body b's water + bank face, 1 clear of it
 function clearOf(b) {
   return smoothstep(b.W, b.W + 4, b.e);
 }
 
-// Apply the law to a raw height. bodies may be passed in when the caller
-// already queried them (the paint does).
+// Apply the law to a surveyed height. The laser sees the banks but not the
+// bed, so the law is short: land beside water keeps a hand of freeboard,
+// the bed is cut below the waterline, and over the first W metres the wet
+// lip climbs from the waterline onto the surveyed ground. Everything above
+// that is the ground as it was measured. bodies may be passed in when the
+// caller already queried them (the paint does).
 export function shoreHeight(h, x, z, bodies = shoreBodies(x, z)) {
   if (!bodies.length) return h;
-  for (const b of bodies) {
-    const k = 1 - smoothstep(b.fadeA, b.fadeB, b.e);
-    const u = carve(b);
-    if (u < h) h += k * (u - h);
-  }
   for (let i = 0; i < bodies.length; i++) {
     const b = bodies[i];
+    if (b.e <= 0) continue;
     let k = 1 - smoothstep(b.fadeA, b.fadeB, b.e);
     for (let j = 0; j < bodies.length; j++) if (j !== i) k *= clearOf(bodies[j]);
-    const l = fill(b);
+    const l = freeboard(b);
     if (l > h) h += k * (l - h);
+  }
+  const land = h;
+  for (const b of bodies) {
+    if (b.e < 0) h = Math.min(h, bedAt(b));
+    else if (b.e < b.W) h = Math.min(h, lerp(b.level - 0.1, land, ease(b.e / b.W)));
   }
   // the mill terrace: the bank cut back to a level yard beside the dam
   const M = LOC.MILL;

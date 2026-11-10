@@ -29,10 +29,11 @@ const LANDMARKS = [
   { key: 'fort', x: () => LOC.HILLFORT.x, z: () => LOC.HILLFORT.z, lv: 'Pilskalns', en: 'Hillfort', present: [0, 0, 1, 0, 0, 0], dy: 0 },
   { key: 'lake', x: () => LOC.LAKE_VIEW.x + 200, z: () => LOC.LAKE_VIEW.z, lv: 'Taurenes ezers', en: 'Lake Taurene', present: [1, 1, 1, 1, 1, 1], view: 'ezers', dy: 0 },
   { key: 'oak', x: () => LOC.OAK.x, z: () => LOC.OAK.z, lv: 'Vecais ozols', en: 'The old oak', present: [0, 0, 1, 1, 1, 0], dy: -15 },
-  { key: 'barrows', x: () => LOC.BARROWS.x, z: () => LOC.BARROWS.z, lv: 'Kapu uzkalniņi', en: 'Barrow graves', present: [0, 0, 1, 1, 1, 1], dy: 15 },
-  { key: 'church', x: () => LOC.CHURCH.x, z: () => LOC.CHURCH.z, lv: 'Dzērbenes baznīca', en: 'Dzērbene church', present: [0, 0, 0, 1, 1, 1], dy: 0 },
+  { key: 'barrows', x: () => LOC.BARROWS.x, z: () => LOC.BARROWS.z, lv: 'Kapu uzkalniņi', en: 'Grave mounds', present: [0, 1, 0, 0, 0, 0], dy: 15 },
+  { key: 'senkapi', x: () => 189, z: () => -614, lv: 'Nēķina senkapi', en: 'Nēķina cemetery', present: [0, 0, 1, 0, 0, 0], dy: -12 },
+  { key: 'church', x: () => LOC.CHURCH.x, z: () => LOC.CHURCH.z, lv: 'Apšu baznīca', en: 'Apšu church', present: [0, 0, 0, 1, 1, 1], dy: 0 },
 ];
-const ERA_YEARS = ['10 800 pr.Kr.', '~50', '~950', '1860', '1935', '2025'];
+const ERA_YEARS = ['10 500 pr.Kr.', '~50', '~950', '1860', '1935', '2025'];
 
 // --- per-era base bake ------------------------------------------------------
 const bakes = new Map();
@@ -88,7 +89,7 @@ function bakeBase(era) {
     ctx.drawImage(tmp, 0, 0, W, W);
 
     // fields in pale gold
-    if (era >= 2) {
+    if (era >= 1) {
       ctx.fillStyle = 'rgba(196,176,110,0.55)';
       for (const f of fieldsForEra(era)) {
         ctx.save();
@@ -124,7 +125,7 @@ function bakeBase(era) {
   }
 
   // roads for THIS era (hand-laid diorama roads + the OSM network)
-  if (era >= 2) {
+  if (era >= 1) {
     const draw = (pts, wpx, style) => {
       ctx.strokeStyle = style;
       ctx.lineWidth = wpx;
@@ -135,6 +136,7 @@ function bakeBase(era) {
     for (const r of roadsForEra(era)) draw(r.pts, 1.4, 'rgba(150,124,84,0.9)');
     if (era >= 3) {
       for (const r of ROADS_OSM) {
+        if (era < (r.minEra ?? 3) || (r.maxEra !== undefined && era > r.maxEra)) continue;
         if (era === 3 && r.c === 2) continue;
         const main = r.c <= 1;
         draw(r.pts, main ? 1.8 : 0.9, main

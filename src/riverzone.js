@@ -31,7 +31,8 @@ export const LAKE_SHORES = LAKES.map((l) => {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
   }
-  return { name: l.name, level: l.level, poly, minX, maxX, minZ, maxZ };
+  // depth: sounded maximum where one is published, else an assumed 3.6 m
+  return { name: l.name, level: l.level, depth: l.depth || 3.6, poly, minX, maxX, minZ, maxZ };
 });
 
 const LG_RES = 8;
@@ -197,7 +198,32 @@ export function lakeAt(x, z) {
   if (v === 0) return null;
   if (v <= 100) return LAKE_SHORES[v - 1];
   const lake = LAKE_SHORES[v - 101];
-  return pointInPoly(x, z, lake.poly) ? lake : null;
+  return inLakePoly(lake, x, z) ? lake : null;
+}
+// Point-in-polygon against a surveyed shoreline of a thousand or more
+// vertices: only the edges whose z-span covers the point's 8 m band are tested.
+function inLakePoly(lake, x, z) {
+  if (!lake.bands) {
+    lake.bands = new Map();
+    const P = lake.poly;
+    for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+      const a = P[j], b = P[i];
+      const b0 = Math.floor(Math.min(a[1], b[1]) / 8), b1 = Math.floor(Math.max(a[1], b[1]) / 8);
+      for (let k = b0; k <= b1; k++) {
+        let arr = lake.bands.get(k);
+        if (!arr) lake.bands.set(k, arr = []);
+        arr.push(a[0], a[1], b[0], b[1]);
+      }
+    }
+  }
+  const arr = lake.bands.get(Math.floor(z / 8));
+  if (!arr) return false;
+  let inside = false;
+  for (let i = 0; i < arr.length; i += 4) {
+    const az = arr[i + 1], bz = arr[i + 3];
+    if ((az > z) !== (bz > z) && x < (arr[i + 2] - arr[i]) * (z - az) / (bz - az) + arr[i]) inside = !inside;
+  }
+  return inside;
 }
 export function inAnyLake(x, z) { return lakeAt(x, z) !== null; }
 export function lakeLevelAt(x, z) {
@@ -264,13 +290,16 @@ function buildChannel(sourcePts, opts) {
   cum = 0; prev = even[0];
   const sourceMinLevel = Math.min(...pts.map((p) => p[2]));
   let level = Math.max(prev[2], sourceMinLevel);
-  chan.samples.push([prev[0], prev[1], level, widthLaw(chan.arcOffset, chan)]);
+  // a 4th component is the surveyed half-width; brooks keep the width law
+  const measured = pts[0].length > 3;
+  const hwOf = (p, s) => measured ? clamp(p[3], chan.minHW, chan.maxHW) : widthLaw(s, chan);
+  chan.samples.push([prev[0], prev[1], level, hwOf(prev, chan.arcOffset)]);
   chan.sampleS.push(0);
   for (let i = 1; i < even.length; i++) {
     const p = even[i];
     cum += Math.hypot(p[0] - prev[0], p[1] - prev[1]);
     level = Math.min(level, Math.max(p[2], sourceMinLevel));
-    chan.samples.push([p[0], p[1], level, widthLaw(chan.arcOffset + cum, chan)]);
+    chan.samples.push([p[0], p[1], level, hwOf(p, chan.arcOffset + cum)]);
     chan.sampleS.push(cum);
     prev = p;
   }
@@ -320,8 +349,8 @@ function buildChannel(sourcePts, opts) {
 }
 
 export const RIVER = buildChannel(RIVER_PTS, {
-  baseHW: 10.2, swellAmp: 3.4, swellL: 110, nibbleAmp: 1.0, nibbleL: 26,
-  minHW: 7.6, maxHW: 13.2, seedY: 3.7, sampleGap: 5.6, name: 'Gauja', kind: 'river',
+  baseHW: 3.6, swellAmp: 1.0, swellL: 110, nibbleAmp: 0.4, nibbleL: 26,
+  minHW: 1.6, maxHW: 16, seedY: 3.7, sampleGap: 4, name: 'Gauja', kind: 'river',
 });
 export const STREAM_CHANNELS = [];
 for (let i = 0; i < STREAMS.length; i++) {
@@ -368,10 +397,9 @@ function harmonise(chan) {
     if (a.lake && a.lake === b.lake) { for (let i = a.i; i <= b.i; i++) S[i][2] = a.L; continue; }
     const oa = orig[a.i], ob = orig[b.i], sa = chan.sampleS[a.i], sb = chan.sampleS[b.i];
     for (let i = a.i; i <= b.i; i++) {
-      // half sampled shape, half even grade: the 27 m DEM concentrates
-      // whole metres of fall into single hundred-metre steps
+      // the surveyed fall, eased a little toward an even grade
       const even = lerp(a.L, b.L, (chan.sampleS[i] - sa) / Math.max(1e-6, sb - sa));
-      S[i][2] = oa - ob > 0.05 ? lerp(b.L + (orig[i] - ob) * (a.L - b.L) / (oa - ob), even, 0.55) : even;
+      S[i][2] = oa - ob > 0.05 ? lerp(b.L + (orig[i] - ob) * (a.L - b.L) / (oa - ob), even, 0.15) : even;
     }
   }
   if (ctrl.length && ctrl[0].i > 0) for (let i = 0; i < ctrl[0].i; i++) S[i][2] = Math.max(S[i][2], ctrl[0].L);
@@ -391,14 +419,16 @@ for (const chan of STREAM_CHANNELS) harmonise(chan);
 //
 // Both the coarse terrain field stamp and the query-time channel law call
 // this, so the carved bed and the rendered bed cannot disagree.
-export const BED_RIFFLE = 1.78;   // depth below the surface over a crossing
-export const BED_POOL = 3.05;     // ...and in the scour hole at a bend apex
+// Depths are inferred, not sounded. The laser survey gives the young Gauja a
+// width of about seven metres here, a small upland river, so the bed is
+// scaled to that: knee-deep riffles and pools a little over a metre.
+export const BED_RIFFLE = 0.55;   // depth below the surface over a crossing
+export const BED_POOL = 1.4;      // ...and in the scour hole at a bend apex
 export function poolK(curvature) {
-  // |curvature| runs p25 0.0022 / p50 0.0064 / p90 0.026 on the Gauja
   return smoothstep(0.0035, 0.0210, Math.abs(curvature || 0));
 }
-export function bedDropAt(curvature) {
-  return lerp(BED_RIFFLE, BED_POOL, poolK(curvature));
+export function bedDropAt(curvature, hw = 3.5) {
+  return lerp(BED_RIFFLE, BED_POOL, poolK(curvature)) * clamp(Math.sqrt(hw / 3.5), 0.75, 1.5);
 }
 
 function profileAtS(chan, s) {
@@ -623,6 +653,8 @@ export function inConfluenceMask(x, z, margin = 0) { return confluenceAt(x, z, m
 // the flooded cells here: { level, x0, z0, S, nx, nz, data(Uint8) }.
 let POND = null;
 export function setPond(p) { POND = p; }
+// The pond stands whenever the weir does: the manor centuries and today.
+export const pondEra = (era) => era >= 3;
 export function pondAt(x, z) {
   if (!POND) return null;
   const ix = Math.floor((x - POND.x0) / POND.S), iz = Math.floor((z - POND.z0) / POND.S);
@@ -640,7 +672,7 @@ export function waterLevelAt(x, z, era = 4) {
   if (rv && rv.d < rv.hw + 1.5) w = Math.max(w, rv.level);
   const st = streamAt(x, z);
   if (st && st.d < st.hw + 0.8) w = Math.max(w, st.level);
-  if ((era === 3 || era === 4) && pondAt(x, z)) w = Math.max(w, POND.level);
+  if (pondEra(era) && pondAt(x, z)) w = Math.max(w, POND.level);
   return w;
 }
 
@@ -660,7 +692,7 @@ export function vegExcluded(x, z, y, era = 4, m = 0) {
   }
   const st = streamAt(x, z);
   if (st && (st.d < st.hw + 1.2 + m * 0.6 || (st.d < st.hw + 5 && y < st.level + 0.4))) return true;
-  if ((era === 3 || era === 4 || era === undefined) && POND) {
+  if ((era === undefined || pondEra(era)) && POND) {
     if (y < POND.level + 0.25 && pondAt(x, z)) return true;
   }
   return false;

@@ -541,7 +541,7 @@ function buildLilies() {
     group,
     setEra(era) {
       group.visible = era !== 0;
-      padsPond.visible = era === 3 || era === 4;
+      padsPond.visible = era >= 3;
     },
   };
 }
@@ -697,17 +697,18 @@ export function buildWater() {
       r.m.material.opacity = 0.32 * (1 - k) * (1 - k);
     }
   }
-  // era palettes: glacial meltwater is milky with rock flour; later rivers
-  // carry the humic tea of the bogs and spruce forests upstream
+  // era palettes: on the tundra the water is clear snowmelt (no glacier is
+  // left in the catchment to cloud it with rock flour); later rivers carry
+  // the humic tea of the bogs and spruce forests upstream
   function setEra(era) {
     riseEra = era;
     lilies.setEra(era);
-    const pondOn = era === 3 || era === 4;
+    const pondOn = era >= 3;
     for (const m of mats) {
       const u = m.userData.u;
       u.uPondMask.value = pondOn ? 1 : 0;
       if (era === 0) {
-        u.uBody.value.setRGB(0.055, 0.085, 0.088); u.uSilt.value.setRGB(0.2, 0.24, 0.22); u.uExtinct.value = 2.2;
+        u.uBody.value.setRGB(0.03, 0.055, 0.06); u.uSilt.value.setRGB(0.2, 0.22, 0.2); u.uExtinct.value = 0.9;
       } else {
         u.uBody.value.setRGB(0.052, 0.043, 0.025); u.uSilt.value.setRGB(0.20, 0.18, 0.12); u.uExtinct.value = 1.35;
       }

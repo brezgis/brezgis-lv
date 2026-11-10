@@ -484,7 +484,11 @@ export function manorOutbuilding(len = 20) {
 
 export function watermill(pondLevel) {
   const g = new THREE.Group();
-  const house = logCabin({ w: 5, d: 6.5, wallH: 3, roofH: 2.2, roof: 'shingleGable', old: true, windows: 1 });
+  // Photographs of 1980 and 1982 in the National Library show the manor
+  // mill as a tall fieldstone building, so the walls are stone here. The
+  // wheel and its side are a reconstruction.
+  const house = logCabin({ w: 6, d: 8.5, wallH: 4.6, roofH: 2.6, roof: 'shingleGable', old: true, windows: 2 });
+  house.traverse((o) => { if (o.isMesh && (o.material === MAT.logOld || o.material === MAT.log)) o.material = MAT.stone; });
   g.add(house);
   const wheel = new THREE.Group();
   const rim = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.12, 6, 18), MAT.darkWood);
@@ -496,7 +500,7 @@ export function watermill(pondLevel) {
     paddle.rotation.z = a;
     wheel.add(paddle);
   }
-  wheel.position.set(-3.2, 1.2, 0);
+  wheel.position.set(-3.7, 1.2, 0);
   wheel.rotation.y = Math.PI / 2;
   g.add(wheel);
   g.userData.tick = (t) => { wheel.rotation.x = t * 0.7; };
@@ -728,30 +732,47 @@ export function poemStone() {
   return shadowize(g);
 }
 
-export function storkNestPole() {
+// A stork's nest on a cartwheel: on a pole today, on a topped old tree
+// before the war (the 1934 census found almost all nests in trees).
+export function storkNestPole({ tree = false } = {}) {
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 5.4, 6), MAT.logOld);
-  pole.position.y = 2.7;
+  const H = tree ? 7.6 : 5.4;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(tree ? 0.16 : 0.09, tree ? 0.34 : 0.12, H, tree ? 9 : 6), MAT.logOld);
+  pole.position.y = H / 2;
+  g.add(pole);
+  if (tree) {
+    // stubs of the lopped crown
+    for (let i = 0; i < 5; i++) {
+      const len = 0.9 + rng() * 1.1;
+      const limb = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.085, len, 5), MAT.logOld);
+      const a = i * 1.3 + rng() * 0.5, y = 3.6 + i * 0.75;
+      limb.position.set(Math.cos(a) * len * 0.42, y + len * 0.2, Math.sin(a) * len * 0.42);
+      limb.rotation.set(0, -a, -1.05);
+      g.add(limb);
+    }
+  }
   const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.1, 5, 12), MAT.darkWood);
   wheel.rotation.x = Math.PI / 2;
-  wheel.position.y = 5.45;
+  wheel.position.y = H + 0.05;
   const nest = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.22, 5, 12), MAT.hay);
   nest.rotation.x = Math.PI / 2;
-  nest.position.y = 5.6;
-  g.add(pole, wheel, nest);
+  nest.position.y = H + 0.2;
+  g.add(wheel, nest);
   return shadowize(g);
 }
 
+// Apšu (Lodes) church is a log church of 1780, so the walls and tower are
+// timber and the roof is shingled. Its proportions here are approximate.
 export function churchSilhouette() {
   const g = new THREE.Group();
-  const nave = new THREE.Mesh(new THREE.BoxGeometry(24, 9, 12), MAT.plaster);
+  const nave = new THREE.Mesh(new THREE.BoxGeometry(24, 9, 12), MAT.logOld);
   nave.position.y = 4.5;
-  const naveRoof = gableRoof(12, 24, 5, MAT.tile);
+  const naveRoof = gableRoof(12, 24, 5, MAT.darkWood);
   naveRoof.rotation.y = Math.PI / 2;
   naveRoof.position.y = 9;
-  const tower = new THREE.Mesh(new THREE.BoxGeometry(8, 16, 8), MAT.plaster);
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(8, 16, 8), MAT.logOld);
   tower.position.set(14, 8, 0);
-  const spire = new THREE.Mesh(new THREE.ConeGeometry(4.4, 12, 8), MAT.iron);
+  const spire = new THREE.Mesh(new THREE.ConeGeometry(4.4, 12, 8), MAT.darkWood);
   spire.position.set(14, 22, 0);
   g.add(nave, naveRoof, tower, spire);
   addDoor(g, { axis: 'x', face: 18, w: 2.2, h: 3.2 });
@@ -1088,8 +1109,9 @@ export function erratics(count, area) {
 export function deadIce(x, z, s = 1) {
   const g = new THREE.Group();
   const iceMat = new THREE.MeshPhongMaterial({
-    color: 0xc9d4d1, shininess: 18, specular: 0x6a797d,
+    color: 0xaab5b1, shininess: 18, specular: 0x6a797d,
   });
+  const tillMat = new THREE.MeshLambertMaterial({ color: 0x6d6557 });
   for (let i = 0; i < 3; i++) {
     const blob = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), iceMat);
     blob.position.set((rng() - 0.5) * 14 * s, -1.2 + i * 0.4, (rng() - 0.5) * 10 * s);
@@ -1097,6 +1119,16 @@ export function deadIce(x, z, s = 1) {
     blob.rotation.set(rng(), rng(), rng());
     blob.castShadow = true;
     g.add(blob);
+    // Dead ice does not lie about clean. By now it is buried under the
+    // till and gravel that melted out of it, and only slumped faces show.
+    const mantle = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), tillMat);
+    mantle.position.copy(blob.position);
+    mantle.position.y += blob.scale.y * 0.3;
+    mantle.position.x += (rng() - 0.5) * 3 * s; mantle.position.z += (rng() - 0.5) * 3 * s;
+    mantle.scale.set(blob.scale.x * 1.02, blob.scale.y * 0.8, blob.scale.z * 0.92);
+    mantle.rotation.copy(blob.rotation);
+    mantle.castShadow = mantle.receiveShadow = true;
+    g.add(mantle);
   }
   g.position.set(x, meshHeightAt(x, z), z);
   return g;

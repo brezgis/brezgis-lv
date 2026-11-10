@@ -2194,9 +2194,24 @@ export function buildEra(era, ctx) {
       markBuilding(-158, 171, 8, 14, 0.2);
       smokes.push([-158, meshHeightAt(-158, 171) + 8.2, 171, { rate: 0.7, gray: 0.6 }]);
     }
-    // Jāņi fire pyre on Brežģa kalns — the parish's festival hill
-    add(pyre(), B.x, B.z, 0.4);
-    fires.push([B.x, meshHeightAt(B.x, B.z) + 0.9, B.z, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
+    // Jāņi fire pyre on Brežģa kalns, the parish's festival hill, beside the
+    // survey's trig point (a timber signal over the mark, on every sheet
+    // from 1905 to 1943)
+    {
+      const sig = new THREE.Group();
+      for (let k = 0; k < 4; k++) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 7.2, 5), MAT.logOld);
+        const a = k * Math.PI / 2 + 0.6;
+        leg.position.set(Math.cos(a) * 1.1, 3.4, Math.sin(a) * 1.1);
+        leg.rotation.set(Math.sin(a) * 0.31, 0, -Math.cos(a) * 0.31);
+        leg.castShadow = true;
+        sig.add(leg);
+      }
+      sig.name = 'trig-signal';
+      add(sig, B.x - 9, B.z + 7);
+    }
+    add(pyre(), B.x + 8, B.z - 4, 0.4);
+    fires.push([B.x + 8, meshHeightAt(B.x + 8, B.z - 4) + 0.9, B.z - 4, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
 
     if (modern) {
       add(poemStone(), LOC.STONE.x, LOC.STONE.z, -0.5);
@@ -2290,15 +2305,19 @@ export function buildEra(era, ctx) {
     add(logCabin({ w: 4.5, d: 6, wallH: 2.1, roofH: 2.2, roof: 'shingleGable', old: true }), K.x + 26, K.z - 14, -0.4);
     markBuilding(K.x + 26, K.z - 14, 4.5, 6, -0.4);
 
-    // Brežģa kalns: the 2017 observation tower, the summit oak, the Jāņi pyre
-    add(observationTower(), B.x, B.z, 0.2);
-    markBuilding(B.x, B.z, 4, 4, 0.2);
+    // Brežģa kalns: the 2017 observation tower and the Jāņi pyre
+    // The tower stands where the survey found its roof, 17 to 18 m above the
+    // ground. Published accounts give it as an 11 m tower, which fits the
+    // viewing platform, so the model is raised to the surveyed roof height.
+    const tower = add(observationTower(), B.x, B.z, 0.2);
+    tower.scale.set(1.3, 1.58, 1.3);
+    markBuilding(B.x, B.z, 6, 6, 0.2);
     addRaw(gravelEllipse(B.x + 55, B.z - 60, 12, 7, -0.58, 0x9d947f));
     add(infoSign(), B.x + 48, B.z - 52, -0.7);
     add(picnicTable(), B.x + 24, B.z - 18, -0.45);
     add(fireRing(), B.x + 10, B.z - 8, 0.25);
-    add(outhouse(), B.x + 38, B.z - 36, 0.55);
-    markBuilding(B.x + 38, B.z - 36, 1.4, 1.4, 0.55);
+    add(outhouse(), B.x - 24, B.z + 18, 0.55);
+    markBuilding(B.x - 24, B.z + 18, 1.4, 1.4, 0.55);
     const roadside = buildRoadside();
     for (const stop of roadside.children) {
       stageFootprints.push(stageFootprint(stop.position.x,stop.position.z,3.6,2.3,stop.rotation.y));
@@ -2314,8 +2333,6 @@ export function buildEra(era, ctx) {
       s: p.s, dir: i % 2 ? -1 : 1, speed: 15 + (i % 3) * 2.5,
     })));
     if (trafficTick) ticks.push(trafficTick);
-    add(pyre(), B.x + 22, B.z + 10, 0.4);
-    fires.push([B.x + 22, meshHeightAt(B.x + 22, B.z + 10) + 0.9, B.z + 10, { intensity: 30, dist: 150, duskOnly: true, scale: 3.6 }]);
 
     utilityPoles(g, true);
 

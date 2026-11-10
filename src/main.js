@@ -835,19 +835,23 @@ async function boot() {
   // for long.
   const HEADROOM_SHADOW_MAP = renderer.capabilities.maxTextureSize >= 5120 ? 5120 : 4096;
   Object.assign(gov, {
-    acc: 0, frames: 0, level: 1, shadowEvery: 2, shadowTick: 0,
+    acc: 0, frames: 0, level: 1, shadowEvery: 2, shadowTick: 0, reflEvery: 1, reflTick: 0,
     fps: 0, highSamples: 0, upgradeCooldown: 0,
   });
   const GOV_STEPS = [
     // A high-FPS-only rung: 5120 is 1.56x the texel memory of the 4096
     // default, and is never selected when the GPU's texture limit is lower.
     // refl: the water mirror's resolution as a fraction of the frame
-    { pr: Math.min(devicePixelRatio, 2), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP, refl: 0.5 },
-    { pr: Math.min(devicePixelRatio, 2), grass: 1, shadowEvery: 2, shadowMap: 4096, refl: 0.5 },
-    { pr: Math.min(devicePixelRatio, 1.75), grass: 1, shadowEvery: 2, shadowMap: 4096, refl: 0.45 },
-    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.85, shadowEvery: 3, shadowMap: 4096, refl: 0.4 },
-    { pr: Math.min(devicePixelRatio, 1.25), grass: 0.65, shadowEvery: 4, shadowMap: 2048, refl: 0.33 },
-    { pr: Math.min(devicePixelRatio, 1), grass: 0.45, shadowEvery: 5, shadowMap: 2048, refl: 0.25 },
+    // Sharpness is the last thing given up: a struggling GPU first refreshes
+    // its shadows and its water mirror less often and thins the grass, and
+    // only then renders fewer pixels. reflEvery: frames per mirror refresh.
+    { pr: Math.min(devicePixelRatio, 2), grass: 1, shadowEvery: 2, shadowMap: HEADROOM_SHADOW_MAP, refl: 0.5, reflEvery: 1 },
+    { pr: Math.min(devicePixelRatio, 2), grass: 1, shadowEvery: 2, shadowMap: 4096, refl: 0.5, reflEvery: 1 },
+    { pr: Math.min(devicePixelRatio, 2), grass: 0.9, shadowEvery: 3, shadowMap: 4096, refl: 0.45, reflEvery: 2 },
+    { pr: Math.min(devicePixelRatio, 1.75), grass: 0.8, shadowEvery: 4, shadowMap: 4096, refl: 0.4, reflEvery: 2 },
+    { pr: Math.min(devicePixelRatio, 1.5), grass: 0.65, shadowEvery: 5, shadowMap: 2048, refl: 0.33, reflEvery: 3 },
+    { pr: Math.min(devicePixelRatio, 1.25), grass: 0.5, shadowEvery: 6, shadowMap: 2048, refl: 0.25, reflEvery: 3 },
+    { pr: Math.min(devicePixelRatio, 1), grass: 0.4, shadowEvery: 8, shadowMap: 2048, refl: 0.25, reflEvery: 4 },
   ];
   function applyGov(s) {
     renderer.setPixelRatio(s.pr);
@@ -856,6 +860,7 @@ async function boot() {
     grass.setBudget(s.grass);
     water.setReflectionScale(s.refl);
     gov.shadowEvery = s.shadowEvery;
+    gov.reflEvery = s.reflEvery;
     if (sky.sun.shadow.mapSize.x !== s.shadowMap) {
       sky.sun.shadow.mapSize.set(s.shadowMap, s.shadowMap);
       if (sky.sun.shadow.map) { sky.sun.shadow.map.dispose(); sky.sun.shadow.map = null; }
@@ -1097,7 +1102,11 @@ async function boot() {
       if (text !== clockText || clockEl !== clockTextEl) { clockEl.textContent = text; clockText = text; clockTextEl = clockEl; }
     }
     // the water's planar mirror (grass is sub-pixel in a half-res reflection)
-    water.updateReflection(renderer, scene, camera, reflHide, dt);
+    gov.reflAcc = (gov.reflAcc || 0) + dt;
+    if (++gov.reflTick >= (gov.reflEvery || 1)) {
+      water.updateReflection(renderer, scene, camera, reflHide, gov.reflAcc);
+      gov.reflTick = 0; gov.reflAcc = 0;
+    }
     composer.render();
     // background era preparation: generous behind the welcome card, a few
     // ms per frame in the world, nothing while the frame rate is struggling

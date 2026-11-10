@@ -185,7 +185,11 @@ function makeReliefTex() {
       const i = (tz * N + tx) * 4;
       data[i] = enc((row[tx + 2] - row[tx]) / (2 * e));          // dh/dx
       data[i + 1] = enc((nextRow[tx + 1] - prevRow[tx + 1]) / (2 * e)); // dh/dz
-      data[i + 2] = 0; data[i + 3] = 255;
+      // curvature: hollows a little darker, crests a little lighter, the
+      // way damp ditches and dry banks read on the ground and from the air
+      const lap = (row[tx] + row[tx + 2] + prevRow[tx + 1] + nextRow[tx + 1] - 4 * row[tx + 1]) / (e * e);
+      data[i + 2] = Math.round(127.5 + Math.max(-1, Math.min(1, -lap * 7)) * 127);
+      data[i + 3] = 255;
     }
     const t = prevRow; prevRow = row; row = nextRow; nextRow = t;
   }
@@ -246,13 +250,15 @@ function detailify(material, strength) {
     );
     sh.uniforms.uShoreMask = { value: shoreMaskTex };
     sh.uniforms.uRelief = { value: reliefTex };
-    sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; uniform sampler2D uShoreMask; uniform sampler2D uRelief; varying vec3 vWp; varying vec3 vWn; varying float vKeep; vec3 gWn; float vSlope;\n' +
+    sh.fragmentShader = 'uniform sampler2D uDetail; uniform float uDetailK; uniform sampler2D uShoreMask; uniform sampler2D uRelief; varying vec3 vWp; varying vec3 vWn; varying float vKeep; vec3 gWn; float vSlope; float gCurv;\n' +
       sh.fragmentShader.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
         {
           // world normal: the surveyed relief, handing over to the mesh's own
           // normals where the 2 m shore and site ground is built (vKeep)
           vec2 ruv = vec2((vWp.x - ${OX.toFixed(1)}) / ${SPAN.toFixed(1)} + 0.5, (vWp.z - ${OZ.toFixed(1)}) / ${SPAN.toFixed(1)} + 0.5);
-          vec2 s = texture2D(uRelief, ruv).rg * 2.0 - 1.0;
+          vec4 rel = texture2D(uRelief, ruv);
+          gCurv = (rel.b * 2.0 - 1.0) * (1.0 - vKeep);
+          vec2 s = rel.rg * 2.0 - 1.0;
           vec2 g = sign(s) * s * s * ${RELIEF_MAX.toFixed(1)};
           gWn = normalize(mix(normalize(vec3(-g.x, 1.0, -g.y)), normalize(vWn), vKeep));
           vSlope = 1.0 - gWn.y;
@@ -274,6 +280,7 @@ function detailify(material, strength) {
         '#include <color_fragment>',
         `#include <color_fragment>
         {
+          diffuseColor.rgb *= 1.0 + gCurv * 0.2;
           float d0 = texture2D(uDetail, vWp.xz * 0.31).r;   // soil crumb
           float d1 = texture2D(uDetail, vWp.xz * 0.09).r;   // tussocks
           float d2 = texture2D(uDetail, vWp.xz * 0.011).r;  // field-scale patchiness
@@ -536,10 +543,23 @@ export function* buildTerrainJob() {
   geo.rotateX(-Math.PI / 2);
   geo.translate(OX, 0, OZ);
   const pos = geo.attributes.position;
+  // One shore query per vertex does three jobs: the height, and the bank
+  // record every era's paint needs (so painting never asks again).
+  coarseRecIdx = new Int32Array(pos.count).fill(-1);
+  const recs = [];
+  const tmp = new Float32Array(TREC);
   for (let i = 0; i < pos.count; i++) {
     if ((i & 8191) === 0) yield;
-    pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+    const x = pos.getX(i), z = pos.getZ(i);
+    const bodies = shoreBodies(x, z);
+    pos.setY(i, heightAtWith(x, z, bodies));
+    if (bodies.length) {
+      shoreRecord(bodies, tmp);
+      coarseRecIdx[i] = recs.length / TREC;
+      for (let k = 0; k < TREC; k++) recs.push(tmp[k]);
+    }
   }
+  coarseRec = new Float32Array(recs);
   // record the rendered grid for meshHeightAt
   {
     const n = RES;
@@ -561,6 +581,42 @@ export function* buildTerrainJob() {
   terrainMesh = new THREE.Mesh(geo, colorMaterial);
   terrainMesh.receiveShadow = true;
   terrainMesh.name = 'terrain';
+  // The ground is drawn as tiles that share the big mesh's vertex buffers but
+  // carry their own index and bounds, so only the tiles in view are drawn
+  // (two million triangles went to the GPU every pass, wherever one looked).
+  {
+    const T = 11, C = (RES - 1) / T;                 // 11 x 11 tiles of 93 cells
+    const P = pos.array;
+    const full = geo.index.array;
+    for (let tz = 0; tz < T; tz++) for (let tx = 0; tx < T; tx++) {
+      const idx = new Uint32Array(C * C * 6);
+      let n = 0, minY = Infinity, maxY = -Infinity;
+      for (let r = tz * C; r < (tz + 1) * C; r++) for (let c = tx * C; c < (tx + 1) * C; c++) {
+        const q = (r * (RES - 1) + c) * 6;
+        for (let k = 0; k < 6; k++) idx[n++] = full[q + k];
+      }
+      for (let r = tz * C; r <= (tz + 1) * C; r++) for (let c = tx * C; c <= (tx + 1) * C; c++) {
+        const y = P[(r * RES + c) * 3 + 1];
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+      const tg = new THREE.BufferGeometry();
+      for (const name of ['position', 'normal', 'uv', 'color']) tg.setAttribute(name, geo.attributes[name]);
+      tg.setIndex(new THREE.BufferAttribute(idx, 1));
+      const a = (tz * C) * RES + tx * C, b = ((tz + 1) * C) * RES + (tx + 1) * C;
+      const box = new THREE.Box3(
+        new THREE.Vector3(Math.min(P[a * 3], P[b * 3]), minY, Math.min(P[a * 3 + 2], P[b * 3 + 2])),
+        new THREE.Vector3(Math.max(P[a * 3], P[b * 3]), maxY, Math.max(P[a * 3 + 2], P[b * 3 + 2])));
+      tg.boundingBox = box;
+      tg.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
+      const tile = new THREE.Mesh(tg, colorMaterial);
+      tile.receiveShadow = true;
+      tile.name = 'terrain:tile';
+      tile.matrixAutoUpdate = false;
+      terrainMesh.add(tile);
+      coarseTiles.push(tile);
+    }
+    geo.setDrawRange(0, 0);                          // the parent only owns the buffers
+  }
   shoreMeshes = shoreTiles.map((g) => {
     const m = new THREE.Mesh(g, colorMaterialFine);
     m.receiveShadow = true;
@@ -595,6 +651,8 @@ function makeSatMaterial(tex, coarse) {
 const c = new THREE.Color();
 let satMaterial = null, satMaterialFine = null, colorMaterial = null, colorMaterialFine = null;
 let shoreMeshes = [];
+const coarseTiles = [];
+let coarseRecIdx = null, coarseRec = null;   // per coarse vertex: slot of its bank record, or -1
 const eraColorCache = [];
 
 // Ground colour where the shore law owns the land: bed under the water,
@@ -766,7 +824,7 @@ function paintCoarseInto(geo, era, out, land, i0, i1) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
     const rgb = paintVertex(era, x, y, z);
     land[i * 3] = rgb[0]; land[i * 3 + 1] = rgb[1]; land[i * 3 + 2] = rgb[2];
-    shoreTint(era, x, y, z, rgb, _n2);
+    if (coarseRecIdx[i] >= 0) shoreTintRec(era, y, rgb, _n2, coarseRec, coarseRecIdx[i] * TREC);
     c.set(rgb[0], rgb[1], rgb[2]);
     out[i * 3] = c.r; out[i * 3 + 1] = c.g; out[i * 3 + 2] = c.b;
   }
@@ -842,10 +900,12 @@ export function paintEra(era) {
   if (era === 5) {
     ensureSat();
     terrainMesh.material = satMaterial;
+    for (const t of coarseTiles) t.material = satMaterial;
     for (const m of shoreMeshes) m.material = satMaterialFine;
     return;
   }
   terrainMesh.material = colorMaterial;
+  for (const t of coarseTiles) t.material = colorMaterial;
   for (const m of shoreMeshes) m.material = colorMaterialFine;
   const job = paintJob(era);
   if (job) { while (!job.next().done); paintJobs.delete(era); }

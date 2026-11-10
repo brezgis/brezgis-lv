@@ -196,7 +196,12 @@ export const LOC = {
   // 57.150747 N 25.647753 E; the laser survey puts the 200.3 m crown of its
   // 12 m hill here, 80 m from the west shore of Dabaru ezers
   HILLFORT: { x: -1040, z: 968 },
-  BREZGA: { x: BREZGA.x, z: BREZGA.z },      // Brežģa kalns summit (255 m) — the family hill
+  // Brežģa kalns as people know it: the knoll beside the old highway where
+  // the trig point stood and the 2017 tower stands (the laser survey sees
+  // the tower as a roof at 1711, 5120, on ground at 250.6 m). The ridge's
+  // true high point, 256.3 m, is 120 m to the north (BREZGA_TOP).
+  BREZGA: { x: 1711, z: 5120 },
+  BREZGA_TOP: { x: BREZGA.x, z: BREZGA.z, y: BREZGA.y },
   // Brežģa krogs: "Bregsche" on Rücker's 1839 map, a tavern of Nötkenshof on
   // the south side of the old highway, where the farm Vecbrežģis stands now
   KROGS: { x: 2215, z: 5222 },
@@ -920,7 +925,9 @@ export function forestDensity(era, x, z, y) {
     if (dRiver < 26 && dRiver > 12) d = Math.max(d, 0.35);
     d *= smoothstep(20, 60, Math.hypot(x - K.x, z - K.z)) * 0.9 + 0.1; // krogs clearing
   }
-  // universal exclusions
+  // universal exclusions (skipped where nothing grows anyway: the field
+  // lookup is the dearest part of painting a million ground vertices)
+  if (d <= 0.001) return 0;
   if (fieldAt(era, x, z)) return 0;
   if (era >= 1 && distToRoad(era, x, z) < (era === 1 ? 2 : 3.5)) return 0;
   for (const p of PADS) if (Math.hypot(x - p.x, z - p.z) < p.r + 6) return 0;

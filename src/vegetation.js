@@ -1045,13 +1045,10 @@ export function* buildVegetationJob(scene, renderer) {
         lists[kind][tier].push([x, y, z, h, rot, 1]);
       }
     }
-    // the sacred oak by the stead, and the attested summit oak on Brežģa kalns
+    // the old oak by the stead. (An oak on the summit of Brežģa kalns was
+    // drawn here once; no source for one could be found, so it is gone.)
     if (era >= 1) {
       lists.oak.full.push([LOC.OAK.x, heightAt(LOC.OAK.x, LOC.OAK.z), LOC.OAK.z, era <= 1 ? 14 : 15 + era, 1.2, 1.2]);
-    }
-    if (era >= 3) {
-      const B = LOC.BREZGA;
-      lists.oak.full.push([B.x + 9, heightAt(B.x + 9, B.z + 11), B.z + 11, 15 + (era - 3) * 1.5, 0.8, 1.15]);
     }
     eraCache.set(era, lists);
   }
